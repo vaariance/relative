@@ -281,3 +281,137 @@ test("committed fee reserves cannot be mistaken for available custody or staged 
   assert.equal(committed.fee, 200n); assert.equal(committed.gross, 1000000n);
   assert.equal(committed.feeTerms.version, 1n);
 });
+
+test("selected-class deposits quote and queue a single fee-aware direct entry", async () => {
+  const s = setup();
+  s.pool.schemaVersion = 2; s.pool.feeVersion = bn(1); s.pool.feeBps = 2; s.pool.feeCap = bn(2000000);
+  s.put("pool", s.poolKey, s.pool);
+  const quote = await s.sdk.quoteDeposit(s.owner, 0, 2000000n);
+  assert.equal(quote.classId, 0); assert.equal(quote.direction, "collateral-to-class");
+  assert.equal(quote.fee, 400n); assert.equal(quote.netCollateral, 1999600n);
+  assert.equal(quote.guaranteed, false); assert.equal(quote.execution, "future-publication");
+  assert.deepEqual(s.quoteInstructions.map(({ operation, from, to }) => ({ operation, from, to })), [{ operation: 0, from: 255, to: 0 }]);
+  const plan = await s.sdk.prepareDeposit({ ...s.buy, classId: 0, expectedFeeVersion: 1n });
+  assert.equal(plan.kind, "deposit-class"); assert.equal(plan.instructions.length, 1);
+  const instruction = s.decode(plan);
+  assert.equal(instruction.name, "depositWithFee");
+  assert.equal((instruction.data as { to: number }).to, 0);
+  assert.equal((instruction.data as { expectedFeeVersion: anchor.BN }).expectedFeeVersion.toString(), "1");
+  const transaction = await s.sdk.transaction(plan);
+  assert.equal(transaction.transaction.message.header.numRequiredSignatures, 1);
+  const market = await s.sdk.market();
+  assert.equal(market.classes.length, s.pool.classes.length);
+  assert.deepEqual(market.classes[0], { classId: 0, assetId: s.get("methodology").roster[0], benchmark: false });
+  assert.deepEqual(market.classes.at(-1), { classId: s.pool.classes.length - 1, assetId: null, benchmark: true });
+});
+
+test("selected-class balances and redemption use only the requested unlocked position", async () => {
+  const s = setup();
+  s.position.staged = false;
+  s.position.classes = s.pool.classes.map(() => ({ units: bn(0), locked: bn(0) }));
+  s.position.classes[0] = { units: bn(5000), locked: bn(1000) };
+  s.put("position", s.pdas.position(s.poolKey, s.owner), s.position);
+  assert.equal((await s.sdk.classBalances(s.owner, 0)).availableUnits, 4000n);
+  assert.equal((await s.sdk.balances(s.owner)).availableUnits, 0n);
+  const quote = await s.sdk.quoteRedeem(s.owner, 0, 4000n);
+  assert.equal(quote.classId, 0); assert.equal(quote.direction, "class-to-collateral");
+  assert.deepEqual(s.quoteInstructions.map(({ operation, from, to }) => ({ operation, from, to })), [{ operation: 2, from: 0, to: 255 }]);
+  const input = { owner: s.owner, tokenAccount: s.tokenAccount, classId: 0, units: 4000n, minimumProceeds: 10n, expiryBatch: s.buy.expiryBatch };
+  const plan = await s.sdk.prepareRedeem(input);
+  assert.equal(plan.kind, "redeem-class");
+  assert.equal(s.decode(plan).name, "redeem");
+  assert.equal((s.decode(plan).data as { from: number }).from, 0);
+  await assert.rejects(s.sdk.prepareRedeem({ ...input, units: 4001n }), /SwapInsufficientUnlockedUnits/);
+  await assert.rejects(s.sdk.prepareRedeem({ ...input, classId: 1 }), /SwapInsufficientUnlockedUnits/);
+});
+
+test("selected-class entry validates indices, ownership, fee version, capacity and expiry", async () => {
+  const s = setup();
+  for (const classId of [-1, 0.5, NaN, s.pool.classes.length]) {
+    await assert.rejects(s.sdk.quoteDeposit(s.owner, classId, 2000000n), /SwapInvalidClass/);
+    await assert.rejects(s.sdk.prepareDeposit({ ...s.buy, classId }), /SwapInvalidClass/);
+    await assert.rejects(s.sdk.classBalances(s.owner, classId), /SwapInvalidClass/);
+  }
+  await assert.rejects(s.sdk.prepareDeposit({ ...s.buy, classId: 0, owner: PublicKey.default }), /SwapWalletTokenMismatch/);
+  await assert.rejects(s.sdk.prepareDeposit({ ...s.buy, classId: 0, expectedFeeVersion: 100n }), /SwapFeeChangedRebuild/);
+  await assert.rejects(s.sdk.prepareDeposit({ ...s.buy, classId: 0, expiryBatch: 0n }), /SwapExpiryTooEarly/);
+  await assert.rejects(s.sdk.prepareDeposit({ ...s.buy, classId: 0, amount: 100000000000n }), /SwapCapacityExceeded/);
+});
+
+test("selected-class request lifecycle retains class and owner boundaries through refund", async () => {
+  const s = setup();
+  const request = s.get("request");
+  request.owner = s.owner; request.operation = 0; request.to = 0; request.from = 255;
+  request.status = 0; request.applied = false; request.evaluated = false;
+  request.targetBatch = s.pool.lastBatch.addn(1); request.expiryBatch = request.targetBatch.addn(1);
+  const nonce = BigInt(request.nonce.toString());
+  s.put("request", s.pdas.request(s.poolKey, nonce), request);
+  assert.equal((await s.sdk.request(s.owner, nonce, 0)).classId, 0);
+  assert.equal(s.decode(await s.sdk.prepareCancel(s.owner, nonce, 0)).name, "cancel");
+  await assert.rejects(s.sdk.prepareCancel(s.owner, nonce, 1), /SwapRequestClassMismatch/);
+  await assert.rejects(s.sdk.request(PublicKey.default, nonce, 0), /SwapRequestOwnerMismatch/);
+  await assert.rejects(s.sdk.prepareExpire(s.owner, nonce, 0), /SwapNotExpired/);
+  s.map.get(SYSVAR_CLOCK_PUBKEY.toBase58())!.data.writeBigInt64LE(s.now + 180n, 32);
+  assert.equal(s.decode(await s.sdk.prepareExpire(s.owner, nonce, 0)).name, "expire");
+  request.status = 3;
+  s.put("request", s.pdas.request(s.poolKey, nonce), request);
+  s.position.staged = false; s.position.refundable = request.amount;
+  s.put("position", s.pdas.position(s.poolKey, s.owner), s.position);
+  assert.equal((await s.sdk.request(s.owner, nonce, 0)).refundRequired, true);
+  assert.equal(s.decode(await s.sdk.prepareRefund({ owner: s.owner, tokenAccount: s.tokenAccount, nonce, classId: 0 })).name, "refund");
+  await assert.rejects(s.sdk.prepareRefund({ owner: s.owner, tokenAccount: s.tokenAccount, nonce, classId: 1 }), /SwapRequestClassMismatch/);
+});
+
+test("selected-class request management rejects switches and malformed endpoint sentinels", async () => {
+  const s = setup();
+  const request = s.get("request");
+  request.owner = s.owner; request.operation = 1; request.to = 0; request.from = 1;
+  const nonce = BigInt(request.nonce.toString());
+  s.put("request", s.pdas.request(s.poolKey, nonce), request);
+  await assert.rejects(s.sdk.request(s.owner, nonce, 0), /SwapRequestClassMismatch/);
+  request.operation = 0;
+  s.put("request", s.pdas.request(s.poolKey, nonce), request);
+  await assert.rejects(s.sdk.request(s.owner, nonce, 0), /SwapRequestClassMismatch/);
+});
+
+test("routed entry context validates reservation without requiring pre-funded collateral", async () => {
+  const s = setup();
+  s.map.delete(s.tokenAccount.toBase58());
+  const entry = await s.sdk.entryContext(s.owner, 0, s.buy.expiryBatch, 0n, 2000000n);
+  assert.ok(entry.owner.equals(s.owner)); assert.ok(entry.pool.equals(s.poolKey));
+  assert.equal(entry.classId, 0); assert.equal(entry.feeTerms.version, 0n);
+  assert.equal(entry.observedSequence, BigInt(s.pool.sequence.toString()));
+  assert.ok(entry.request.address.equals(s.pdas.request(s.poolKey, entry.request.nonce)));
+  await assert.rejects(s.sdk.prepareDeposit({ ...s.buy, classId: 0 }), /SwapWalletTokenMismatch/);
+  await assert.rejects(s.sdk.entryContext(s.owner, 0, s.buy.expiryBatch, 1n, 2000000n), /SwapFeeChangedRebuild/);
+  await assert.rejects(s.sdk.entryContext(s.owner, 0, 0n, 0n, 2000000n), /SwapExpiryTooEarly/);
+});
+
+test("direct capabilities need no Express provider and do not imply the market is trading", async () => {
+  const s = setup();
+  assert.deepEqual(await s.sdk.capabilities(), { directEntry: { available: true },
+    express: { available: false, reason: "router-not-configured" } });
+  s.pool.initialized = false;
+  s.put("pool", s.poolKey, s.pool);
+  assert.equal((await s.sdk.capabilities()).directEntry.available, true);
+  await assert.rejects(s.sdk.prepareDeposit({ ...s.buy, classId: 0 }), /SwapPoolNotInitialized/);
+  s.setGenesis("mainnet");
+  assert.deepEqual(await s.sdk.capabilities(), { directEntry: { available: false, reason: "network-mismatch" },
+    express: { available: false, reason: "network-mismatch" } });
+});
+
+test("direct configuration is captured and selected-class staged units remain unspendable", async () => {
+  const s = setup();
+  const options = { poolId: s.poolId, collateralMint: s.pool.collateralMint };
+  const sdk = new CoxSwapSdk(s.program, options);
+  options.poolId = 999n; options.collateralMint = PublicKey.default;
+  assert.ok((await sdk.market()).collateralMint.equals(s.pool.collateralMint));
+  s.position.staged = true;
+  s.position.stagedSequence = s.pool.sequence.addn(1);
+  s.position.classes[0] = { units: bn(0), locked: bn(0) };
+  s.position.stagedMints[0] = bn(9000);
+  s.put("position", s.pdas.position(s.poolKey, s.owner), s.position);
+  assert.equal((await sdk.classBalances(s.owner, 0)).availableUnits, 0n);
+  await assert.rejects(sdk.prepareRedeem({ owner: s.owner, tokenAccount: s.tokenAccount, classId: 0,
+    units: 1n, minimumProceeds: 0n, expiryBatch: s.buy.expiryBatch }), /SwapInsufficientUnlockedUnits/);
+});
