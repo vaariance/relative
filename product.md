@@ -1,6 +1,16 @@
 # COX product direction and work plan
 
-Version 14 · 11 October 2026 · CRYPTO benchmark entry and exit
+Version 15 · 15 October 2026 · Direct performance-position and full-output entry
+
+Version 15 records Peter's approved SDK entry flow: collateral can enter a selected
+asset performance class directly, with one successful deposit fee. For supported
+input tokens, one user transaction swaps through a DEX into collateral and queues
+the full actual output for that class; the position fills at the next applicable
+valid publication. Pre-existing wallet collateral is preserved. This uses a
+separate routing component and retains the current pool accounting. It does not
+mean minting CRYPTO and then switching, or charging two pool fees. Route/network
+compatibility, compiled verification, router deployment and API/UI integration
+remain delivery requirements. No production or deployment is claimed here.
 
 Version 14 records Peter's app flow: the swap SDK handles collateral → CRYPTO
 benchmark units and CRYPTO benchmark units → collateral. Moving between CRYPTO
@@ -325,11 +335,19 @@ publication accounts use schema 2 and fixed per-pool addresses; all other
 account schemas remain unchanged. On-chain history exposes the latest
 publication; earlier publications come from the verified archive.
 
-**Swap SDK — Peter.** `@cox/client/swap` supplies the benchmark-only entry/exit
-flow, on-chain quote estimates, unsigned wallet transactions, committed balances
-and request status, cancellation/refund and withdrawal. Godwin integrates it into
-the app. Asset switches use the existing low-level builders inside the trading
-app. Quotes do not guarantee the next publication's output or fill time.
+**Swap SDK — Peter.** `@cox/client/swap` supplies direct collateral entry into a
+selected asset class or CRYPTO, class redemption, on-chain quote estimates,
+unsigned wallet transactions, committed balances and request status,
+cancellation/refund and withdrawal. Retain the existing benchmark methods.
+`@cox/client/routed` composes supported token swaps with full-output queued entry
+through a separate router: measure collateral received, preserve prior wallet
+collateral and submit one fee-aware deposit into the selected class. The DEX
+swap and deposit submission are atomic; future position execution remains
+asynchronous. Joel integrates the composed build/submission API; Godwin consumes
+those unsigned transactions in the app. Existing holders can still switch
+between classes. Quotes do not guarantee the next publication's output or fill
+time. Future epoch pools are separate pools alongside the current pool, outside
+this SDK change; faster publication is deferred.
 
 **P4 — Publisher.** `apps/cox-publisher`: for each cutoff, read the archived
 snapshot from J2, submit exactly those values and their digest in `publish`,

@@ -27,7 +27,129 @@ const pool = await reader.pool(0n);
 
 Here `program` is the configured Anchor instance and `feePayerPublicKey` identifies an existing account used by unsigned simulations. No private key is needed for a read simulation. Verify the RPC network, program release and pool before preparing transactions; constructing these helpers alone does not pin the network.
 
-The `@cox/client/swap` entry point is tested with a browser bundle and provides the benchmark deposit and redemption flow below.
+The `@cox/client/swap` and `@cox/client/routed` entry points are tested with browser bundles. The SDK prepares transactions; the app API remains responsible for supplying unsigned transactions to the web app.
+
+## Direct performance-position entry
+
+`prepareDeposit` queues collateral directly into an existing asset class or the CRYPTO class. This is one deposit request and one pool trading fee on successful fill. It does not mint intermediate CRYPTO units or submit a switch. Existing `prepareBuy` and `prepareSell` methods retain their benchmark behavior.
+
+```ts
+const market = await swap.market();
+const quote = await swap.quoteDeposit(owner, selectedClassId, amount);
+const plan = await swap.prepareDeposit({
+  owner,
+  tokenAccount,
+  classId: selectedClassId,
+  amount,
+  minimumUnits,
+  expiryBatch,
+  expectedFeeVersion: quote.feeTerms.version,
+});
+const unsigned = await swap.transaction(plan);
+```
+
+Construct `swap` with `CoxSwapSdk(program, { poolId, collateralMint })` from
+`@cox/client/swap`; no DEX provider, API key or router is needed. Each pool
+accepts its configured collateral mint only. This SDK does not add a second
+collateral token to an existing pool.
+
+Select `classId` from `market.classes`, whose `assetId` comes from the sealed methodology roster. CRYPTO has `benchmark: true` and `assetId: null`. Numeric class indices are local to the pool; never infer an input token mint from an asset ticker or class index.
+
+`classBalances(owner, classId)`, `quoteRedeem` and `prepareRedeem` support the selected position. `request(owner, nonce, classId)`, `prepareCancel(owner, nonce, classId)`, `prepareExpire(owner, nonce, classId)` and `prepareRefund({ owner, tokenAccount, nonce, classId })` retain the same destination/owner boundary. Omitting `classId` on lifecycle helpers preserves the existing CRYPTO-only default. Withdrawal payables and refundable collateral are wallet-wide, not exclusive to a class.
+
+```ts
+const held = await swap.classBalances(owner, selectedClassId);
+const redemption = await swap.quoteRedeem(owner, selectedClassId, held.availableUnits);
+const sell = await swap.prepareRedeem({
+  owner, tokenAccount, classId: selectedClassId, units: held.availableUnits,
+  minimumProceeds, expiryBatch, expectedFeeVersion: redemption.feeTerms.version,
+});
+const unsignedSell = await swap.transaction(sell);
+const receipt = await swap.request(owner, sell.request!.nonce, selectedClassId);
+```
+
+Callers submit the wallet-signed transaction through their own transport.
+Read the request after submission until it is filled, failed or expired.
+After a filled redemption, use `prepareWithdraw({ owner, tokenAccount,
+amount })` and `transaction` to withdraw committed payables. For a rejected
+deposit with `refundRequired`, prepare a refund with the same class and
+nonce. Staged credits and locked units are not spendable; a pending request
+is not a completed position. Do not quote or redeem a zero available balance.
+
+## Capabilities and devnet availability
+
+```ts
+const capabilities = await swap.capabilities();
+if (!capabilities.directEntry.available) {
+  throw new Error(capabilities.directEntry.reason);
+}
+```
+
+`SwapCapabilities` has `directEntry` and `express` fields. Each is either
+`{ available: true }` or `{ available: false, reason }`. The capability reports
+network/configuration support, not pool readiness, funds or route liquidity;
+preparation still enforces initialization, pause, halt, balance and fee rules.
+RPC failures propagate as errors rather than being disguised as unsupported
+features. `CoxSwapSdk.capabilities()` reports Express as
+`router-not-configured`, without needing any Express configuration.
+
+Express is experimental and disabled by default. `CoxRoutedEntrySdk` accepts
+an optional `routerProgramId`, an optional route provider and
+`expressEnabled: true` only for an explicitly enabled, independently verified
+integration. Its `capabilities()` reports `router-not-configured`,
+`provider-not-configured`, `provider-network-mismatch`, `express-not-enabled`,
+`router-not-executable` or `network-mismatch` as applicable. Preparation and
+transaction construction throw `ExpressUnavailableError` with
+`code: "SwapExpressUnavailable"` and a typed `reason` when unavailable,
+before requesting a route or constructing a wallet transaction.
+
+The current release has no router deployment or verified devnet route, so
+Express remains unavailable. Setting an enable flag does not prove a route:
+even after configuration and executable-account checks pass, route validation
+and full transaction simulation remain mandatory. These checks are not a
+router binary audit or authentication of a caller-configured deployment.
+
+## Full-output routed entry
+
+The intended journey is supported input token → DEX → collateral → full output queued into the selected performance class. The DEX and request submission share one wallet-signed transaction; the position fills at its next applicable valid publication. Missed publications, failed output conditions and expiry retain the existing rules.
+
+`CoxRoutedEntrySdk` in `@cox/client/routed` targets the separate [COX router](../cox-router/README.md), which invokes Jupiter, measures the owner's actual collateral increase and invokes the existing fee-aware deposit. Every collateral base unit received by that swap is queued. Collateral held before the swap stays in the wallet. The minimum collateral bound controls rejection, not how much of a successful output is deposited.
+
+```ts
+import { CoxRoutedEntrySdk } from "@cox/client/routed";
+
+const routed = new CoxRoutedEntrySdk(program, {
+  poolId: 1n,
+  collateralMint: market.collateralMint,
+  routerProgramId,
+  genesisHash: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+  expressEnabled: true,
+}, devnetRouteProvider);
+const capabilities = await routed.capabilities();
+if (!capabilities.express.available) {
+  throw new Error(capabilities.express.reason);
+}
+const entry = await routed.prepare({
+  owner,
+  inputMint,
+  inputTokenAccount,
+  inputAmount,
+  classId: selectedClassId,
+  minimumUnits,
+  expiryBatch,
+  expectedFeeVersion: market.feeTerms.version,
+  slippageBps: 50,
+});
+const unsignedEntry = await routed.transaction(entry);
+```
+
+The router address is explicit because this change does not deploy a router. The provider must supply an executable supported Jupiter route on the same network. Only classic SPL source accounts are supported in this first version; native SOL must already be wrapped. Token-2022 and arbitrary setup/cleanup instructions are rejected. Safe owner ATA setup and address lookup tables are supported. The complete transaction is simulated before signing, including creation of a missing collateral ATA and a measured compute budget. Fee changes and global request-nonce races require a rebuild.
+
+`JupiterRouteProvider` in `@cox/client/jupiter` fetches Swap v2 Build instructions with exact-input routing, no integrator fee, a specified collateral destination and on-chain verification of lookup-table contents. Run it on the server with an injected API key. It is explicitly mainnet-only. **The current COX SDK remains devnet-only, so the mainnet provider cannot be combined with the current pool.** A usable devnet route or a separately approved production release is required for live integration; no cross-network route is attempted.
+
+The routed SDK tests use mocked RPC simulation. Native router tests and any compiled-runtime evidence are documented in its README. They do not establish live Jupiter execution. The app API currently rejects routed transactions and lookup tables; its explicit route build/submission integration is a separate handoff. The web app does not automatically gain this behavior by updating the package.
+
+If the initial composed transaction fails, the swap and deposit are rolled back together, apart from ordinary network fees. If the queued deposit is rejected later, its refund is in collateral, not the original input token. A later refund requires another wallet transaction; the success path needs no further user signature to fill.
 
 ## Benchmark swaps
 
@@ -44,7 +166,7 @@ const swap = new CoxSwapSdk(program, {
 const market = await swap.market();
 ```
 
-This configuration selects pool 1 with Circle devnet USDC. The SDK validates the network, mint and sealed methodology. `prepareBuy` reserves collateral for benchmark units; `prepareSell` reserves benchmark units for redemption. Both execute through a future publication. After redemption finalizes, `prepareWithdraw` prepares the separate transfer of committed collateral to the wallet. Quotes are estimates, and the SDK never signs or broadcasts transactions. Moving between CRYPTO and individual asset positions uses the trading instructions separately.
+This configuration selects pool 1 with Circle devnet USDC. The SDK validates the network, mint and sealed methodology. `prepareBuy` reserves collateral for benchmark units; `prepareSell` reserves benchmark units for redemption. Both execute through a future publication. After redemption finalizes, `prepareWithdraw` prepares the separate transfer of committed collateral to the wallet. Quotes are estimates, and the SDK never signs or broadcasts transactions. Existing CRYPTO holders can still switch into individual asset positions with the trading instructions; new collateral can enter an asset class directly with `prepareDeposit`.
 
 ## Integer values
 
