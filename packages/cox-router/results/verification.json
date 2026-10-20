@@ -1,0 +1,61 @@
+{
+  "schema": "cox.router.verification/v1",
+  "verifiedDate": "2026-10-20",
+  "baselineCommit": "9f93a77",
+  "deployment": null,
+  "liveJupiterVerified": false,
+  "compiler": "Solana platform-tools v1.48 rustc 1.84.1-dev",
+  "client": {
+    "testsPassed": 56,
+    "typeCheckPassed": true,
+    "browserBundlesPassed": true
+  },
+  "routerHostTestsPassed": 12,
+  "compiledRuntimeTestsPassed": 3,
+  "runtime": "LiteSVM 0.6.1",
+  "swapProgram": "controlled fixture at pinned Jupiter address with real SPL Token CPIs",
+  "sources": {
+    "packages/cox-router/src/lib.rs": "112c52dfa7a37a5da571fd49b27386dbd118212870e2301fc7f1dce921d9b95b",
+    "packages/cox-router/Cargo.toml": "42fa40ba629da052684528124c9cc8fc209f5e5ad11a432da4bed4174e408060",
+    "packages/cox-router/Cargo.lock": "44992914fdfaff0769bd5c4e67bba5dd0ddff96e4319ae731c13402741b56848",
+    "packages/cox-router/test-swap/src/lib.rs": "f3a1e72366ac6e17e3e035e2026fbae51f141de5be0cd8e1cfd94691cd50e3a0",
+    "packages/cox-router/test-swap/Cargo.toml": "6ff68f3f76084b0ab4028f8552d34847e1a92e4f48b3ef0cb285374ffbf696ec",
+    "packages/cox-router/test-swap/Cargo.lock": "ce4c24d3bdc1d9656d68a3701aa6dc6ae33352c59b48cb7c0f3652231378a9bf",
+    "packages/cox-router/program-tests/tests/runtime.rs": "b623ff60aea491d06bf8a94ae1afea019808509f24c2cf55c4c42c7b971b8a06",
+    "packages/cox-router/program-tests/Cargo.toml": "636150ba25e5124b50f54ba22588cdc32254e67a4d14e861c1529976c0cbeb37",
+    "packages/cox-router/program-tests/Cargo.lock": "15eb7d2eaad50f224bb9c4dd21942f161c2f7ae875f336d88938c626786db33b",
+    "packages/cox-client/src/swap.ts": "e751aeeea1bc66634611b65ea76d4325d8b93de29e0ddbdd0892145254110c05",
+    "packages/cox-client/src/capabilities.ts": "eab0d1e97cd87ba36a2ce8980112f825060bb27985e4a04d3ac134478844e3c6",
+    "packages/cox-client/src/routed.ts": "fa98474be745b73c0a724bf3402985fc29e56da85bf1236aa683fa4707599dcc",
+    "packages/cox-client/src/jupiter.ts": "aa44e038718323d2224211752f79805a810317e947d04bd7a48695a13f849357",
+    "packages/cox-client/test/swap.test.ts": "9fecae38dad09219bc75974d4482b65bedb9931ff417d4da81b778e4e43cc3df",
+    "packages/cox-client/test/routed.test.ts": "c70d441c0c86a5273999be18cbc6859543b9c02abe7c5da46f6333caacb79f04",
+    "packages/cox-client/test/jupiter.test.ts": "f9f3f443efb241012b29b97286338a6c4a679f6285eb337e89d63cc05356211e"
+  },
+  "artifacts": {
+    "packages/cox-router/target/sbf-solana-solana/release/cox_router.so": {
+      "sha256": "127a0f2c38862cb090d1eb18c92b531c01ff62b9d006efc2bc0e959269bfb7c6",
+      "bytes": 99592
+    },
+    "packages/cox-router/target/sbf-solana-solana/release/cox_router_test_swap.so": {
+      "sha256": "3a5e1b4e6bace7f3e3bd69dbd511b0b44afb91e1d3b7aef9b557b6fe09bba74b",
+      "bytes": 46360
+    },
+    "packages/cox/target/deploy/cox.so": {
+      "sha256": "865dcb315e2b9359294df8640c9d6aa04b3f9c308e2f1b74ff5a8db0e36a9b3c",
+      "bytes": 1029528
+    }
+  },
+  "proven": [
+    "Full actual collateral output, including excess above quote, is queued",
+    "Existing wallet collateral remains untouched",
+    "Swap and deposit failures roll back token movements and queue state",
+    "Queued selected-class position fills at the next publication with one pool fee and no intermediate CRYPTO units",
+    "Express is opt-in, rejects unavailable configurations before routing, and rechecks nonce and fee version after simulation"
+  ],
+  "remaining": [
+    "Verified compatible live route and reviewed router deployment before enabling Express",
+    "Separate app API/UI integration if a future task activates Express",
+    "Dual-collateral support is outside this SDK closeout"
+  ]
+}

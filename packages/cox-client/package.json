@@ -6,13 +6,15 @@
   "exports": {
     ".": "./src/index.ts",
     "./wire": "./src/wire.ts",
-    "./swap": "./src/swap.ts"
+    "./swap": "./src/swap.ts",
+    "./routed": "./src/routed.ts",
+    "./jupiter": "./src/jupiter.ts"
   },
   "scripts": {
     "test": "node --test test/*.test.ts",
     "fixtures": "node src/fixtures.ts",
     "build": "tsc --noEmit",
-    "test:swap": "node --test test/swap.test.ts"
+    "test:swap": "node --test test/swap.test.ts test/routed.test.ts test/jupiter.test.ts"
   },
   "engines": {
     "node": ">=24"
