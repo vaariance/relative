@@ -31,7 +31,7 @@ export function decodeAccount<K extends keyof Accounts>(program: Program, name: 
   if (info.data.length < 10) throw new Error("AccountVersionMismatch");
   const schema = info.data.readUInt16LE(8);
   const legacy = name === "pool" || name === "request" ? schema === 1 : name === "batch" ? schema === 2 : false;
-  const supported = name === "pool" || name === "request" ? schema === 1 || schema === 2
+  const supported = name === "pool" ? schema === 1 || schema === 2 || schema === 3 : name === "request" ? schema === 1 || schema === 2
     : name === "batch" || name === "publication" ? schema === 2 || schema === 3 : schema === 1;
   if (!supported) throw new Error("AccountVersionMismatch");
   const account = (legacy ? legacyCoder(program) : program.coder.accounts).decode(name, info.data) as Accounts[K];
@@ -81,6 +81,12 @@ export class CoxReader {
     return decodeAccount(this.program, name, info);
   }
   async registry() { return this.account("registry", this.pdas.registry()); }
+  async retirement(poolId: bigint) {
+    const pool = this.pdas.pool(poolId);
+    const value = await this.account("retirement", this.pdas.retirement(pool));
+    if (!value.pool.equals(pool)) throw new Error("RetirementPoolMismatch");
+    return value;
+  }
   async pool(poolId: bigint) {
     const key = this.pdas.pool(poolId);
     const pool = await this.account("pool", key);

@@ -144,6 +144,7 @@ export class CoxSwapSdk {
     return { pool, registry, methodology, now, halted, position };
   }
   private trading(context: Awaited<ReturnType<CoxSwapSdk["context"]>>) {
+    check(context.pool.schemaVersion !== 3, "SwapPoolRetired");
     check(context.pool.initialized, "SwapPoolNotInitialized");
     check(!context.registry.paused, "SwapPaused");
     check(!context.halted, "SwapHalted");
@@ -183,7 +184,7 @@ export class CoxSwapSdk {
       classes: context.pool.classes.map((_, classId) => ({ classId, assetId: context.methodology.roster[classId] ?? null, benchmark: classId === this.cryptoClass(context.pool) })),
       cryptoUnitDecimals: CRYPTO_UNIT_DECIMALS, cryptoClass: this.cryptoClass(context.pool), testOnly: true as const,
       benchmarkLabel: `CRYPTO (pilot, ${context.methodology.roster.length} assets)`, initialized: context.pool.initialized,
-      paused: context.registry.paused, halted: context.halted, earliestBatchEstimate: this.earliestBatch(context), sequence: number(context.pool.sequence), batch: number(context.pool.lastBatch) };
+      retired: context.pool.schemaVersion === 3, paused: context.registry.paused, halted: context.halted, earliestBatchEstimate: this.earliestBatch(context), sequence: number(context.pool.sequence), batch: number(context.pool.lastBatch) };
   }
   async balances(owner: PublicKey) {
     return this.classBalances(owner);
@@ -317,7 +318,7 @@ export class CoxSwapSdk {
   async prepareWithdraw(input: WalletAccounts & { amount: bigint }): Promise<SwapPlan> {
     uint(input.amount, U64_MAX, true);
     const context = await this.context(input.owner);
-    check(!context.halted, "SwapHalted");
+    check(context.pool.schemaVersion === 3 || !context.halted, "SwapHalted");
     check(!!context.position && number(context.position.payable) >= input.amount, "SwapInsufficientPayable");
     await this.token(input.tokenAccount, input.owner);
     const { request: _, ...keys } = this.keys(input, 0n);

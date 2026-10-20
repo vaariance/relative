@@ -27,6 +27,40 @@ const fixture = <K extends keyof Accounts>(name: K) => {
   return { key: new PublicKey(value.address), account: decodeAccount(program, name, info(value)), info: info(value) };
 };
 
+test("retirement builders match generated ABI and permissionless payout has no owner-signing requirement", () => {
+  const pool = fixture("pool");
+  const owner = fixture("position").account.owner;
+  const keys = { pool: pool.key, vault: pool.account.vault };
+  const calls = [
+    builder.beginRetirement(owner, keys),
+    builder.retirePosition({ ...keys, position: reader.pdas.position(pool.key, owner) }),
+    builder.retireRequest({ ...keys, authority: owner, position: reader.pdas.position(pool.key, owner), request: fixture("request").key }),
+    builder.payRetirement({ ...keys, position: reader.pdas.position(pool.key, owner), userToken: pool.account.vault }),
+  ];
+  for (const [index, name] of ["beginRetirement", "retirePosition", "retireRequest", "payRetirement"].entries()) {
+    const instruction = calls[index]!;
+    const definition = program.idl.instructions.find(value => value.name === name)!;
+    assert.deepEqual(instruction.data, discriminator("global", name.replace(/[A-Z]/g, letter => "_" + letter.toLowerCase())));
+    assert.equal(instruction.keys.length, definition.accounts.length);
+    assert.ok(definition.accounts.every(account => account.name !== "recipient"));
+    if (name === "retirePosition" || name === "payRetirement") assert.ok(instruction.keys.every(key => !key.isSigner));
+  }
+});
+
+test("retired schema preserves the existing pool layout and committed fee fields", () => {
+  const release = JSON.parse(readFileSync(new URL("../../cox/fixtures/fee-accounts.json", import.meta.url), "utf8")) as { accounts: Fixture[] };
+  const value = release.accounts.find(value => value.name === "pool")!;
+  const original = info(value);
+  const retired = { ...original, data: Buffer.from(original.data) };
+  retired.data.writeUInt16LE(3, 8);
+  const before = decodeAccount(program, "pool", original);
+  const after = decodeAccount(program, "pool", retired);
+  assert.equal(after.schemaVersion, 3);
+  assert.equal(after.fees.toString(), before.fees.toString());
+  assert.equal(after.active.toString(), before.active.toString());
+  assert.deepEqual(after.classes, before.classes);
+});
+
 test("actual SBF account bytes decode with the generated Anchor IDL", () => {
   assert.equal(program.programId.toBase58(), fixtures.programAddress);
   for (const name of ["registry", "methodology", "pool", "position", "request", "batch", "publication"] as const) {

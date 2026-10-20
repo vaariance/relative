@@ -4,6 +4,7 @@ import type { PublicKey } from "@solana/web3.js";
 type Integer = anchor.BN;
 interface Header { schemaVersion: number; bump: number }
 export interface Class { backing: Integer; units: Integer }
+export interface Retirement extends Header { pool: PublicKey; sequence: Integer; stateDigest: number[]; classes: Class[] }
 export interface PriceWire { priceE8: Integer; venue: number; step: number; candleStart: Integer; tradeAgeMinutes: number }
 export interface Registry extends Header { admin: PublicKey; runtime: PublicKey; pendingRuntime: PublicKey | null; runtimeEffectiveBatch: Integer; paused: boolean; nextPoolId: Integer; maxAcceptedBatch: Integer; activeBatches: Integer }
 export interface Methodology extends Header { digest: number[]; canonical: number[]; sealed: boolean; activationBatch: Integer; expectedLength: number; roster: number[]; origin: Integer; bybit: boolean }
@@ -32,4 +33,4 @@ export interface Batch extends Header {
 export interface Publication extends Header {
   pool: PublicKey; sequence: Integer; batch: Integer; stateDigest: number[]; snapshotDigest: number[]; manifestDigest: number[]; statePreimage: number[]; prices: PriceWire[]; committedAt: Integer;
 }
-export interface Accounts { registry: Registry; methodology: Methodology; pool: Pool; position: Position; request: Request; batch: Batch; publication: Publication }
+export interface Accounts { registry: Registry; methodology: Methodology; pool: Pool; position: Position; request: Request; batch: Batch; publication: Publication; retirement: Retirement }

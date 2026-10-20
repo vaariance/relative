@@ -163,6 +163,116 @@ pub mod cox {
         p.try_serialize(&mut &mut data[..])?;
         Ok(())
     }
+    pub fn begin_retirement(ctx: Context<BeginRetirement>) -> Result<()> {
+        require!(ctx.accounts.registry.paused, CoxError::Paused);
+        let p = &mut ctx.accounts.pool;
+        reconcile(p, &ctx.accounts.vault)?;
+        require!(p.schema_version != 3, CoxError::PoolRetired);
+        require!(p.schema_version == 2, CoxError::InvalidAccount);
+        require!(p.initialized, CoxError::InvalidOrigin);
+        require!(p.stage.is_none(), CoxError::BatchBusy);
+        let retirement = &mut ctx.accounts.retirement;
+        retirement.schema_version = 1;
+        retirement.bump = ctx.bumps.retirement;
+        retirement.pool = p.key();
+        retirement.sequence = p.sequence;
+        retirement.state_digest = p.state_digest;
+        retirement.classes = p.classes.clone();
+        p.schema_version = 3;
+        p.fee_pending = false;
+        emit!(RetirementStarted {
+            pool: p.key(),
+            sequence: p.sequence,
+            state_digest: p.state_digest,
+        });
+        Ok(())
+    }
+    pub fn retire_request(ctx: Context<ManageRequest>) -> Result<()> {
+        require!(ctx.accounts.pool.schema_version == 3, CoxError::NotRetired);
+        release_request(ctx, false)
+    }
+    pub fn retire_position(ctx: Context<RetirePosition>) -> Result<()> {
+        let p = &mut ctx.accounts.pool;
+        reconcile(p, &ctx.accounts.vault)?;
+        require!(
+            p.schema_version == 3 && p.stage.is_none(),
+            CoxError::NotRetired
+        );
+        let retirement = &ctx.accounts.retirement;
+        require!(
+            retirement.sequence == p.sequence && retirement.state_digest == p.state_digest,
+            CoxError::WrongPredecessor
+        );
+        materialize(&mut ctx.accounts.position, p)?;
+        let position = &mut ctx.accounts.position;
+        require!(!position.staged, CoxError::BatchBusy);
+        require!(
+            position.classes.len() == retirement.classes.len(),
+            CoxError::InvalidAccount
+        );
+        require!(
+            position.classes.iter().all(|c| c.locked == 0),
+            CoxError::InsufficientUnlockedUnits
+        );
+        require!(
+            position.classes.iter().any(|c| c.units > 0),
+            CoxError::AlreadyProcessed
+        );
+        let mut payable = 0;
+        for (index, holding) in position.classes.iter_mut().enumerate() {
+            let fixed = &retirement.classes[index];
+            let class = &mut p.classes[index];
+            if holding.units == 0 {
+                continue;
+            }
+            require!(
+                fixed.units > 0 && holding.units <= class.units,
+                CoxError::InvalidAccount
+            );
+            let value = u64::try_from(
+                holding.units.checked_mul(fixed.backing as u128)
+                    .ok_or(CoxError::ArithmeticOverflow)? / fixed.units,
+            ).map_err(|_| error!(CoxError::ArithmeticOverflow))?;
+            class.units = class.units.checked_sub(holding.units)
+                .ok_or(CoxError::ArithmeticOverflow)?;
+            class.backing = sub(class.backing, value)?;
+            let residual = if class.units == 0 {
+                let remaining = class.backing;
+                class.backing = 0;
+                remaining
+            } else {
+                0
+            };
+            p.active = sub(p.active, add(value, residual)?)?;
+            p.residual = add(p.residual, residual)?;
+            payable = add(payable, value)?;
+            holding.units = 0;
+        }
+        position.payable = add(position.payable, payable)?;
+        p.payable = add(p.payable, payable)?;
+        emit!(PositionRetired {
+            pool: p.key(),
+            owner: position.owner,
+            payable,
+        });
+        reconcile(p, &ctx.accounts.vault)
+    }
+    pub fn pay_retirement(ctx: Context<RetirementPayout>) -> Result<()> {
+        let p = &mut ctx.accounts.pool;
+        require!(p.schema_version == 3 && p.stage.is_none(), CoxError::NotRetired);
+        reconcile(p, &ctx.accounts.vault)?;
+        materialize(&mut ctx.accounts.position, p)?;
+        let position = &mut ctx.accounts.position;
+        require!(position.classes.iter().all(|class| class.units == 0 && class.locked == 0), CoxError::InsufficientUnlockedUnits);
+        let amount = position.payable;
+        require!(amount > 0, CoxError::InsufficientPayable);
+        position.payable = 0;
+        p.payable = sub(p.payable, amount)?;
+        transfer_out(p, &ctx.accounts.vault, &ctx.accounts.user_token, &ctx.accounts.token_program, amount)?;
+        emit!(WithdrawalPaid { pool: p.key(), owner: position.owner, amount });
+        ctx.accounts.vault.reload()?;
+        reconcile(p, &ctx.accounts.vault)
+    }
     pub fn schedule_fees(
         ctx: Context<ManageFees>,
         bps: u16,
@@ -170,6 +280,7 @@ pub mod cox {
         activation_cutoff: u64,
     ) -> Result<()> {
         let p = &mut ctx.accounts.pool;
+        require!(p.schema_version != 3, CoxError::PoolRetired);
         require!(p.schema_version == 2, CoxError::InvalidAccount);
         require!(bps <= 100 && cap <= 2_000_000, CoxError::InvalidFee);
         require!(
@@ -452,7 +563,7 @@ pub mod cox {
     pub fn withdraw(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
         let p = &mut ctx.accounts.pool;
         reconcile(p, &ctx.accounts.vault)?;
-        require!(!halted(p, now()?)?, CoxError::Halted);
+        require!(p.schema_version == 3 || !halted(p, now()?)?, CoxError::Halted);
         materialize(&mut ctx.accounts.position, p)?;
         require!(
             amount > 0 && ctx.accounts.position.payable >= amount,
@@ -487,6 +598,7 @@ pub mod cox {
     ) -> Result<()> {
         let p = &mut ctx.accounts.pool;
         reconcile(p, &ctx.accounts.vault)?;
+        require!(p.schema_version != 3, CoxError::PoolRetired);
         require!(!ctx.accounts.registry.paused, CoxError::Paused);
         require!(p.stage.is_none(), CoxError::BatchBusy);
         let previous_batch = &ctx.accounts.batch;
@@ -602,7 +714,7 @@ pub mod cox {
             )
         };
         let b = &mut ctx.accounts.batch;
-        b.schema_version = if p.schema_version == 2 { 3 } else { 2 };
+        b.schema_version = if p.schema_version >= 2 { 3 } else { 2 };
         b.bump = ctx.bumps.batch;
         b.pool = p.key();
         b.batch_id = batch_id;
@@ -983,7 +1095,7 @@ pub mod cox {
         p.state_digest = math::artifact_digest(&state);
         b.phase = 2;
         let publication = &mut ctx.accounts.publication;
-        publication.schema_version = if p.schema_version == 2 { 3 } else { 2 };
+        publication.schema_version = if p.schema_version >= 2 { 3 } else { 2 };
         publication.bump = ctx.bumps.publication;
         publication.pool = p.key();
         publication.sequence = p.sequence;
@@ -1008,7 +1120,7 @@ pub mod cox {
     pub fn read_reference(ctx: Context<ReadPool>, class: u8) -> Result<ReferenceRead> {
         let p = &ctx.accounts.pool;
         require!(
-            matches!(p.schema_version, 1 | 2)
+            matches!(p.schema_version, 1 | 2 | 3)
                 && p.initialized
                 && (class as usize) < p.classes.len(),
             CoxError::InvalidAccount
@@ -1068,6 +1180,7 @@ pub mod cox {
         units: u128,
     ) -> Result<QuoteRead> {
         let p = &ctx.accounts.pool;
+        require!(p.schema_version != 3, CoxError::PoolRetired);
         require!(p.fee_version == 0, CoxError::FeeVersionChanged);
         require!(operation <= 2 && p.initialized, CoxError::InvalidRequest);
         let operation = match operation {
@@ -1113,6 +1226,7 @@ pub mod cox {
         expected_fee_version: u64,
     ) -> Result<FeeQuoteRead> {
         let p = &ctx.accounts.pool;
+        require!(p.schema_version != 3, CoxError::PoolRetired);
         require!(p.initialized && operation <= 2, CoxError::InvalidRequest);
         require!(
             p.fee_version == expected_fee_version,
@@ -1501,6 +1615,52 @@ pub struct MigratePool<'info> {
     #[account(token::authority=pool)]
     pub vault: Account<'info, TokenAccount>,
 }
+#[account]
+pub struct Retirement {
+    pub schema_version: u16,
+    pub bump: u8,
+    pub pool: Pubkey,
+    pub sequence: u64,
+    pub state_digest: [u8; 32],
+    pub classes: Vec<Class>,
+}
+#[derive(Accounts)]
+pub struct BeginRetirement<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    #[account(seeds=[b"registry"],bump=registry.bump,has_one=admin)]
+    pub registry: Account<'info, Registry>,
+    #[account(mut,seeds=[b"pool",pool.pool_id.to_le_bytes().as_ref()],bump=pool.bump,has_one=registry,has_one=vault)]
+    pub pool: Account<'info, Pool>,
+    #[account(init,payer=admin,space=4096,seeds=[b"retirement",pool.key().as_ref()],bump)]
+    pub retirement: Account<'info, Retirement>,
+    #[account(token::authority=pool,token::mint=pool.collateral_mint)]
+    pub vault: Account<'info, TokenAccount>,
+    pub system_program: Program<'info, System>,
+}
+#[derive(Accounts)]
+pub struct RetirePosition<'info> {
+    #[account(mut,seeds=[b"pool",pool.pool_id.to_le_bytes().as_ref()],bump=pool.bump,has_one=vault)]
+    pub pool: Account<'info, Pool>,
+    #[account(seeds=[b"retirement",pool.key().as_ref()],bump=retirement.bump,has_one=pool,constraint=retirement.schema_version==1 @ CoxError::InvalidAccount)]
+    pub retirement: Account<'info, Retirement>,
+    #[account(mut,seeds=[b"position",pool.key().as_ref(),position.owner.as_ref()],bump=position.bump,has_one=pool)]
+    pub position: Account<'info, Position>,
+    #[account(token::authority=pool,token::mint=pool.collateral_mint)]
+    pub vault: Account<'info, TokenAccount>,
+}
+#[derive(Accounts)]
+pub struct RetirementPayout<'info> {
+    #[account(mut,seeds=[b"pool",pool.pool_id.to_le_bytes().as_ref()],bump=pool.bump,has_one=vault)]
+    pub pool: Account<'info, Pool>,
+    #[account(mut,seeds=[b"position",pool.key().as_ref(),position.owner.as_ref()],bump=position.bump,has_one=pool)]
+    pub position: Account<'info, Position>,
+    #[account(mut,token::authority=pool,token::mint=pool.collateral_mint)]
+    pub vault: Account<'info, TokenAccount>,
+    #[account(mut,token::authority=position.owner,token::mint=pool.collateral_mint)]
+    pub user_token: Account<'info, TokenAccount>,
+    pub token_program: Program<'info, Token>,
+}
 #[derive(Accounts)]
 pub struct ManageFees<'info> {
     pub admin: Signer<'info>,
@@ -1808,9 +1968,9 @@ fn fee_terms(r: &Request) -> math::FeeTerms {
     }
 }
 fn reconcile(p: &mut Pool, v: &TokenAccount) -> Result<()> {
-    require!(matches!(p.schema_version, 1 | 2), CoxError::InvalidAccount);
+    require!(matches!(p.schema_version, 1 | 2 | 3), CoxError::InvalidAccount);
     require!(
-        p.schema_version == 2 || (p.fees == 0 && p.fee_version == 0 && !p.fee_pending),
+        p.schema_version >= 2 || (p.fees == 0 && p.fee_version == 0 && !p.fee_pending),
         CoxError::InvalidAccount
     );
     let expected = add(
@@ -1912,6 +2072,7 @@ fn submit(ctx: Context<Submit>, submission: Submission) -> Result<()> {
     let p = &mut ctx.accounts.pool;
     reconcile(p, &ctx.accounts.vault)?;
     let t = now()?;
+    require!(p.schema_version != 3, CoxError::PoolRetired);
     require!(p.initialized, CoxError::InvalidOrigin);
     require!(!ctx.accounts.registry.paused, CoxError::Paused);
     require!(!halted(p, t)?, CoxError::Halted);
@@ -2035,7 +2196,7 @@ fn release_request(ctx: Context<ManageRequest>, expire: bool) -> Result<()> {
             rolled.checked_mul(60).ok_or(CoxError::ArithmeticOverflow)?,
         )?;
         require!(
-            t < cutoff || halted(p, t)? || ctx.accounts.registry.paused,
+            p.schema_version == 3 || t < cutoff || halted(p, t)? || ctx.accounts.registry.paused,
             CoxError::CancellationClosed
         );
     }
@@ -2096,7 +2257,7 @@ pub fn state_bytes(
     manifest: &[u8; 32],
 ) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
-    (if p.schema_version == 2 {
+    (if p.schema_version >= 2 {
         "COX/STATE/V2"
     } else {
         "COX/STATE/V1"
@@ -2128,7 +2289,7 @@ pub fn state_bytes(
     p.payable.serialize(&mut bytes)?;
     p.residual.serialize(&mut bytes)?;
     bytes.extend_from_slice(&b.receipt_root);
-    if p.schema_version == 2 {
+    if p.schema_version >= 2 {
         p.fees.serialize(&mut bytes)?;
         b.fees.serialize(&mut bytes)?;
         p.fee_version.serialize(&mut bytes)?;
@@ -2193,6 +2354,8 @@ pub enum CoxError {
     InvalidFeeActivation,
     FeeVersionChanged,
     InsufficientFees,
+    PoolRetired,
+    NotRetired,
 }
 #[derive(Accounts)]
 pub struct ReadPool<'info> {
@@ -2321,4 +2484,17 @@ pub struct RuntimeScheduled {
     pub registry: Pubkey,
     pub key: Pubkey,
     pub effective_batch: u64,
+}
+
+#[event]
+pub struct RetirementStarted {
+    pub pool: Pubkey,
+    pub sequence: u64,
+    pub state_digest: [u8; 32],
+}
+#[event]
+pub struct PositionRetired {
+    pub pool: Pubkey,
+    pub owner: Pubkey,
+    pub payable: u64,
 }

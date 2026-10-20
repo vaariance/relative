@@ -10,6 +10,7 @@ export function addresses(programId: PublicKey = PROGRAM_ID) {
     methodology: (digest: Uint8Array) => derive(Buffer.from("methodology"), bytes32(digest)),
     pool: (poolId: bigint) => derive(Buffer.from("pool"), integer(poolId, 8)),
     vault: (pool: PublicKey) => derive(Buffer.from("vault"), pool.toBytes()),
+    retirement: (pool: PublicKey) => derive(Buffer.from("retirement"), pool.toBytes()),
     position: (pool: PublicKey, owner: PublicKey) => derive(Buffer.from("position"), pool.toBytes(), owner.toBytes()),
     request: (pool: PublicKey, nonce: bigint) => derive(Buffer.from("request"), pool.toBytes(), integer(nonce, 8)),
     batch: (pool: PublicKey) => derive(Buffer.from("batch"), pool.toBytes()),

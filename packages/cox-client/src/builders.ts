@@ -75,6 +75,9 @@ export class CoxInstructions {
   }
   refund(keys: OwnerKeys) { return this.build("refund", {}, { ...keys, registry: this.pdas.registry(), tokenProgram: TOKEN_PROGRAM }); }
   withdraw(keys: Omit<OwnerKeys, "request">, amount: bigint) { return this.build("withdraw", { amount: bn(amount) }, { ...keys, registry: this.pdas.registry(), tokenProgram: TOKEN_PROGRAM }); }
+  payRetirement(keys: PoolKeys & { position: PublicKey; userToken: PublicKey }) {
+    return this.build("payRetirement", {}, { ...keys, tokenProgram: TOKEN_PROGRAM });
+  }
   publish(keys: PoolKeys & { payer: PublicKey; runtime: PublicKey; methodology: PublicKey }, batchId: bigint, sequence: bigint, predecessor: Uint8Array, prices: readonly PublishPrice[], snapshot: Uint8Array, archiveTime: bigint) {
     return this.build("publish", { batchId: bn(batchId), sequence: bn(sequence), predecessor: [...bytes32(predecessor)], prices: prices.map(price => ({ ...price, priceE8: bn(price.priceE8), candleStart: bn(price.candleStart) })), snapshot: [...bytes32(snapshot)], archiveTime: bn(archiveTime) },
       { ...keys, registry: this.pdas.registry(), batch: this.pdas.batch(keys.pool), systemProgram: SystemProgram.programId });
@@ -94,6 +97,15 @@ export class CoxInstructions {
     return this.build("quoteRequestWithFee", { operation, from, to, amount: bn(amount), units: bn(units), expectedFeeVersion: bn(expectedFeeVersion) }, { pool });
   }
   migratePool(admin: PublicKey, keys: PoolKeys) { return this.build("migratePool", {}, { admin, registry: this.pdas.registry(), ...keys }); }
+  beginRetirement(admin: PublicKey, keys: PoolKeys) {
+    return this.build("beginRetirement", {}, { admin, registry: this.pdas.registry(), ...keys, retirement: this.pdas.retirement(keys.pool), systemProgram: SystemProgram.programId });
+  }
+  retirePosition(keys: PoolKeys & { position: PublicKey }) {
+    return this.build("retirePosition", {}, { ...keys, retirement: this.pdas.retirement(keys.pool) });
+  }
+  retireRequest(keys: PoolKeys & { authority: PublicKey; request: PublicKey; position: PublicKey }) {
+    return this.build("retireRequest", {}, { ...keys, registry: this.pdas.registry() });
+  }
   scheduleFees(admin: PublicKey, keys: PoolKeys, bps: number, cap: bigint, activationCutoff: bigint) {
     return this.build("scheduleFees", { bps, cap: bn(cap), activationCutoff: bn(activationCutoff) }, { admin, registry: this.pdas.registry(), ...keys });
   }

@@ -93,6 +93,32 @@ test("benchmark buy reserves collateral with the exact deployed ABI and an unsig
   assert.ok(transaction.transaction.serialize().length <= 1232);
 });
 
+test("retired pools remain readable, reject entry early and permit stale retirement withdrawal", async () => {
+  const s = setup();
+  s.position.staged = false;
+  s.position.payable = bn(1);
+  s.put("position", s.pdas.position(s.poolKey, s.owner), s.position);
+  s.pool.payable = bn(1);
+  s.map.get(s.pool.vault.toBase58())!.data.writeBigUInt64LE(BigInt(s.pool.active.toString()) + BigInt(s.pool.pending.toString()) + BigInt(s.pool.residual.toString()) + 1n, 64);
+  s.pool.schemaVersion = 3;
+  s.put("pool", s.poolKey, s.pool);
+  const registry = s.get("registry");
+  registry.paused = true;
+  s.put("registry", s.pdas.registry(), registry);
+  const clock = s.map.get(SYSVAR_CLOCK_PUBKEY.toBase58())!;
+  clock.data.writeBigInt64LE(s.now + 100_000n, 32);
+  const market = await s.sdk.market();
+  assert.equal(market.retired, true);
+  assert.equal(market.halted, true);
+  await assert.rejects(s.sdk.prepareBuy(s.buy), /SwapPoolRetired/);
+  assert.equal(s.quoteInstructions.length, 0);
+  const withdraw = await s.sdk.prepareWithdraw({ owner: s.owner, tokenAccount: s.tokenAccount, amount: 1n });
+  assert.equal(s.decode(withdraw).name, "withdraw");
+  s.pool.schemaVersion = 2;
+  s.put("pool", s.poolKey, s.pool);
+  await assert.rejects(s.sdk.prepareWithdraw({ owner: s.owner, tokenAccount: s.tokenAccount, amount: 1n }), /SwapHalted/);
+});
+
 test("sell uses only the final CRYPTO class; receipt proceeds require a separate withdrawal", async () => {
   const s = setup();
   s.position.staged = false;
