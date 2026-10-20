@@ -957,3 +957,47 @@ another agent needs to know.
 - **What:** At Godwin's request the Portfolio says "Login to Relative to see your requests", with Login as a highlighted link, and the withdraw button says "Login to withdraw". `openLogin()` in `src/components/signer.tsx` opens whatever the top-bar button opens (Privy, or the wallet list without a Privy app ID). Every `SendButton` is now clickable while logged out and opens login; the other forms still label it "Connect wallet to …".
 - **Rules for agents:** Open login only through `openLogin()`, so every prompt shows the same window as the top bar.
 - **Refs:** `apps/web/src/components/signer.tsx`, `apps/web/src/components/send-button.tsx`.
+### 2026-10-14 · Peter (Codex) · Relative X link in landing footer
+
+- **Area:** `apps/web/src/landing/landing.tsx`.
+- **What:** At Peter's request, added `X · @getrelativ` below the footer's Open app button, linking to `https://x.com/getrelativ` in a new tab with the existing footer-link styling.
+- **Refs:** Public X handle supplied by Peter; no deployment in this change.
+
+### 2026-10-15 · Peter (Codex) · Swap SDK composition research
+
+- **Area:** `packages/cox-client/SWAP-PLAN.md`; implementation unchanged.
+- **What:** Traced one-wallet-transaction DEX funding plus future-publication position entry. Existing deposits accept any current class; SDK lifecycle remains benchmark-only and API submission rejects DEX programs and lookup tables. All 29 client tests and type check pass in an isolated copy using existing dependencies. Peter deferred faster publication and described future epoch pools as separate pools alongside the current one.
+- **Rules for agents:** Direct class entry is not equivalent to minting CRYPTO then switching: fees, rounding and timing differ. Existing deposits take fixed amounts; depositing all variable DEX proceeds needs additional on-chain routing logic. Jupiter v2 Build supports ExactIn only. Preserve the API-owned unsigned transaction and wallet-signing boundary.
+- **Open:** Direct-entry economics, full-output routing proof and intended-network DEX coverage before implementation. No changes to pool accounting or system policy are approved by this research.
+- **Refs:** `packages/cox-client/SWAP-PLAN.md`; current user direction; `product.md` v14 predates the expanded SDK scope.
+
+### 2026-10-16 · Peter (Codex) · Direct-class and full-output SDK entry
+
+- **Area:** `packages/cox-client`, new `packages/cox-router`, `product.md` v15; existing pool program unchanged.
+- **What:** Peter selected direct collateral-to-performance-class entry with one deposit fee and required the full actual DEX output to be queued. Added class quotes/preparation/balances/request lifecycle, a routed-entry builder, a server-side Jupiter Build provider and a separate router that measures collateral increase and invokes the existing deposit ABI. Verification passes: 50 client tests/type check, 8 router host tests and 3 compiled LiteSVM tests, including excess output, existing-balance preservation, rollback and next-publication single-fee fill.
+- **Rules for agents:** Queue the entire observed collateral increase, not the quoted minimum; preserve prior wallet collateral. No intermediate CRYPTO issuance or second switch fee. Keep future-publication eligibility, minimum units, refunds and fee-version protections. Treat compiled controlled-swap tests separately from live Jupiter proof. Faster publication is deferred; future epoch pools coexist with the current pool.
+- **Open:** No router deployment or API/UI activation. Jupiter provider is mainnet-only while the current COX SDK remains devnet-only; require a same-network executable route and explicit composed API integration before claiming the live user journey works. Native SOL must already be wrapped; Token-2022 routes remain unsupported.
+- **Refs:** `packages/cox-client/README.md`, `packages/cox-client/SWAP-PLAN.md`, `packages/cox-router/README.md`, `packages/cox-router/results/verification.json`; supersedes the unresolved direct-entry/full-output choices in the preceding swap research entry.
+
+### 2026-10-18 · Peter (Codex) · Market halt traced to publisher RPC failure
+
+- **Area:** Read-only pool 1 live API and dev VM publisher/archiver diagnosis.
+- **What:** Live API reports latest publication sequence 9756 at cutoff 2026-10-18 06:10 UTC and automatic halted status after 60 missed cutoffs. Publisher remains active but has repeatedly received HTTP 502 `every upstream failed` through `cox-rpc-proxy.variance.space` since the 06:11 minute; its configuration has one RPC URL and no independent publisher fallback. Archiver remains active with current admissible 30-asset snapshots. Direct public devnet `getSlot` from the same VM succeeds. API reports no executing batch and matching vault/ledger (247156989 base units).
+- **Rules for agents:** Distinguish publisher RPC/proxy outage from price-feed failure or a vault shortfall. A running service does not prove successful publication. Do not log authenticated RPC paths.
+- **Open:** Proxy upstream failure cause and recovery; no service configuration, restart, deployment or on-chain state changed in this diagnosis.
+- **Refs:** `apps/cox-publisher/src/config.ts`, `packages/app-api/src/cox-types.ts`, live `/v1/status`, VM service journal.
+
+### 2026-10-20 · Peter (Codex) · SDK-only swap closeout and explicit Express capability
+
+- **Area:** `packages/cox-client`, `packages/cox-router`; existing pool, UI and API unchanged.
+- **What:** Peter limited closeout to SDK/contracts/tests/docs. Added typed direct/Express capability results, explicit Express opt-in, compatible-provider and executable-router checks, and early `SwapExpressUnavailable` errors with reasons. Direct entry needs no router or DEX credentials. Transaction preparation rechecks nonce, fee and plan integrity after composed simulation. Direct configuration is captured; adversarial router coverage expanded. All 56 client tests/type check, 12 host tests and 3 compiled LiteSVM tests pass; rebuilt router binary is unchanged. Source/artifact hashes and the checked closeout record are refreshed.
+- **Rules for agents:** Express remains unavailable on the current devnet deployment: no reviewed router address or compatible live route is verified. Availability is a configuration check, not a guarantee of liquidity, pool readiness or reviewed binary identity. Preserve the mainnet-provider/devnet-pool guard. Controlled swap tests are not live Jupiter evidence. API/UI, dual-collateral support and deployment are separate work; do not add them to this closeout.
+- **Open:** User review and commit approval. No staging, commit or deployment performed; keep this agent-log entry in its own commit and preserve earlier uncommitted entries and unrelated changes.
+- **Refs:** `packages/cox-client/SWAP-PLAN.md`, `packages/cox-client/README.md`, `packages/cox-router/results/verification.json`.
+
+### 2026-10-20 · Peter (Codex) · Shared working branch and swap commit approval
+
+- **Area:** Repository workflow and swap SDK closeout.
+- **What:** Peter approved splitting the reviewed changes into commits, pushing a new branch named `working`, and emailing Godwin with Joel copied. The shared continuation branch is `working`; bring in the latest team main before publishing it.
+- **Rules for agents:** Continue new shared development on `working`, preserve local changes when switching, and keep agent-log commits separate. This approval supersedes the pending commit approval in the preceding SDK-only swap closeout entry. It does not authorise deployment or live Express activation.
+- **Refs:** `packages/cox-client/SWAP-PLAN.md`, `packages/cox-router/results/verification.json`.
