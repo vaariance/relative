@@ -454,7 +454,7 @@ fn permissionless_expiry_and_snapshot_deadlines() {
     p.h.send(
         "expire",
         &[Harness::instruction(
-            a::ManageRequest {
+            a::ManageRequest { test_vault: None,
                 authority: bob.pubkey(),
                 registry: p.registry,
                 pool: p.pool,
@@ -506,7 +506,7 @@ fn wrong_mint_and_foreign_program_owned_pool_reject() {
     p.h.send(
         "wrong_program_owner",
         &[Harness::instruction(
-            a::Submit {
+            a::Submit { test_vault: None,
                 owner: alice.pubkey(),
                 registry: p.registry,
                 pool: p.pool,

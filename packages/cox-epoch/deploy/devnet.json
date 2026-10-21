@@ -1,0 +1,21 @@
+{
+  "network": "devnet",
+  "rpc": "https://api.devnet.solana.com",
+  "genesisHash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+  "admin": "4rCo36GY63kyZpCae2ccfhJEk3TLqKMybhT42YhCPp9N",
+  "upgradeAuthority": "4yHCCpEmBvaCKAdfiY2kULM8qFJcDQR4uSrfAT3EWbw5",
+  "runtimeAuthority": "GNmM11ZMFqEu3FYewGNDunpSSJBw8KnkDxzCGpSbpGj6",
+  "anchorVersion": "0.31.1",
+  "sbfToolsVersion": "2.2.1",
+  "platformToolsVersion": "v1.48",
+  "sbfRustVersion": "rustc 1.84.1-dev",
+  "schema": "relative.epoch-deployment/v1",
+  "programId": "4RRBbmzExtPDMYNUgCaetfz3wNYkF2mrAYKZVY4iXz2w",
+  "programKeyPath": ".cox/keys/epoch-program-keypair.json",
+  "livePoolActive": false,
+  "deployed": false,
+  "status": "prepared-not-deployed",
+  "deployedCommit": null,
+  "deployedBuildSha256": null,
+  "deploymentSignature": null
+}

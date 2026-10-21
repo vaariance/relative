@@ -221,7 +221,7 @@ fn withdraw_fees(p: &mut PoolHarness, token: Pubkey, amount: u64, runtime: bool,
     p.h.send(
         "withdraw_fees",
         &[Harness::instruction(
-            a::WithdrawFees {
+            a::WithdrawFees { test_vault: None,
                 admin: signer.pubkey(),
                 registry: p.registry,
                 pool: p.pool,

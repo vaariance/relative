@@ -108,6 +108,10 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "test_vault",
+          "optional": true
         }
       ],
       "args": []
@@ -242,6 +246,10 @@
           "relations": [
             "pool"
           ]
+        },
+        {
+          "name": "test_vault",
+          "optional": true
         }
       ],
       "args": []
@@ -459,6 +467,11 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "test_vault",
+          "writable": true,
+          "optional": true
         }
       ],
       "args": [
@@ -619,6 +632,11 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "test_vault",
+          "writable": true,
+          "optional": true
         }
       ],
       "args": [
@@ -793,6 +811,10 @@
           "relations": [
             "pool"
           ]
+        },
+        {
+          "name": "test_vault",
+          "optional": true
         }
       ],
       "args": []
@@ -946,6 +968,10 @@
           "relations": [
             "pool"
           ]
+        },
+        {
+          "name": "test_vault",
+          "optional": true
         }
       ],
       "args": []
@@ -1080,6 +1106,10 @@
           "relations": [
             "pool"
           ]
+        },
+        {
+          "name": "test_vault",
+          "optional": true
         }
       ],
       "args": []
@@ -1241,6 +1271,263 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "test_vault",
+          "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_adaptive_pool",
+      "discriminator": [
+        229,
+        87,
+        134,
+        0,
+        143,
+        236,
+        121,
+        69
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "pool_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "test_vault",
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "pool_id",
+          "type": "u64"
+        },
+        {
+          "name": "trading_opens_at",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "initialize_devnet_collateral",
+      "discriminator": [
+        107,
+        169,
+        140,
+        81,
+        122,
+        248,
+        231,
+        7
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "test_mint"
+        },
+        {
+          "name": "vault",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "test_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  101,
+                  115,
+                  116,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": []
@@ -1368,6 +1655,10 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "test_vault",
+          "optional": true
         }
       ],
       "args": [
@@ -1590,6 +1881,10 @@
           "relations": [
             "pool"
           ]
+        },
+        {
+          "name": "test_vault",
+          "optional": true
         }
       ],
       "args": []
@@ -1640,6 +1935,10 @@
         },
         {
           "name": "vault"
+        },
+        {
+          "name": "test_vault",
+          "optional": true
         }
       ],
       "args": []
@@ -1770,6 +2069,11 @@
         {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "test_vault",
+          "writable": true,
+          "optional": true
         }
       ],
       "args": []
@@ -1904,6 +2208,10 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "test_vault",
+          "optional": true
         }
       ],
       "args": [
@@ -1946,6 +2254,189 @@
         {
           "name": "archive_time",
           "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "publish_adaptive",
+      "discriminator": [
+        150,
+        19,
+        134,
+        38,
+        230,
+        20,
+        227,
+        20
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "runtime",
+          "signer": true
+        },
+        {
+          "name": "registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "batch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  116,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "test_vault",
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "batch_id",
+          "type": "u64"
+        },
+        {
+          "name": "sequence",
+          "type": "u64"
+        },
+        {
+          "name": "predecessor",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "prices",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "PriceWire"
+              }
+            }
+          }
+        },
+        {
+          "name": "snapshot",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "archive_time",
+          "type": "u64"
+        },
+        {
+          "name": "benchmark",
+          "type": "i128"
         }
       ]
     },
@@ -2344,6 +2835,11 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "test_vault",
+          "writable": true,
+          "optional": true
         }
       ],
       "args": [
@@ -2504,6 +3000,11 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "test_vault",
+          "writable": true,
+          "optional": true
         }
       ],
       "args": [
@@ -2671,9 +3172,170 @@
         {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "test_vault",
+          "writable": true,
+          "optional": true
         }
       ],
       "args": []
+    },
+    {
+      "name": "refund_partial",
+      "discriminator": [
+        52,
+        106,
+        149,
+        138,
+        100,
+        246,
+        223,
+        31
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "request",
+            "position"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          },
+          "relations": [
+            "request",
+            "position"
+          ]
+        },
+        {
+          "name": "request",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  113,
+                  117,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "request.nonce",
+                "account": "Request"
+              }
+            ]
+          }
+        },
+        {
+          "name": "position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "user_token",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "test_vault",
+          "writable": true,
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
     },
     {
       "name": "register_methodology",
@@ -2869,6 +3531,10 @@
           "relations": [
             "pool"
           ]
+        },
+        {
+          "name": "test_vault",
+          "optional": true
         }
       ],
       "args": []
@@ -3003,6 +3669,10 @@
           "relations": [
             "pool"
           ]
+        },
+        {
+          "name": "test_vault",
+          "optional": true
         }
       ],
       "args": []
@@ -3209,6 +3879,10 @@
           "relations": [
             "pool"
           ]
+        },
+        {
+          "name": "test_vault",
+          "optional": true
         }
       ],
       "args": []
@@ -3301,6 +3975,87 @@
       ]
     },
     {
+      "name": "seal_adaptive_methodology",
+      "discriminator": [
+        152,
+        223,
+        225,
+        130,
+        100,
+        240,
+        118,
+        119
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "methodology",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "config",
+          "type": {
+            "defined": {
+              "name": "AdaptiveManifestConfig"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "seal_evaluation",
       "discriminator": [
         176,
@@ -3388,6 +4143,10 @@
           "relations": [
             "pool"
           ]
+        },
+        {
+          "name": "test_vault",
+          "optional": true
         }
       ],
       "args": []
@@ -3612,6 +4371,11 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "test_vault",
+          "writable": true,
+          "optional": true
         }
       ],
       "args": [
@@ -3776,6 +4540,11 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "test_vault",
+          "writable": true,
+          "optional": true
         }
       ],
       "args": [
@@ -4041,6 +4810,11 @@
         {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "test_vault",
+          "writable": true,
+          "optional": true
         }
       ],
       "args": [
@@ -4129,6 +4903,11 @@
         {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "test_vault",
+          "writable": true,
+          "optional": true
         }
       ],
       "args": [
@@ -4610,9 +5389,83 @@
     {
       "code": 6041,
       "name": "NotRetired"
+    },
+    {
+      "code": 6042,
+      "name": "DualCollateralDisabled"
+    },
+    {
+      "code": 6043,
+      "name": "MissingCollateralVault"
+    },
+    {
+      "code": 6044,
+      "name": "CollateralLiquidity"
+    },
+    {
+      "code": 6045,
+      "name": "DualRetirementUnsupported"
     }
   ],
   "types": [
+    {
+      "name": "AdaptiveManifestConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "string"
+          },
+          {
+            "name": "roster",
+            "type": "bytes"
+          },
+          {
+            "name": "pyth_feed_ids",
+            "type": {
+              "vec": "u32"
+            }
+          },
+          {
+            "name": "origin",
+            "type": "u64"
+          },
+          {
+            "name": "origin_prices",
+            "type": {
+              "vec": "u64"
+            }
+          },
+          {
+            "name": "universe_digest",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "feed_check_digest",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "max_price_age_ms",
+            "type": "u64"
+          },
+          {
+            "name": "max_feed_age_ms",
+            "type": "u64"
+          }
+        ]
+      }
+    },
     {
       "name": "Batch",
       "type": {
@@ -5245,6 +6098,16 @@
           {
             "name": "fee_initial_scheduled",
             "type": "bool"
+          },
+          {
+            "name": "trading_opens_at",
+            "type": "u64"
+          },
+          {
+            "name": "test_collateral_mint",
+            "type": {
+              "option": "pubkey"
+            }
           }
         ]
       }
@@ -5769,6 +6632,10 @@
           },
           {
             "name": "fee",
+            "type": "u64"
+          },
+          {
+            "name": "refunded_amount",
             "type": "u64"
           }
         ]

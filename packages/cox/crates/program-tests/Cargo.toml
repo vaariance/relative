@@ -6,6 +6,9 @@ publish = false
 
 [workspace]
 
+[features]
+devnet-collateral = ["cox/devnet-collateral"]
+
 [dependencies]
 anchor-lang = "=0.31.1"
 cox-math = { path = "../math" }

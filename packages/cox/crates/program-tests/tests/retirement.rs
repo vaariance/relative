@@ -8,7 +8,7 @@ use support::{pda, protocol::PoolHarness, Harness, ORIGIN};
 fn migrate(p: &mut PoolHarness) {
     p.pause(true);
     let admin = p.h.admin.insecure_clone();
-    p.h.send("migrate_pool", &[Harness::instruction(a::MigratePool {
+    p.h.send("migrate_pool", &[Harness::instruction(a::MigratePool { test_vault: None,
         admin: admin.pubkey(), registry: p.registry, pool: p.pool, vault: p.vault,
     }, i::MigratePool {})], &[&admin], true);
     p.pause(false);
@@ -16,7 +16,7 @@ fn migrate(p: &mut PoolHarness) {
 
 fn begin(p: &mut PoolHarness, unauthorized: bool, success: bool) {
     let signer = if unauthorized { p.h.bob.insecure_clone() } else { p.h.admin.insecure_clone() };
-    p.h.send("begin_retirement", &[Harness::instruction(a::BeginRetirement {
+    p.h.send("begin_retirement", &[Harness::instruction(a::BeginRetirement { test_vault: None,
         admin: signer.pubkey(), registry: p.registry, pool: p.pool,
         retirement: pda(&[b"retirement", p.pool.as_ref()]), vault: p.vault,
         system_program: system_program::ID,
@@ -26,7 +26,7 @@ fn begin(p: &mut PoolHarness, unauthorized: bool, success: bool) {
 
 fn retire(p: &mut PoolHarness, owner: Pubkey, success: bool) {
     let operator = p.h.bob.insecure_clone();
-    p.h.send("retire_position", &[Harness::instruction(a::RetirePosition {
+    p.h.send("retire_position", &[Harness::instruction(a::RetirePosition { test_vault: None,
         pool: p.pool, retirement: pda(&[b"retirement", p.pool.as_ref()]),
         position: p.position(owner), vault: p.vault,
     }, i::RetirePosition {})], &[&operator], success);
@@ -36,7 +36,7 @@ fn retire(p: &mut PoolHarness, owner: Pubkey, success: bool) {
 fn release(p: &mut PoolHarness, nonce: u64, success: bool) {
     let request: Request = p.h.read(p.request(nonce));
     let operator = p.h.bob.insecure_clone();
-    p.h.send("retire_request", &[Harness::instruction(a::ManageRequest {
+    p.h.send("retire_request", &[Harness::instruction(a::ManageRequest { test_vault: None,
         authority: operator.pubkey(), registry: p.registry, pool: p.pool,
         request: p.request(nonce), position: p.position(request.owner), vault: p.vault,
     }, i::RetireRequest {})], &[&operator], success);
@@ -45,7 +45,7 @@ fn release(p: &mut PoolHarness, nonce: u64, success: bool) {
 
 fn pay(p: &mut PoolHarness, owner: Pubkey, destination: Pubkey, success: bool) {
     let payer = p.h.bob.insecure_clone();
-    p.h.send("pay_retirement", &[Harness::instruction(a::RetirementPayout {
+    p.h.send("pay_retirement", &[Harness::instruction(a::RetirementPayout { test_vault: None,
         pool: p.pool, position: p.position(owner), vault: p.vault, user_token: destination,
         token_program: support::token_program(),
     }, i::PayRetirement {})], &[&payer], success);
@@ -108,7 +108,7 @@ fn captured_live_pool_rehearsal_retires_and_automatically_pays_every_owner() {
         svm.send_transaction(transaction).unwrap(); svm.expire_blockhash();
     };
     send(&mut svm, &[Harness::instruction(a::Admin { admin: admin.pubkey(), registry }, i::Pause {})]);
-    send(&mut svm, &[Harness::instruction(a::BeginRetirement {
+    send(&mut svm, &[Harness::instruction(a::BeginRetirement { test_vault: None,
         admin: admin.pubkey(), registry, pool, retirement, vault, system_program: system_program::ID,
     }, i::BeginRetirement {})]);
     let token_balance = |svm: &LiteSVM, key: Pubkey| u64::from_le_bytes(svm.get_account(&key).unwrap().data[64..72].try_into().unwrap());
@@ -119,9 +119,9 @@ fn captured_live_pool_rehearsal_retires_and_automatically_pays_every_owner() {
         let account = Position::try_deserialize(&mut svm.get_account(&position).unwrap().data.as_slice()).unwrap();
         let mut instructions = Vec::new();
         if account.classes.iter().any(|class| class.units > 0) {
-            instructions.push(Harness::instruction(a::RetirePosition { pool, retirement, position, vault }, i::RetirePosition {}));
+            instructions.push(Harness::instruction(a::RetirePosition { test_vault: None, pool, retirement, position, vault }, i::RetirePosition {}));
         }
-        instructions.push(Harness::instruction(a::RetirementPayout { pool, position, vault, user_token: destination,
+        instructions.push(Harness::instruction(a::RetirementPayout { test_vault: None, pool, position, vault, user_token: destination,
             token_program: support::token_program() }, i::PayRetirement {}));
         let balance = token_balance(&svm, destination);
         send(&mut svm, &instructions);
@@ -251,7 +251,7 @@ fn retirement_preserves_committed_fees_and_refunds_full_unexecuted_deposits() {
     p.withdraw(false, 4_999_000, true);
     assert_eq!(p.pool_state().fees, 1_000);
     assert_eq!(p.h.token_balance(p.vault), 1_000 + p.pool_state().residual);
-    p.h.send("migrate_pool", &[Harness::instruction(a::MigratePool {
+    p.h.send("migrate_pool", &[Harness::instruction(a::MigratePool { test_vault: None,
         admin: admin.pubkey(), registry: p.registry, pool: p.pool, vault: p.vault,
     }, i::MigratePool {})], &[&admin], false);
 }

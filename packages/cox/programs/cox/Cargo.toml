@@ -8,13 +8,14 @@ crate-type = ["cdylib", "lib"]
 name = "cox"
 [features]
 default = []
+devnet-collateral = []
 no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
 cpi = ["no-entrypoint"]
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 [dependencies]
-anchor-lang = { version = "=0.31.1", features = ["init-if-needed"] }
+anchor-lang = { version = "=0.31.1", features = ["init-if-needed", "allow-missing-optionals"] }
 anchor-spl = { version = "=0.31.1", default-features = false, features = ["token", "token_2022"] }
 cox-math = { path = "../../crates/math" }
 serde_json = "1"

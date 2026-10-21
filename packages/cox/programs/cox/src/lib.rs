@@ -1,9 +1,12 @@
 #![allow(unexpected_cfgs)]
 
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::program_option::COption;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 use cox_math as math;
 use serde_json::json;
+mod adaptive_manifest;
+pub use adaptive_manifest::*;
 
 declare_id!("G6iQGoupNSfduw1QJxQ9vcVi9FnCC6cbippXsi4QQzJF");
 pub const COLLATERAL_LIMIT: u64 = 100_000_000_000;
@@ -96,29 +99,36 @@ pub mod cox {
         m.sealed = true;
         Ok(())
     }
-    pub fn initialize_pool(ctx: Context<InitializePool>, pool_id: u64) -> Result<()> {
-        require!(ctx.accounts.methodology.sealed, CoxError::UnsealedManifest);
-        require!(ctx.accounts.mint.decimals == 6, CoxError::InvalidCollateral);
-        require!(
-            pool_id == ctx.accounts.registry.next_pool_id,
-            CoxError::Replay
-        );
-        let p = &mut ctx.accounts.pool;
-        p.schema_version = 1;
-        p.bump = ctx.bumps.pool;
-        p.pool_id = pool_id;
-        p.registry = ctx.accounts.registry.key();
-        p.methodology = ctx.accounts.methodology.key();
-        p.collateral_mint = ctx.accounts.mint.key();
-        p.vault = ctx.accounts.vault.key();
-        p.origin = ctx.accounts.methodology.origin;
-        let n = ctx.accounts.methodology.roster.len();
-        p.classes = vec![Class::default(); n + 1];
-        p.benchmark = 100 * math::SCALE;
-        p.references = vec![100 * math::SCALE; n + 1];
-        ctx.accounts.registry.next_pool_id = add(ctx.accounts.registry.next_pool_id, 1)?;
-        reconcile(p, &ctx.accounts.vault)?;
+    pub fn seal_adaptive_methodology(ctx: Context<ManageMethodology>, config: AdaptiveManifestConfig) -> Result<()> {
+        let m = &mut ctx.accounts.methodology;
+        require!(!m.sealed && m.canonical.len() == m.expected_length as usize, CoxError::InvalidManifest);
+        let canonical = canonical_adaptive_manifest(&config, ctx.accounts.registry.runtime)?;
+        require!(canonical == m.canonical && math::artifact_digest(&canonical) == m.digest, CoxError::InvalidManifest);
+        m.schema_version = 2;
+        m.roster = config.roster;
+        m.origin = config.origin;
+        m.bybit = false;
+        m.sealed = true;
         Ok(())
+    }
+    pub fn initialize_pool(ctx: Context<InitializePool>, pool_id: u64) -> Result<()> {
+        initialize_pool_inner(ctx, pool_id, None)
+    }
+    pub fn initialize_adaptive_pool(ctx: Context<InitializePool>, pool_id: u64, trading_opens_at: u64) -> Result<()> {
+        require!(trading_opens_at >= ctx.accounts.methodology.origin, CoxError::InvalidOrigin);
+        initialize_pool_inner(ctx, pool_id, Some(trading_opens_at))
+    }
+    pub fn initialize_devnet_collateral(ctx: Context<InitializeDevnetCollateral>) -> Result<()> {
+        require!(cfg!(feature = "devnet-collateral"), CoxError::DualCollateralDisabled);
+        let p = &mut ctx.accounts.pool;
+        require!(p.schema_version == 4 && !p.initialized && p.stage.is_none() && p.test_collateral_mint.is_none()
+            && p.next_request_nonce == 0 && p.active == 0 && p.pending == 0 && p.payable == 0 && p.residual == 0 && p.fees == 0,
+            CoxError::InvalidAccount);
+        require!(ctx.accounts.test_mint.decimals == 6 && ctx.accounts.test_mint.key() != p.collateral_mint
+            && ctx.accounts.test_mint.mint_authority == COption::Some(ctx.accounts.admin.key())
+            && ctx.accounts.test_mint.freeze_authority == COption::None, CoxError::InvalidCollateral);
+        p.test_collateral_mint = Some(ctx.accounts.test_mint.key());
+        reconcile(p, &ctx.accounts.vault, Some(&ctx.accounts.test_vault))
     }
     pub fn migrate_pool(ctx: Context<MigratePool>) -> Result<()> {
         require!(ctx.accounts.registry.paused, CoxError::Paused);
@@ -157,7 +167,7 @@ pub mod cox {
         legacy.serialize(&mut clean)?;
         clean.resize(data.len(), 0);
         let mut p = Pool::try_deserialize(&mut clean.as_slice())?;
-        reconcile(&mut p, &ctx.accounts.vault)?;
+        reconcile(&mut p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
         p.schema_version = 2;
         data.fill(0);
         p.try_serialize(&mut &mut data[..])?;
@@ -166,9 +176,10 @@ pub mod cox {
     pub fn begin_retirement(ctx: Context<BeginRetirement>) -> Result<()> {
         require!(ctx.accounts.registry.paused, CoxError::Paused);
         let p = &mut ctx.accounts.pool;
-        reconcile(p, &ctx.accounts.vault)?;
+        require!(p.test_collateral_mint.is_none(), CoxError::DualRetirementUnsupported);
+        reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
         require!(p.schema_version != 3, CoxError::PoolRetired);
-        require!(p.schema_version == 2, CoxError::InvalidAccount);
+        require!(matches!(p.schema_version, 2 | 4), CoxError::InvalidAccount);
         require!(p.initialized, CoxError::InvalidOrigin);
         require!(p.stage.is_none(), CoxError::BatchBusy);
         let retirement = &mut ctx.accounts.retirement;
@@ -193,7 +204,7 @@ pub mod cox {
     }
     pub fn retire_position(ctx: Context<RetirePosition>) -> Result<()> {
         let p = &mut ctx.accounts.pool;
-        reconcile(p, &ctx.accounts.vault)?;
+        reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
         require!(
             p.schema_version == 3 && p.stage.is_none(),
             CoxError::NotRetired
@@ -255,12 +266,12 @@ pub mod cox {
             owner: position.owner,
             payable,
         });
-        reconcile(p, &ctx.accounts.vault)
+        reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())
     }
     pub fn pay_retirement(ctx: Context<RetirementPayout>) -> Result<()> {
         let p = &mut ctx.accounts.pool;
         require!(p.schema_version == 3 && p.stage.is_none(), CoxError::NotRetired);
-        reconcile(p, &ctx.accounts.vault)?;
+        reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
         materialize(&mut ctx.accounts.position, p)?;
         let position = &mut ctx.accounts.position;
         require!(position.classes.iter().all(|class| class.units == 0 && class.locked == 0), CoxError::InsufficientUnlockedUnits);
@@ -271,7 +282,8 @@ pub mod cox {
         transfer_out(p, &ctx.accounts.vault, &ctx.accounts.user_token, &ctx.accounts.token_program, amount)?;
         emit!(WithdrawalPaid { pool: p.key(), owner: position.owner, amount });
         ctx.accounts.vault.reload()?;
-        reconcile(p, &ctx.accounts.vault)
+        if let Some(vault) = ctx.accounts.test_vault.as_mut() { vault.reload()?; }
+        reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())
     }
     pub fn schedule_fees(
         ctx: Context<ManageFees>,
@@ -281,13 +293,13 @@ pub mod cox {
     ) -> Result<()> {
         let p = &mut ctx.accounts.pool;
         require!(p.schema_version != 3, CoxError::PoolRetired);
-        require!(p.schema_version == 2, CoxError::InvalidAccount);
+        require!(matches!(p.schema_version, 2 | 4), CoxError::InvalidAccount);
         require!(bps <= 100 && cap <= 2_000_000, CoxError::InvalidFee);
         require!(
             !p.fee_pending
                 || p.stage.is_none()
                 || p.stage_batch
-                    .checked_mul(60)
+                    .checked_mul(publication_interval(p))
                     .and_then(|v| p.origin.checked_add(v))
                     .is_some_and(|v| v < p.fee_pending_cutoff),
             CoxError::BatchBusy
@@ -296,7 +308,7 @@ pub mod cox {
         require!(
             activation_cutoff > t
                 && activation_cutoff >= p.origin
-                && (activation_cutoff - p.origin) % 60 == 0,
+                && (activation_cutoff - p.origin) % publication_interval(p) == 0,
             CoxError::InvalidFeeActivation
         );
         if p.fee_initial_scheduled {
@@ -327,7 +339,7 @@ pub mod cox {
         require!(
             p.stage.is_none()
                 || p.stage_batch
-                    .checked_mul(60)
+                    .checked_mul(publication_interval(p))
                     .and_then(|v| p.origin.checked_add(v))
                     .is_some_and(|v| v < p.fee_pending_cutoff),
             CoxError::BatchBusy
@@ -341,18 +353,20 @@ pub mod cox {
     }
     pub fn withdraw_fees(ctx: Context<WithdrawFees>, amount: u64) -> Result<()> {
         let p = &mut ctx.accounts.pool;
-        reconcile(p, &ctx.accounts.vault)?;
+        reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
         require!(amount > 0 && amount <= p.fees, CoxError::InsufficientFees);
         p.fees = sub(p.fees, amount)?;
-        transfer_out(
+        transfer_out_collateral(
             p,
             &ctx.accounts.vault,
+            ctx.accounts.test_vault.as_ref(),
             &ctx.accounts.treasury_token,
             &ctx.accounts.token_program,
             amount,
         )?;
         ctx.accounts.vault.reload()?;
-        reconcile(p, &ctx.accounts.vault)?;
+        if let Some(vault) = ctx.accounts.test_vault.as_mut() { vault.reload()?; }
+        reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
         emit!(FeesWithdrawn {
             pool: p.key(),
             admin: ctx.accounts.admin.key(),
@@ -527,42 +541,14 @@ pub mod cox {
         release_request(ctx, true)
     }
     pub fn refund(ctx: Context<Refund>) -> Result<()> {
-        let p = &mut ctx.accounts.pool;
-        reconcile(p, &ctx.accounts.vault)?;
-        materialize(&mut ctx.accounts.position, p)?;
-        let r = &mut ctx.accounts.request;
-        refresh_request(r, p);
-        require!(
-            r.operation == 0 && matches!(r.status, 2 | 3 | 4 | 5 | 7),
-            CoxError::NotRefundable
-        );
-        let value = r.amount;
-        require!(
-            ctx.accounts.position.refundable >= value,
-            CoxError::NotRefundable
-        );
-        ctx.accounts.position.refundable = sub(ctx.accounts.position.refundable, value)?;
-        p.pending = sub(p.pending, value)?;
-        r.status = 6;
-        transfer_out(
-            p,
-            &ctx.accounts.vault,
-            &ctx.accounts.user_token,
-            &ctx.accounts.token_program,
-            value,
-        )?;
-        emit!(DepositRefunded {
-            pool: p.key(),
-            request: r.key(),
-            amount: value
-        });
-        ctx.accounts.vault.reload()?;
-        reconcile(p, &ctx.accounts.vault)?;
-        Ok(())
+        refund_inner(ctx, None)
+    }
+    pub fn refund_partial(ctx: Context<Refund>, amount: u64) -> Result<()> {
+        refund_inner(ctx, Some(amount))
     }
     pub fn withdraw(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
         let p = &mut ctx.accounts.pool;
-        reconcile(p, &ctx.accounts.vault)?;
+        reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
         require!(p.schema_version == 3 || !halted(p, now()?)?, CoxError::Halted);
         materialize(&mut ctx.accounts.position, p)?;
         require!(
@@ -571,9 +557,10 @@ pub mod cox {
         );
         ctx.accounts.position.payable = sub(ctx.accounts.position.payable, amount)?;
         p.payable = sub(p.payable, amount)?;
-        transfer_out(
+        transfer_out_collateral(
             p,
             &ctx.accounts.vault,
+            ctx.accounts.test_vault.as_ref(),
             &ctx.accounts.user_token,
             &ctx.accounts.token_program,
             amount,
@@ -584,7 +571,8 @@ pub mod cox {
             amount
         });
         ctx.accounts.vault.reload()?;
-        reconcile(p, &ctx.accounts.vault)?;
+        if let Some(vault) = ctx.accounts.test_vault.as_mut() { vault.reload()?; }
+        reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
         Ok(())
     }
     pub fn publish(
@@ -596,183 +584,25 @@ pub mod cox {
         snapshot: [u8; 32],
         archive_time: u64,
     ) -> Result<()> {
-        let p = &mut ctx.accounts.pool;
-        reconcile(p, &ctx.accounts.vault)?;
-        require!(p.schema_version != 3, CoxError::PoolRetired);
-        require!(!ctx.accounts.registry.paused, CoxError::Paused);
-        require!(p.stage.is_none(), CoxError::BatchBusy);
-        let previous_batch = &ctx.accounts.batch;
-        if p.initialized {
-            require!(
-                matches!(previous_batch.schema_version, 2 | 3)
-                    && previous_batch.pool == p.key()
-                    && previous_batch.phase == 2
-                    && previous_batch.batch_id == p.last_batch
-                    && previous_batch.sequence == p.sequence,
-                CoxError::InvalidAccount
-            );
-        } else {
-            require!(previous_batch.schema_version == 0, CoxError::InvalidAccount);
-        }
-        let t = now()?;
-        let cutoff = add(
-            p.origin,
-            batch_id
-                .checked_mul(60)
-                .ok_or(CoxError::ArithmeticOverflow)?,
-        )?;
-        require!(t >= cutoff, CoxError::TooEarly);
-        require!(t <= add(cutoff, 55)?, CoxError::CommitDeadlinePassed);
-        require!(
-            archive_time >= cutoff && archive_time <= t && archive_time <= add(cutoff, 30)?,
-            CoxError::ArchiveDeadlinePassed
-        );
-        require!(
-            ctx.accounts.methodology.activation_batch <= batch_id,
-            CoxError::UnsealedManifest
-        );
-        if p.initialized {
-            require!(
-                batch_id > p.last_batch
-                    && sequence == add(p.sequence, 1)?
-                    && predecessor == p.state_digest,
-                CoxError::WrongPredecessor
-            );
-        } else {
-            require!(
-                batch_id == 0 && sequence == 0 && predecessor == [0; 32],
-                CoxError::InvalidOrigin
-            );
-        }
-        let r = &mut ctx.accounts.registry;
-        if let Some(next) = r.pending_runtime {
-            if batch_id >= r.runtime_effective_batch {
-                r.runtime = next;
-                r.pending_runtime = None;
-            }
-        }
-        require_keys_eq!(
-            r.runtime,
-            ctx.accounts.runtime.key(),
-            CoxError::Unauthorized
-        );
-        let m = &ctx.accounts.methodology;
-        require!(prices.len() == m.roster.len(), CoxError::InvalidRoster);
-        let full = prices
-            .iter()
-            .zip(&m.roster)
-            .map(|(w, i)| {
-                let id = IDS[*i as usize];
-                require!(
-                    !(w.venue == 1 && matches!(id, "TRX" | "JUP"))
-                        && !(w.venue == 2 && (!m.bybit || matches!(id, "ZEC" | "TAO"))),
-                    CoxError::InvalidVenueStep
-                );
-                Ok(math::Price {
-                    asset_id: id.into(),
-                    venue: w.venue,
-                    step: w.step,
-                    candle_start: w.candle_start,
-                    price_e8: w.price_e8,
-                    trade_age_minutes: w.trade_age_minutes,
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let roster = m
-            .roster
-            .iter()
-            .map(|i| IDS[*i as usize].to_string())
-            .collect::<Vec<_>>();
-        let computed = math::artifact_digest(
-            &math::snapshot_bytes(cutoff, &full, &roster)
-                .map_err(|_| error!(CoxError::InvalidPrice))?,
-        );
-        require!(snapshot == computed, CoxError::InvalidSnapshotDigest);
-        let current = prices.iter().map(|x| x.price_e8).collect::<Vec<_>>();
-        let (benchmark, references, fixed, transfer_residual) = if p.initialized {
-            let reference = mm(math::reference(
-                &p.last_prices,
-                &current,
-                &p.origin_prices,
-                p.benchmark,
-            ))?;
-            let revaluation = mm(math::revalue(&to_math(&p.classes), &reference.h))?;
-            let mut references = reference.relative;
-            references.push(100 * math::SCALE);
-            (
-                reference.benchmark,
-                references,
-                from_math(&revaluation.classes),
-                revaluation.residual,
-            )
-        } else {
-            (
-                100 * math::SCALE,
-                vec![100 * math::SCALE; prices.len() + 1],
-                p.classes.clone(),
-                0,
-            )
-        };
-        let b = &mut ctx.accounts.batch;
-        b.schema_version = if p.schema_version >= 2 { 3 } else { 2 };
-        b.bump = ctx.bumps.batch;
-        b.pool = p.key();
-        b.batch_id = batch_id;
-        b.sequence = sequence;
-        b.cutoff = cutoff;
-        b.predecessor_sequence = p.sequence;
-        b.predecessor_digest = p.state_digest;
-        b.snapshot_digest = snapshot;
-        b.prices = prices;
-        b.benchmark = benchmark;
-        b.references = references;
-        b.fixed = fixed;
-        let n = p.classes.len();
-        b.burns = vec![0; n];
-        b.mints = vec![0; n];
-        b.incoming = vec![0; n];
-        b.blocked = vec![false; n];
-        b.accepted_deposits = 0;
-        b.new_payable = 0;
-        b.fees = 0;
-        b.executed = 0;
-        b.rejected = 0;
-        b.phase = 0;
-        b.safety_changed = false;
-        b.transfer_residual = transfer_residual;
-        b.closed_queue_end = p.next_request_nonce;
-        b.queue_start = p.queue_start;
-        b.cursor = p.queue_start;
-        b.next_queue_start = p.next_request_nonce;
-        b.receipt_root = mm(math::digest(
-            if b.schema_version == 3 {
-                "COX/RECEIPTS/V2"
-            } else {
-                "COX/RECEIPTS/V1"
-            },
-            &[],
-        ))?;
-        b.staged_root = mm(math::digest("COX/STAGE/V1", &[]))?;
-        b.accepted_at = t;
-        r.max_accepted_batch = r.max_accepted_batch.max(batch_id);
-        r.active_batches = add(r.active_batches, 1)?;
-        emit!(BatchAccepted {
-            pool: p.key(),
-            batch: batch_id,
-            snapshot
-        });
-        p.stage = Some(b.key());
-        p.stage_batch = batch_id;
-        p.stage_closed_end = b.closed_queue_end;
-        require!(
-            b.closed_queue_end - b.queue_start <= u32::MAX as u64,
-            CoxError::CapacityExceeded
-        );
-        Ok(())
+        require!(ctx.accounts.pool.schema_version != 4, CoxError::InvalidAccount);
+        publish_inner(ctx, batch_id, sequence, predecessor, prices, snapshot, archive_time, None)
+    }
+    pub fn publish_adaptive(
+        ctx: Context<Publish>,
+        batch_id: u64,
+        sequence: u64,
+        predecessor: [u8; 32],
+        prices: Vec<PriceWire>,
+        snapshot: [u8; 32],
+        archive_time: u64,
+        benchmark: i128,
+    ) -> Result<()> {
+        require!(ctx.accounts.pool.schema_version == 4, CoxError::InvalidAccount);
+        publish_inner(ctx, batch_id, sequence, predecessor, prices, snapshot, archive_time, Some(benchmark))
     }
     pub fn evaluate(ctx: Context<Process>) -> Result<()> {
         let p = &mut ctx.accounts.pool;
-        reconcile(p, &ctx.accounts.vault)?;
+        reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
         require!(!ctx.accounts.registry.paused, CoxError::Paused);
         let b = &mut ctx.accounts.batch;
         require!(
@@ -829,7 +659,7 @@ pub mod cox {
     }
     pub fn safety(ctx: Context<Process>) -> Result<()> {
         let p = &mut ctx.accounts.pool;
-        reconcile(p, &ctx.accounts.vault)?;
+        reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
         require!(!ctx.accounts.registry.paused, CoxError::Paused);
         let b = &mut ctx.accounts.batch;
         require!(
@@ -864,7 +694,7 @@ pub mod cox {
     }
     pub fn seal_evaluation(ctx: Context<BatchOnly>) -> Result<()> {
         let p = &mut ctx.accounts.pool;
-        reconcile(p, &ctx.accounts.vault)?;
+        reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
         require!(!ctx.accounts.registry.paused, CoxError::Paused);
         let b = &mut ctx.accounts.batch;
         require!(
@@ -898,7 +728,7 @@ pub mod cox {
     }
     pub fn execute(ctx: Context<Process>) -> Result<()> {
         let p = &mut ctx.accounts.pool;
-        reconcile(p, &ctx.accounts.vault)?;
+        reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
         require!(!ctx.accounts.registry.paused, CoxError::Paused);
         let b = &mut ctx.accounts.batch;
         require!(
@@ -991,7 +821,7 @@ pub mod cox {
     }
     pub fn finalize(ctx: Context<Finalize>) -> Result<()> {
         let p = &mut ctx.accounts.pool;
-        reconcile(p, &ctx.accounts.vault)?;
+        reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
         require!(!ctx.accounts.registry.paused, CoxError::Paused);
         let previous_publication = &ctx.accounts.publication;
         if p.initialized {
@@ -1114,13 +944,13 @@ pub mod cox {
             snapshot: b.snapshot_digest,
             manifest: ctx.accounts.methodology.digest
         });
-        reconcile(p, &ctx.accounts.vault)?;
+        reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
         Ok(())
     }
     pub fn read_reference(ctx: Context<ReadPool>, class: u8) -> Result<ReferenceRead> {
         let p = &ctx.accounts.pool;
         require!(
-            matches!(p.schema_version, 1 | 2 | 3)
+            matches!(p.schema_version, 1 | 2 | 3 | 4)
                 && p.initialized
                 && (class as usize) < p.classes.len(),
             CoxError::InvalidAccount
@@ -1132,7 +962,7 @@ pub mod cox {
             cutoff: add(
                 p.origin,
                 p.last_batch
-                    .checked_mul(60)
+                    .checked_mul(publication_interval(p))
                     .ok_or(CoxError::ArithmeticOverflow)?,
             )?,
             reference: p.references[class as usize],
@@ -1275,7 +1105,7 @@ pub mod cox {
         })
     }
     pub fn materialize_position(ctx: Context<MaterializePosition>) -> Result<()> {
-        reconcile(&mut ctx.accounts.pool, &ctx.accounts.vault)?;
+        reconcile(&mut ctx.accounts.pool, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
         materialize(&mut ctx.accounts.position, &ctx.accounts.pool)
     }
     pub fn pause(ctx: Context<Admin>) -> Result<()> {
@@ -1324,6 +1154,275 @@ pub struct ManifestConfig {
     pub origin: u64,
     pub bybit: bool,
     pub feed_check_digest: [u8; 32],
+}
+fn initialize_pool_inner(ctx: Context<InitializePool>, pool_id: u64, trading_opens_at: Option<u64>) -> Result<()> {
+        require!(ctx.accounts.methodology.sealed, CoxError::UnsealedManifest);
+        if trading_opens_at.is_some() {
+            read_adaptive_manifest(&ctx.accounts.methodology)?;
+        } else {
+            require!(ctx.accounts.methodology.schema_version == 1, CoxError::InvalidManifest);
+        }
+        require!(ctx.accounts.mint.decimals == 6, CoxError::InvalidCollateral);
+        require!(
+            pool_id == ctx.accounts.registry.next_pool_id,
+            CoxError::Replay
+        );
+        let p = &mut ctx.accounts.pool;
+        p.schema_version = if trading_opens_at.is_some() { 4 } else { 1 };
+        p.trading_opens_at = trading_opens_at.unwrap_or(0);
+        p.test_collateral_mint = None;
+        p.bump = ctx.bumps.pool;
+        p.pool_id = pool_id;
+        p.registry = ctx.accounts.registry.key();
+        p.methodology = ctx.accounts.methodology.key();
+        p.collateral_mint = ctx.accounts.mint.key();
+        p.vault = ctx.accounts.vault.key();
+        p.origin = ctx.accounts.methodology.origin;
+        let n = ctx.accounts.methodology.roster.len();
+        p.classes = vec![Class::default(); n + 1];
+        p.benchmark = 100 * math::SCALE;
+        p.references = vec![100 * math::SCALE; n + 1];
+        ctx.accounts.registry.next_pool_id = add(ctx.accounts.registry.next_pool_id, 1)?;
+        reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
+        Ok(())
+
+}
+fn publish_inner(
+    ctx: Context<Publish>, batch_id: u64, sequence: u64, predecessor: [u8; 32],
+    prices: Vec<PriceWire>, snapshot: [u8; 32], archive_time: u64,
+    supplied_benchmark: Option<i128>,
+) -> Result<()> {
+        let p = &mut ctx.accounts.pool;
+        reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
+        require!(p.schema_version != 3, CoxError::PoolRetired);
+        require!(!ctx.accounts.registry.paused, CoxError::Paused);
+        require!(p.stage.is_none(), CoxError::BatchBusy);
+        let previous_batch = &ctx.accounts.batch;
+        if p.initialized {
+            require!(
+                matches!(previous_batch.schema_version, 2 | 3)
+                    && previous_batch.pool == p.key()
+                    && previous_batch.phase == 2
+                    && previous_batch.batch_id == p.last_batch
+                    && previous_batch.sequence == p.sequence,
+                CoxError::InvalidAccount
+            );
+        } else {
+            require!(previous_batch.schema_version == 0, CoxError::InvalidAccount);
+        }
+        let t = now()?;
+        let cutoff = add(
+            p.origin,
+            batch_id
+                .checked_mul(publication_interval(p))
+                .ok_or(CoxError::ArithmeticOverflow)?,
+        )?;
+        require!(t >= cutoff, CoxError::TooEarly);
+        let preparation = p.schema_version == 4 && !p.initialized && t < p.trading_opens_at;
+        require!(preparation || t <= add(cutoff, if p.schema_version == 4 { 5 } else { 55 })?, CoxError::CommitDeadlinePassed);
+        require!(
+            archive_time >= cutoff && archive_time <= t && archive_time <= add(cutoff, 30)?
+                && (p.schema_version != 4 || archive_time == cutoff),
+            CoxError::ArchiveDeadlinePassed
+        );
+        require!(
+            ctx.accounts.methodology.activation_batch <= batch_id,
+            CoxError::UnsealedManifest
+        );
+        if p.initialized {
+            require!(
+                batch_id > p.last_batch
+                    && sequence == add(p.sequence, 1)?
+                    && predecessor == p.state_digest,
+                CoxError::WrongPredecessor
+            );
+        } else {
+            require!(
+                batch_id == 0 && sequence == 0 && predecessor == [0; 32],
+                CoxError::InvalidOrigin
+            );
+        }
+        let r = &mut ctx.accounts.registry;
+        if let Some(next) = r.pending_runtime {
+            if batch_id >= r.runtime_effective_batch {
+                r.runtime = next;
+                r.pending_runtime = None;
+            }
+        }
+        require_keys_eq!(
+            r.runtime,
+            ctx.accounts.runtime.key(),
+            CoxError::Unauthorized
+        );
+        let m = &ctx.accounts.methodology;
+        require!(prices.len() == m.roster.len(), CoxError::InvalidRoster);
+        if let Some(benchmark) = supplied_benchmark {
+            require!(m.schema_version == 2, CoxError::InvalidManifest);
+            if !p.initialized {
+                let manifest = read_adaptive_manifest(m)?;
+                require!(prices.iter().map(|price| price.price_e8).eq(manifest.config.origin_prices.iter().copied()), CoxError::InvalidPrice);
+            }
+            let encoded = adaptive_snapshot_bytes(cutoff, benchmark, &m.roster, &prices)?;
+            require!(math::artifact_digest(&encoded) == snapshot, CoxError::InvalidSnapshotDigest);
+        } else {
+        let full = prices
+            .iter()
+            .zip(&m.roster)
+            .map(|(w, i)| {
+                let id = IDS[*i as usize];
+                require!(
+                    !(w.venue == 1 && matches!(id, "TRX" | "JUP"))
+                        && !(w.venue == 2 && (!m.bybit || matches!(id, "ZEC" | "TAO"))),
+                    CoxError::InvalidVenueStep
+                );
+                Ok(math::Price {
+                    asset_id: id.into(),
+                    venue: w.venue,
+                    step: w.step,
+                    candle_start: w.candle_start,
+                    price_e8: w.price_e8,
+                    trade_age_minutes: w.trade_age_minutes,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let roster = m
+            .roster
+            .iter()
+            .map(|i| IDS[*i as usize].to_string())
+            .collect::<Vec<_>>();
+        let computed = math::artifact_digest(
+            &math::snapshot_bytes(cutoff, &full, &roster)
+                .map_err(|_| error!(CoxError::InvalidPrice))?,
+        );
+        require!(snapshot == computed, CoxError::InvalidSnapshotDigest);
+        }
+        let current = prices.iter().map(|x| x.price_e8).collect::<Vec<_>>();
+        let (benchmark, references, fixed, transfer_residual) = if p.initialized {
+            let reference = if let Some(benchmark) = supplied_benchmark {
+                adaptive_reference(p, &current, benchmark)?
+            } else {
+                mm(math::reference(&p.last_prices, &current, &p.origin_prices, p.benchmark))?
+            };
+            let revaluation = mm(math::revalue(&to_math(&p.classes), &reference.h))?;
+            let mut references = reference.relative;
+            references.push(100 * math::SCALE);
+            (
+                reference.benchmark,
+                references,
+                from_math(&revaluation.classes),
+                revaluation.residual,
+            )
+        } else {
+            require!(supplied_benchmark.is_none_or(|v| v == 100 * math::SCALE), CoxError::InvalidPrice);
+            (
+                100 * math::SCALE,
+                vec![100 * math::SCALE; prices.len() + 1],
+                p.classes.clone(),
+                0,
+            )
+        };
+        let b = &mut ctx.accounts.batch;
+        b.schema_version = if p.schema_version >= 2 { 3 } else { 2 };
+        b.bump = ctx.bumps.batch;
+        b.pool = p.key();
+        b.batch_id = batch_id;
+        b.sequence = sequence;
+        b.cutoff = cutoff;
+        b.predecessor_sequence = p.sequence;
+        b.predecessor_digest = p.state_digest;
+        b.snapshot_digest = snapshot;
+        b.prices = prices;
+        b.benchmark = benchmark;
+        b.references = references;
+        b.fixed = fixed;
+        let n = p.classes.len();
+        b.burns = vec![0; n];
+        b.mints = vec![0; n];
+        b.incoming = vec![0; n];
+        b.blocked = vec![false; n];
+        b.accepted_deposits = 0;
+        b.new_payable = 0;
+        b.fees = 0;
+        b.executed = 0;
+        b.rejected = 0;
+        b.phase = 0;
+        b.safety_changed = false;
+        b.transfer_residual = transfer_residual;
+        b.closed_queue_end = p.next_request_nonce;
+        b.queue_start = p.queue_start;
+        b.cursor = p.queue_start;
+        b.next_queue_start = p.next_request_nonce;
+        b.receipt_root = mm(math::digest(
+            if b.schema_version == 3 {
+                "COX/RECEIPTS/V2"
+            } else {
+                "COX/RECEIPTS/V1"
+            },
+            &[],
+        ))?;
+        b.staged_root = mm(math::digest("COX/STAGE/V1", &[]))?;
+        b.accepted_at = t;
+        r.max_accepted_batch = r.max_accepted_batch.max(batch_id);
+        r.active_batches = add(r.active_batches, 1)?;
+        emit!(BatchAccepted {
+            pool: p.key(),
+            batch: batch_id,
+            snapshot
+        });
+        p.stage = Some(b.key());
+        p.stage_batch = batch_id;
+        p.stage_closed_end = b.closed_queue_end;
+        require!(
+            b.closed_queue_end - b.queue_start <= u32::MAX as u64,
+            CoxError::CapacityExceeded
+        );
+        Ok(())
+
+}
+fn publication_interval(pool: &Pool) -> u64 {
+    if pool.schema_version == 4 { 1 } else { 60 }
+}
+pub fn adaptive_snapshot_bytes(
+    timestamp: u64, benchmark: i128, roster: &[u8], prices: &[PriceWire],
+) -> Result<Vec<u8>> {
+    require!(benchmark > 0 && roster.len() == prices.len(), CoxError::InvalidPrice);
+    require!((2..=30).contains(&roster.len()) && roster.iter().all(|id| (*id as usize) < IDS.len())
+        && roster.windows(2).all(|pair| pair[0] < pair[1]), CoxError::InvalidRoster);
+    let mut bytes = Vec::new();
+    "COX/ADAPTIVE-SNAPSHOT/V1".to_string().serialize(&mut bytes)?;
+    timestamp.serialize(&mut bytes)?;
+    benchmark.serialize(&mut bytes)?;
+    roster.serialize(&mut bytes)?;
+    for price in prices {
+        require!(price.price_e8 > 0 && price.venue == 3 && price.step == 0
+            && price.candle_start == timestamp && price.trade_age_minutes == 0, CoxError::InvalidPrice);
+        price.price_e8.serialize(&mut bytes)?;
+    }
+    Ok(bytes)
+}
+fn adaptive_reference(pool: &Pool, current: &[u64], benchmark: i128) -> Result<math::Reference> {
+    require!(benchmark > 0 && pool.benchmark > 0 && current.len() == pool.last_prices.len()
+        && current.len() == pool.origin_prices.len(), CoxError::InvalidPrice);
+    let scaled = |value: i128, scale: i128, divisor: i128| -> Result<i128> {
+        let product = value.checked_mul(scale).ok_or(CoxError::ArithmeticOverflow)?;
+        mm(math::rounded_div(product, divisor))
+    };
+    let benchmark_gross = scaled(benchmark, math::SCALE, pool.benchmark)?;
+    let origin_benchmark = scaled(benchmark, math::SCALE, 100 * math::SCALE)?;
+    require!(benchmark_gross > 0 && origin_benchmark > 0, CoxError::InvalidPrice);
+    let mut gross = Vec::with_capacity(current.len());
+    let mut relative = Vec::with_capacity(current.len());
+    let mut h = Vec::with_capacity(current.len() + 1);
+    for ((price, previous), origin) in current.iter().zip(&pool.last_prices).zip(&pool.origin_prices) {
+        require!(*price > 0 && *previous > 0 && *origin > 0, CoxError::InvalidPrice);
+        let asset_gross = scaled(*price as i128, math::SCALE, *previous as i128)?;
+        gross.push(asset_gross);
+        h.push(scaled(asset_gross, math::SCALE, benchmark_gross)?);
+        let since_origin = scaled(*price as i128, math::SCALE, *origin as i128)?;
+        relative.push(scaled(100 * math::SCALE, since_origin, origin_benchmark)?);
+    }
+    h.push(math::SCALE);
+    Ok(math::Reference { gross, benchmark_gross, benchmark, relative, h })
 }
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default)]
 pub struct Class {
@@ -1437,6 +1536,8 @@ pub struct Pool {
     pub fee_pending_cap: u64,
     pub fee_pending_cutoff: u64,
     pub fee_initial_scheduled: bool,
+    pub trading_opens_at: u64,
+    pub test_collateral_mint: Option<Pubkey>,
 }
 #[account]
 pub struct Position {
@@ -1486,6 +1587,7 @@ pub struct Request {
     pub fee_cap: u64,
     pub gross: u64,
     pub fee: u64,
+    pub refunded_amount: u64,
 }
 #[account]
 pub struct Batch {
@@ -1585,6 +1687,23 @@ pub struct InitializePool<'info> {
     pub vault: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
+    pub test_vault: Option<Account<'info, TokenAccount>>,
+}
+#[derive(Accounts)]
+pub struct InitializeDevnetCollateral<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    #[account(seeds=[b"registry"],bump=registry.bump,has_one=admin)]
+    pub registry: Account<'info, Registry>,
+    #[account(mut,seeds=[b"pool",pool.pool_id.to_le_bytes().as_ref()],bump=pool.bump,has_one=registry,has_one=vault)]
+    pub pool: Account<'info, Pool>,
+    pub test_mint: Account<'info, Mint>,
+    #[account(token::authority=pool,token::mint=pool.collateral_mint)]
+    pub vault: Account<'info, TokenAccount>,
+    #[account(init,payer=admin,seeds=[b"test-vault",pool.key().as_ref()],bump,token::mint=test_mint,token::authority=pool)]
+    pub test_vault: Account<'info, TokenAccount>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
 }
 #[derive(Accounts)]
 pub struct Submit<'info> {
@@ -1593,17 +1712,19 @@ pub struct Submit<'info> {
     #[account(seeds=[b"registry"],bump=registry.bump)]
     pub registry: Account<'info, Registry>,
     #[account(mut,seeds=[b"pool",pool.pool_id.to_le_bytes().as_ref()],bump=pool.bump,has_one=registry,has_one=vault)]
-    pub pool: Account<'info, Pool>,
+    pub pool: Box<Account<'info, Pool>>,
     #[account(init_if_needed,payer=owner,space=4096,seeds=[b"position",pool.key().as_ref(),owner.key().as_ref()],bump)]
     pub position: Account<'info, Position>,
     #[account(init,payer=owner,space=320,seeds=[b"request",pool.key().as_ref(),pool.next_request_nonce.to_le_bytes().as_ref()],bump)]
     pub request: Account<'info, Request>,
     #[account(mut,token::authority=pool,token::mint=pool.collateral_mint)]
     pub vault: Account<'info, TokenAccount>,
-    #[account(mut,token::authority=owner,token::mint=pool.collateral_mint)]
+    #[account(mut,token::authority=owner,constraint=user_token.mint==pool.collateral_mint || pool.test_collateral_mint==Some(user_token.mint) @ CoxError::InvalidCollateral)]
     pub user_token: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
+    #[account(mut)]
+    pub test_vault: Option<Account<'info, TokenAccount>>,
 }
 #[derive(Accounts)]
 pub struct MigratePool<'info> {
@@ -1614,6 +1735,7 @@ pub struct MigratePool<'info> {
     pub pool: UncheckedAccount<'info>,
     #[account(token::authority=pool)]
     pub vault: Account<'info, TokenAccount>,
+    pub test_vault: Option<Account<'info, TokenAccount>>,
 }
 #[account]
 pub struct Retirement {
@@ -1637,6 +1759,7 @@ pub struct BeginRetirement<'info> {
     #[account(token::authority=pool,token::mint=pool.collateral_mint)]
     pub vault: Account<'info, TokenAccount>,
     pub system_program: Program<'info, System>,
+    pub test_vault: Option<Account<'info, TokenAccount>>,
 }
 #[derive(Accounts)]
 pub struct RetirePosition<'info> {
@@ -1648,6 +1771,7 @@ pub struct RetirePosition<'info> {
     pub position: Account<'info, Position>,
     #[account(token::authority=pool,token::mint=pool.collateral_mint)]
     pub vault: Account<'info, TokenAccount>,
+    pub test_vault: Option<Account<'info, TokenAccount>>,
 }
 #[derive(Accounts)]
 pub struct RetirementPayout<'info> {
@@ -1660,6 +1784,8 @@ pub struct RetirementPayout<'info> {
     #[account(mut,token::authority=position.owner,token::mint=pool.collateral_mint)]
     pub user_token: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
+    #[account(mut)]
+    pub test_vault: Option<Account<'info, TokenAccount>>,
 }
 #[derive(Accounts)]
 pub struct ManageFees<'info> {
@@ -1680,9 +1806,11 @@ pub struct WithdrawFees<'info> {
     pub pool: Account<'info, Pool>,
     #[account(mut,token::authority=pool,token::mint=pool.collateral_mint)]
     pub vault: Account<'info, TokenAccount>,
-    #[account(mut,token::authority=admin,token::mint=pool.collateral_mint)]
+    #[account(mut,token::authority=admin,constraint=treasury_token.mint==pool.collateral_mint || pool.test_collateral_mint==Some(treasury_token.mint) @ CoxError::InvalidCollateral)]
     pub treasury_token: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
+    #[account(mut)]
+    pub test_vault: Option<Account<'info, TokenAccount>>,
 }
 #[derive(Accounts)]
 pub struct ManageRequest<'info> {
@@ -1697,6 +1825,7 @@ pub struct ManageRequest<'info> {
     pub position: Account<'info, Position>,
     #[account(token::authority=pool,token::mint=pool.collateral_mint)]
     pub vault: Account<'info, TokenAccount>,
+    pub test_vault: Option<Account<'info, TokenAccount>>,
 }
 #[derive(Accounts)]
 pub struct Refund<'info> {
@@ -1704,16 +1833,18 @@ pub struct Refund<'info> {
     #[account(seeds=[b"registry"],bump=registry.bump)]
     pub registry: Account<'info, Registry>,
     #[account(mut,seeds=[b"pool",pool.pool_id.to_le_bytes().as_ref()],bump=pool.bump,has_one=registry,has_one=vault)]
-    pub pool: Account<'info, Pool>,
+    pub pool: Box<Account<'info, Pool>>,
     #[account(mut,seeds=[b"request",pool.key().as_ref(),request.nonce.to_le_bytes().as_ref()],bump=request.bump,has_one=pool,has_one=owner)]
     pub request: Account<'info, Request>,
     #[account(mut,seeds=[b"position",pool.key().as_ref(),owner.key().as_ref()],bump=position.bump,has_one=pool,has_one=owner)]
     pub position: Account<'info, Position>,
     #[account(mut,token::authority=pool,token::mint=pool.collateral_mint)]
     pub vault: Account<'info, TokenAccount>,
-    #[account(mut,token::authority=owner,token::mint=pool.collateral_mint)]
+    #[account(mut,token::authority=owner,constraint=user_token.mint==pool.collateral_mint || pool.test_collateral_mint==Some(user_token.mint) @ CoxError::InvalidCollateral)]
     pub user_token: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
+    #[account(mut)]
+    pub test_vault: Option<Account<'info, TokenAccount>>,
 }
 #[derive(Accounts)]
 pub struct Withdraw<'info> {
@@ -1726,9 +1857,11 @@ pub struct Withdraw<'info> {
     pub position: Account<'info, Position>,
     #[account(mut,token::authority=pool,token::mint=pool.collateral_mint)]
     pub vault: Account<'info, TokenAccount>,
-    #[account(mut,token::authority=owner,token::mint=pool.collateral_mint)]
+    #[account(mut,token::authority=owner,constraint=user_token.mint==pool.collateral_mint || pool.test_collateral_mint==Some(user_token.mint) @ CoxError::InvalidCollateral)]
     pub user_token: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
+    #[account(mut)]
+    pub test_vault: Option<Account<'info, TokenAccount>>,
 }
 #[derive(Accounts)]
 #[instruction(batch_id:u64)]
@@ -1747,6 +1880,7 @@ pub struct Publish<'info> {
     #[account(token::authority=pool,token::mint=pool.collateral_mint)]
     pub vault: Account<'info, TokenAccount>,
     pub system_program: Program<'info, System>,
+    pub test_vault: Option<Account<'info, TokenAccount>>,
 }
 #[derive(Accounts)]
 pub struct Process<'info> {
@@ -1762,6 +1896,7 @@ pub struct Process<'info> {
     pub position: Box<Account<'info, Position>>,
     #[account(token::authority=pool,token::mint=pool.collateral_mint)]
     pub vault: Account<'info, TokenAccount>,
+    pub test_vault: Option<Account<'info, TokenAccount>>,
 }
 #[derive(Accounts)]
 pub struct BatchOnly<'info> {
@@ -1773,6 +1908,7 @@ pub struct BatchOnly<'info> {
     pub batch: Account<'info, Batch>,
     #[account(token::authority=pool,token::mint=pool.collateral_mint)]
     pub vault: Account<'info, TokenAccount>,
+    pub test_vault: Option<Account<'info, TokenAccount>>,
 }
 #[derive(Accounts)]
 pub struct Finalize<'info> {
@@ -1791,6 +1927,7 @@ pub struct Finalize<'info> {
     #[account(token::authority=pool,token::mint=pool.collateral_mint)]
     pub vault: Account<'info, TokenAccount>,
     pub system_program: Program<'info, System>,
+    pub test_vault: Option<Account<'info, TokenAccount>>,
 }
 #[derive(Accounts)]
 pub struct MaterializePosition<'info> {
@@ -1800,6 +1937,7 @@ pub struct MaterializePosition<'info> {
     pub position: Account<'info, Position>,
     #[account(token::authority=pool,token::mint=pool.collateral_mint)]
     pub vault: Account<'info, TokenAccount>,
+    pub test_vault: Option<Account<'info, TokenAccount>>,
 }
 #[derive(Accounts)]
 pub struct Admin<'info> {
@@ -1948,11 +2086,11 @@ fn from_math(c: &[math::Class]) -> Vec<Class> {
         .collect()
 }
 fn halted(p: &Pool, t: u64) -> Result<bool> {
-    Ok(p.initialized
+    Ok(p.schema_version != 4 && p.initialized
         && t.saturating_sub(add(
             p.origin,
             p.last_batch
-                .checked_mul(60)
+                .checked_mul(publication_interval(p))
                 .ok_or(CoxError::ArithmeticOverflow)?,
         )?) >= 3600)
 }
@@ -1967,8 +2105,64 @@ fn fee_terms(r: &Request) -> math::FeeTerms {
         }
     }
 }
-fn reconcile(p: &mut Pool, v: &TokenAccount) -> Result<()> {
-    require!(matches!(p.schema_version, 1 | 2 | 3), CoxError::InvalidAccount);
+fn refund_inner(ctx: Context<Refund>, amount: Option<u64>) -> Result<()> {
+    let p = &mut ctx.accounts.pool;
+    reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
+    materialize(&mut ctx.accounts.position, p)?;
+    let r = &mut ctx.accounts.request;
+    refresh_request(r, p);
+    require!(r.operation == 0 && matches!(r.status, 2 | 3 | 4 | 5 | 7), CoxError::NotRefundable);
+    let remaining = sub(r.amount, r.refunded_amount)?;
+    let value = amount.unwrap_or(remaining);
+    require!(value > 0 && value <= remaining && ctx.accounts.position.refundable >= value, CoxError::NotRefundable);
+    ctx.accounts.position.refundable = sub(ctx.accounts.position.refundable, value)?;
+    p.pending = sub(p.pending, value)?;
+    r.refunded_amount = add(r.refunded_amount, value)?;
+    if r.refunded_amount == r.amount { r.status = 6; }
+    transfer_out_collateral(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref(), &ctx.accounts.user_token, &ctx.accounts.token_program, value)?;
+    emit!(DepositRefunded { pool: p.key(), request: r.key(), amount: value });
+    ctx.accounts.vault.reload()?;
+    if let Some(vault) = ctx.accounts.test_vault.as_mut() { vault.reload()?; }
+    reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())
+}
+fn selected_vault<'a, 'info>(p: &Pool, vault: &'a Account<'info, TokenAccount>, test: Option<&'a Account<'info, TokenAccount>>, mint: Pubkey) -> Result<&'a Account<'info, TokenAccount>> {
+    if mint == p.collateral_mint { return Ok(vault); }
+    require!(cfg!(feature = "devnet-collateral") && p.schema_version == 4 && p.test_collateral_mint == Some(mint), CoxError::InvalidCollateral);
+    test.ok_or_else(|| error!(CoxError::MissingCollateralVault))
+}
+fn transfer_out_collateral<'info>(p: &Account<'info, Pool>, vault: &Account<'info, TokenAccount>, test: Option<&Account<'info, TokenAccount>>, destination: &Account<'info, TokenAccount>, program: &Program<'info, Token>, amount: u64) -> Result<()> {
+    let selected = selected_vault(p, vault, test, destination.mint)?;
+    require!(selected.amount >= amount, CoxError::CollateralLiquidity);
+    transfer_out(p, selected, destination, program, amount)
+}
+fn vault_total(p: &Pool, v: &Account<TokenAccount>, test: Option<&Account<TokenAccount>>) -> Result<u64> {
+    let pool = Pubkey::create_program_address(&[b"pool", &p.pool_id.to_le_bytes(), &[p.bump]], &crate::ID)
+        .map_err(|_| error!(CoxError::InvalidAccount))?;
+    require_keys_eq!(v.key(), p.vault, CoxError::InvalidCollateral);
+    validate_collateral_vault(v, pool, p.collateral_mint)?;
+    match p.test_collateral_mint {
+        None => { require!(test.is_none(), CoxError::InvalidCollateral); Ok(v.amount) },
+        Some(mint) => {
+            require!(cfg!(feature = "devnet-collateral"), CoxError::DualCollateralDisabled);
+            require!(p.schema_version == 4 && mint != p.collateral_mint, CoxError::InvalidCollateral);
+            let test = test.ok_or(CoxError::MissingCollateralVault)?;
+            require_keys_eq!(test.key(), Pubkey::find_program_address(&[b"test-vault", pool.as_ref()], &crate::ID).0, CoxError::InvalidCollateral);
+            require!(test.key() != v.key(), CoxError::InvalidCollateral);
+            validate_collateral_vault(test, pool, mint)?;
+            add(v.amount, test.amount)
+        }
+    }
+}
+fn validate_collateral_vault(v: &Account<TokenAccount>, authority: Pubkey, mint: Pubkey) -> Result<()> {
+    require_keys_eq!(v.owner, authority, CoxError::InvalidCollateral);
+    require_keys_eq!(v.mint, mint, CoxError::InvalidCollateral);
+    require!(v.state == anchor_spl::token::spl_token::state::AccountState::Initialized
+        && v.delegate == COption::None && v.close_authority == COption::None && v.is_native == COption::None,
+        CoxError::InvalidCollateral);
+    Ok(())
+}
+fn reconcile(p: &mut Pool, v: &Account<TokenAccount>, test: Option<&Account<TokenAccount>>) -> Result<()> {
+    require!(matches!(p.schema_version, 1 | 2 | 3 | 4), CoxError::InvalidAccount);
     require!(
         p.schema_version >= 2 || (p.fees == 0 && p.fee_version == 0 && !p.fee_pending),
         CoxError::InvalidAccount
@@ -1977,8 +2171,9 @@ fn reconcile(p: &mut Pool, v: &TokenAccount) -> Result<()> {
         add(add(p.active, p.pending)?, add(p.payable, p.residual)?)?,
         p.fees,
     )?;
-    require!(v.amount >= expected, CoxError::VaultMismatch);
-    p.residual = add(p.residual, v.amount - expected)?;
+    let actual = vault_total(p, v, test)?;
+    require!(actual >= expected, CoxError::VaultMismatch);
+    p.residual = add(p.residual, actual - expected)?;
     require!(p.active == total(&p.classes)?, CoxError::VaultMismatch);
     Ok(())
 }
@@ -2070,10 +2265,11 @@ fn submit(ctx: Context<Submit>, submission: Submission) -> Result<()> {
         expiry,
     } = submission;
     let p = &mut ctx.accounts.pool;
-    reconcile(p, &ctx.accounts.vault)?;
+    reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
     let t = now()?;
     require!(p.schema_version != 3, CoxError::PoolRetired);
     require!(p.initialized, CoxError::InvalidOrigin);
+    require!(p.schema_version != 4 || t >= p.trading_opens_at, CoxError::TooEarly);
     require!(!ctx.accounts.registry.paused, CoxError::Paused);
     require!(!halted(p, t)?, CoxError::Halted);
     let n = p.classes.len();
@@ -2086,7 +2282,7 @@ fn submit(ctx: Context<Submit>, submission: Submission) -> Result<()> {
         CoxError::InvalidRequest
     );
     let target = add(
-        t.checked_sub(p.origin).ok_or(CoxError::InvalidOrigin)? / 60,
+        t.checked_sub(p.origin).ok_or(CoxError::InvalidOrigin)? / publication_interval(p),
         1,
     )?
     .max(add(p.last_batch, 1)?);
@@ -2116,7 +2312,7 @@ fn submit(ctx: Context<Submit>, submission: Submission) -> Result<()> {
                 ctx.accounts.token_program.to_account_info(),
                 Transfer {
                     from: ctx.accounts.user_token.to_account_info(),
-                    to: ctx.accounts.vault.to_account_info(),
+                    to: selected_vault(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref(), ctx.accounts.user_token.mint)?.to_account_info(),
                     authority: ctx.accounts.owner.to_account_info(),
                 },
             ),
@@ -2135,6 +2331,7 @@ fn submit(ctx: Context<Submit>, submission: Submission) -> Result<()> {
     }
     let r = &mut ctx.accounts.request;
     r.schema_version = p.schema_version;
+    r.refunded_amount = 0;
     r.bump = ctx.bumps.request;
     r.pool = p.key();
     r.owner = ctx.accounts.owner.key();
@@ -2162,12 +2359,13 @@ fn submit(ctx: Context<Submit>, submission: Submission) -> Result<()> {
     });
     p.next_request_nonce = add(p.next_request_nonce, 1)?;
     ctx.accounts.vault.reload()?;
-    reconcile(p, &ctx.accounts.vault)?;
+        if let Some(vault) = ctx.accounts.test_vault.as_mut() { vault.reload()?; }
+    reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
     Ok(())
 }
 fn release_request(ctx: Context<ManageRequest>, expire: bool) -> Result<()> {
     let p = &mut ctx.accounts.pool;
-    reconcile(p, &ctx.accounts.vault)?;
+    reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
     let t = now()?;
     let r = &mut ctx.accounts.request;
     refresh_request(r, p);
@@ -2182,7 +2380,7 @@ fn release_request(ctx: Context<ManageRequest>, expire: bool) -> Result<()> {
             CoxError::CancellationClosed
         );
     }
-    let current = t.saturating_sub(p.origin) / 60;
+    let current = t.saturating_sub(p.origin) / publication_interval(p);
     if expire {
         require!(current > r.expiry_batch, CoxError::InvalidExpiry);
     } else {
@@ -2193,7 +2391,7 @@ fn release_request(ctx: Context<ManageRequest>, expire: bool) -> Result<()> {
         };
         let cutoff = add(
             p.origin,
-            rolled.checked_mul(60).ok_or(CoxError::ArithmeticOverflow)?,
+            rolled.checked_mul(publication_interval(p)).ok_or(CoxError::ArithmeticOverflow)?,
         )?;
         require!(
             p.schema_version == 3 || t < cutoff || halted(p, t)? || ctx.accounts.registry.paused,
@@ -2257,7 +2455,9 @@ pub fn state_bytes(
     manifest: &[u8; 32],
 ) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
-    (if p.schema_version >= 2 {
+    (if p.schema_version == 4 {
+        "COX/STATE/ADAPTIVE/V1"
+    } else if p.schema_version >= 2 {
         "COX/STATE/V2"
     } else {
         "COX/STATE/V1"
@@ -2310,6 +2510,7 @@ pub fn state_bytes(
         86_400u64.serialize(&mut policy)?;
         bytes.extend_from_slice(&math::artifact_digest(&policy));
     }
+    if p.schema_version == 4 { p.trading_opens_at.serialize(&mut bytes)?; p.test_collateral_mint.serialize(&mut bytes)?; }
     Ok(bytes)
 }
 #[error_code]
@@ -2356,6 +2557,10 @@ pub enum CoxError {
     InsufficientFees,
     PoolRetired,
     NotRetired,
+    DualCollateralDisabled,
+    MissingCollateralVault,
+    CollateralLiquidity,
+    DualRetirementUnsupported,
 }
 #[derive(Accounts)]
 pub struct ReadPool<'info> {

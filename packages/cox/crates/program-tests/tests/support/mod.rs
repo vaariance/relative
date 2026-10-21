@@ -183,6 +183,13 @@ impl Harness {
         }
     }
 
+    pub fn create_secondary_collateral(&mut self) -> (Pubkey, Pubkey, Pubkey) {
+        let saved = (self.mint, self.alice_token, self.bob_token);
+        self.create_collateral();
+        let created = (self.mint, self.alice_token, self.bob_token);
+        (self.mint, self.alice_token, self.bob_token) = saved;
+        created
+    }
     fn create_collateral(&mut self) {
         let mint = Keypair::new();
         let alice_token = Keypair::new();

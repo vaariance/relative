@@ -11,10 +11,35 @@ pub struct PoolHarness {
     pub pool: Pubkey,
     pub vault: Pubkey,
     pub roster: Vec<u8>,
+    pub secondary: Option<(Pubkey, Pubkey, Pubkey)>,
 }
 
 impl PoolHarness {
     pub fn new(count: usize) -> Self {
+        Self::new_mode(count, false)
+    }
+    pub fn new_adaptive(count: usize) -> Self {
+        Self::new_mode(count, true)
+    }
+    fn new_mode(count: usize, adaptive: bool) -> Self {
+        Self::new_prepared(count, adaptive, ORIGIN, ORIGIN)
+    }
+    pub fn new_adaptive_scheduled(count: usize, opens_at: u64, prepared_at: u64) -> Self {
+        Self::new_prepared(count, true, opens_at, prepared_at)
+    }
+    pub fn new_adaptive_dual(count: usize) -> Self {
+        Self::new_prepared_collateral(count, true, ORIGIN, ORIGIN, true)
+    }
+    fn new_prepared(count: usize, adaptive: bool, opens_at: u64, prepared_at: u64) -> Self {
+        Self::new_prepared_collateral(count, adaptive, opens_at, prepared_at, false)
+    }
+    fn new_prepared_collateral(
+        count: usize,
+        adaptive: bool,
+        opens_at: u64,
+        prepared_at: u64,
+        dual: bool,
+    ) -> Self {
         let mut h = Harness::new();
         let registry = pda(&[b"registry"]);
         let admin = h.admin.insecure_clone();
@@ -43,7 +68,22 @@ impl PoolHarness {
             bybit: false,
             feed_check_digest: [42; 32],
         };
-        let canonical = cox::canonical_manifest(&config, runtime).unwrap();
+        let adaptive_config = cox::AdaptiveManifestConfig {
+            version: "relative-adaptive-v1".into(),
+            roster: config.roster.clone(),
+            pyth_feed_ids: config.roster.iter().map(|id| u32::from(*id) + 1).collect(),
+            origin: config.origin,
+            origin_prices: vec![100_000_000; count],
+            universe_digest: [43; 32],
+            feed_check_digest: config.feed_check_digest,
+            max_price_age_ms: 5_000,
+            max_feed_age_ms: 60_000,
+        };
+        let canonical = if adaptive {
+            cox::canonical_adaptive_manifest(&adaptive_config, runtime).unwrap()
+        } else {
+            cox::canonical_manifest(&config, runtime).unwrap()
+        };
         let digest = cox_math::artifact_digest(&canonical);
         let methodology = pda(&[b"methodology", &digest]);
         h.send(
@@ -82,38 +122,54 @@ impl PoolHarness {
                 true,
             );
         }
-        h.send(
-            "seal_methodology",
-            &[Harness::instruction(
-                a::ManageMethodology {
-                    admin: admin.pubkey(),
-                    registry,
-                    methodology,
+        let seal_accounts = a::ManageMethodology {
+            admin: admin.pubkey(),
+            registry,
+            methodology,
+        };
+        let seal = if adaptive {
+            Harness::instruction(
+                seal_accounts,
+                i::SealAdaptiveMethodology {
+                    config: adaptive_config,
                 },
+            )
+        } else {
+            Harness::instruction(
+                seal_accounts,
                 i::SealMethodology {
                     config: config.clone(),
                 },
-            )],
-            &[&admin],
-            true,
-        );
+            )
+        };
+        h.send("seal_methodology", &[seal], &[&admin], true);
         let pool = pda(&[b"pool", &0u64.to_le_bytes()]);
         let vault = pda(&[b"vault", pool.as_ref()]);
+        let initialize_accounts = a::InitializePool {
+            test_vault: None,
+            admin: admin.pubkey(),
+            registry,
+            methodology,
+            pool,
+            mint: h.mint,
+            vault,
+            token_program: token_program(),
+            system_program: system_program::ID,
+        };
+        let initialize_instruction = if adaptive {
+            Harness::instruction(
+                initialize_accounts,
+                i::InitializeAdaptivePool {
+                    pool_id: 0,
+                    trading_opens_at: opens_at,
+                },
+            )
+        } else {
+            Harness::instruction(initialize_accounts, i::InitializePool { pool_id: 0 })
+        };
         h.send(
             "initialize_pool",
-            &[Harness::instruction(
-                a::InitializePool {
-                    admin: admin.pubkey(),
-                    registry,
-                    methodology,
-                    pool,
-                    mint: h.mint,
-                    vault,
-                    token_program: token_program(),
-                    system_program: system_program::ID,
-                },
-                i::InitializePool { pool_id: 0 },
-            )],
+            &[initialize_instruction],
             &[&admin],
             true,
         );
@@ -124,14 +180,54 @@ impl PoolHarness {
             pool,
             vault,
             roster: config.roster,
+            secondary: None,
         };
-        result.publish(0, vec![100_000_000; count]);
+        if dual {
+            result.configure_secondary(true);
+        }
+        if adaptive {
+            result.h.time(prepared_at);
+            result.publish_adaptive(0, vec![100_000_000; count], 100 * cox_math::SCALE, true);
+        } else {
+            result.publish(0, vec![100_000_000; count]);
+        }
         result.seal_evaluation();
         result.finalize();
         result.assert_vault();
         result
     }
 
+    pub fn configure_secondary(&mut self, success: bool) {
+        let secondary = self.h.create_secondary_collateral();
+        let admin = self.h.admin.insecure_clone();
+        let test_vault = pda(&[b"test-vault", self.pool.as_ref()]);
+        self.h.send(
+            "initialize_devnet_collateral",
+            &[Harness::instruction(
+                a::InitializeDevnetCollateral {
+                    admin: admin.pubkey(),
+                    registry: self.registry,
+                    pool: self.pool,
+                    test_mint: secondary.0,
+                    vault: self.vault,
+                    test_vault,
+                    token_program: token_program(),
+                    system_program: system_program::ID,
+                },
+                i::InitializeDevnetCollateral {},
+            )],
+            &[&admin],
+            success,
+        );
+        if success {
+            self.secondary = Some(secondary);
+        }
+    }
+    pub fn test_vault(&self) -> Option<Pubkey> {
+        self.pool_state()
+            .test_collateral_mint
+            .map(|_| pda(&[b"test-vault", self.pool.as_ref()]))
+    }
     pub fn pool_state(&self) -> Pool {
         self.h.read(self.pool)
     }
@@ -150,7 +246,11 @@ impl PoolHarness {
     pub fn assert_vault(&self) {
         let pool = self.pool_state();
         assert_eq!(
-            self.h.token_balance(self.vault),
+            self.h.token_balance(self.vault)
+                + self
+                    .test_vault()
+                    .map(|key| self.h.token_balance(key))
+                    .unwrap_or(0),
             pool.active + pool.pending + pool.payable + pool.residual + pool.fees
         );
         assert_eq!(
@@ -164,6 +264,7 @@ impl PoolHarness {
             "materialize_position",
             &[Harness::instruction(
                 a::MaterializePosition {
+                    test_vault: self.test_vault(),
                     pool: self.pool,
                     position: self.position(owner),
                     vault: self.vault,
@@ -205,6 +306,7 @@ impl PoolHarness {
 
     pub fn submit_accounts(&self, owner: Pubkey, user_token: Pubkey) -> a::Submit {
         a::Submit {
+            test_vault: self.test_vault(),
             owner,
             registry: self.registry,
             pool: self.pool,
@@ -378,6 +480,7 @@ impl PoolHarness {
             "publish",
             &[Harness::instruction(
                 a::Publish {
+                    test_vault: self.test_vault(),
                     payer: runtime.pubkey(),
                     runtime: runtime.pubkey(),
                     registry: self.registry,
@@ -401,10 +504,77 @@ impl PoolHarness {
         );
         self.assert_vault();
     }
+    pub fn publish_adaptive(
+        &mut self,
+        batch_id: u64,
+        values: Vec<u64>,
+        benchmark: i128,
+        success: bool,
+    ) {
+        let timestamp = ORIGIN + batch_id;
+        let prices = values
+            .into_iter()
+            .map(|price_e8| PriceWire {
+                price_e8,
+                venue: 3,
+                step: 0,
+                candle_start: timestamp,
+                trade_age_minutes: 0,
+            })
+            .collect::<Vec<_>>();
+        let snapshot = cox_math::artifact_digest(
+            &cox::adaptive_snapshot_bytes(timestamp, benchmark, &self.roster, &prices).unwrap(),
+        );
+        self.try_adaptive_wire(batch_id, prices, benchmark, snapshot, None, success);
+    }
+    pub fn try_adaptive_wire(
+        &mut self,
+        batch_id: u64,
+        prices: Vec<PriceWire>,
+        benchmark: i128,
+        snapshot: [u8; 32],
+        runtime_override: Option<&Keypair>,
+        success: bool,
+    ) {
+        let state = self.pool_state();
+        let runtime = runtime_override
+            .map(|key| key.insecure_clone())
+            .unwrap_or_else(|| self.h.runtime.insecure_clone());
+        let instruction = Harness::instruction(
+            a::Publish {
+                test_vault: self.test_vault(),
+                payer: runtime.pubkey(),
+                runtime: runtime.pubkey(),
+                registry: self.registry,
+                pool: self.pool,
+                methodology: self.methodology,
+                batch: pda(&[b"batch", self.pool.as_ref()]),
+                vault: self.vault,
+                system_program: system_program::ID,
+            },
+            i::PublishAdaptive {
+                batch_id,
+                sequence: if state.initialized {
+                    state.sequence + 1
+                } else {
+                    0
+                },
+                predecessor: state.state_digest,
+                prices,
+                snapshot,
+                archive_time: ORIGIN + batch_id,
+                benchmark,
+            },
+        );
+        self.h
+            .send("publish_adaptive", &[instruction], &[&runtime], success);
+        self.assert_vault();
+    }
     pub fn process_accounts(&self, nonce: u64) -> a::Process {
         let request_key = self.request(nonce);
         let request: Request = self.h.read(request_key);
         a::Process {
+            test_vault: self.test_vault(),
             registry: self.registry,
             pool: self.pool,
             batch: self.batch(),
@@ -433,6 +603,7 @@ impl PoolHarness {
                 "seal_evaluation",
                 &[Harness::instruction(
                     a::BatchOnly {
+                        test_vault: self.test_vault(),
                         registry: self.registry,
                         pool: self.pool,
                         batch: self.batch(),
@@ -481,6 +652,7 @@ impl PoolHarness {
             "finalize",
             &[Harness::instruction(
                 a::Finalize {
+                    test_vault: self.test_vault(),
                     payer: admin.pubkey(),
                     registry: self.registry,
                     pool: self.pool,
@@ -523,6 +695,7 @@ impl PoolHarness {
             "withdraw",
             &[Harness::instruction(
                 a::Withdraw {
+                    test_vault: self.test_vault(),
                     owner: signer.pubkey(),
                     registry: self.registry,
                     pool: self.pool,
@@ -549,6 +722,7 @@ impl PoolHarness {
             "cancel",
             &[Harness::instruction(
                 a::ManageRequest {
+                    test_vault: self.test_vault(),
                     authority: signer.pubkey(),
                     registry: self.registry,
                     pool: self.pool,
@@ -578,6 +752,7 @@ impl PoolHarness {
             "refund",
             &[Harness::instruction(
                 a::Refund {
+                    test_vault: self.test_vault(),
                     owner: signer.pubkey(),
                     registry: self.registry,
                     pool: self.pool,
