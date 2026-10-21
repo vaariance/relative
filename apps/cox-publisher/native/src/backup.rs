@@ -1,0 +1,746 @@
+use base64::{engine::general_purpose::STANDARD, Engine};
+use reqwest::{Client, StatusCode, Url};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::{
+    collections::BTreeSet,
+    fs::{self, File, OpenOptions},
+    io::{Read, Write},
+    path::{Path, PathBuf},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+use tokio::sync::Mutex;
+
+const MAX_CONFIG_BYTES: u64 = 16_384;
+const MAX_MANIFEST_BYTES: usize = 32 * 1024 * 1024;
+const MAX_DEPTH: usize = 5;
+const MUTABLE: [&str; 5] = [
+    "identity.json",
+    "checkpoint.json",
+    "discovery.json",
+    "prices/latest.json",
+    "prices/active-anchor.json",
+];
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Config {
+    pub schema: String,
+    pub bucket: String,
+    pub prefix: String,
+    pub state_directory: PathBuf,
+    pub markers_directory: PathBuf,
+    pub max_file_bytes: u64,
+    pub max_files: usize,
+    pub max_total_bytes: u64,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Error {
+    Configuration,
+    Storage,
+    UnsafePath,
+    Limit,
+    Mutated,
+    Manifest,
+    Credentials,
+    Network,
+    Checksum,
+    Conflict,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Entry {
+    pub path: String,
+    pub bytes: u64,
+    pub sha256: String,
+    pub crc32c: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Manifest {
+    pub schema: String,
+    pub prefix: String,
+    pub identity_sha256: String,
+    pub entries: Vec<Entry>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemoteMetadata {
+    pub name: String,
+    pub generation: String,
+    pub bytes: u64,
+    pub crc32c: String,
+    pub sha256: String,
+}
+pub enum Created {
+    New(RemoteMetadata),
+    Exists,
+}
+pub struct RemoteObject {
+    pub metadata: RemoteMetadata,
+    pub body: Vec<u8>,
+}
+#[allow(async_fn_in_trait)]
+pub trait Transport {
+    async fn create(&self, object: &str, bytes: &[u8], sha256: &str) -> Result<Created, Error>;
+    async fn get(&self, object: &str, max_bytes: u64) -> Result<RemoteObject, Error>;
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Report {
+    pub manifest_object: String,
+    pub manifest_sha256: String,
+    pub files: usize,
+    pub bytes: u64,
+}
+
+fn digest(bytes: &[u8]) -> String {
+    hex::encode(Sha256::digest(bytes))
+}
+fn valid_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+pub fn crc32c(bytes: &[u8]) -> String {
+    let mut checksum = !0_u32;
+    for byte in bytes {
+        checksum ^= u32::from(*byte);
+        for _ in 0..8 {
+            checksum = (checksum >> 1) ^ (0x82f63b78_u32 & 0_u32.wrapping_sub(checksum & 1));
+        }
+    }
+    STANDARD.encode((!checksum).to_be_bytes())
+}
+fn segments(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 512
+        && value.split('/').all(|segment| {
+            !segment.is_empty()
+                && segment != "."
+                && segment != ".."
+                && segment
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+        })
+}
+impl Config {
+    pub fn read(path: &Path) -> Result<Self, Error> {
+        let bytes = read_regular(path, MAX_CONFIG_BYTES)?;
+        let value: Self = serde_json::from_slice(&bytes).map_err(|_| Error::Configuration)?;
+        value.validate()?;
+        Ok(value)
+    }
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.schema != "relative.backup/v1"
+            || !(3..=222).contains(&self.bucket.len())
+            || !self
+                .bucket
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"._-".contains(&b))
+            || !self.bucket.as_bytes()[0].is_ascii_alphanumeric()
+            || !self.bucket.as_bytes()[self.bucket.len() - 1].is_ascii_alphanumeric()
+            || !segments(&self.prefix)
+            || !self.state_directory.is_absolute()
+            || !self.markers_directory.is_absolute()
+            || self.markers_directory == self.state_directory
+            || self
+                .markers_directory
+                .starts_with(self.state_directory.join("prices"))
+            || self
+                .markers_directory
+                .starts_with(self.state_directory.join("publications"))
+            || self.max_file_bytes == 0
+            || self.max_file_bytes > 16 * 1024 * 1024
+            || self.max_files == 0
+            || self.max_files > 100_000
+            || self.max_total_bytes < self.max_file_bytes
+            || self.max_total_bytes > 64 * 1024 * 1024 * 1024
+        {
+            return Err(Error::Configuration);
+        }
+        Ok(())
+    }
+}
+fn check_components(path: &Path) -> Result<(), Error> {
+    if !path.is_absolute()
+        || path.components().any(|part| {
+            matches!(
+                part,
+                std::path::Component::ParentDir | std::path::Component::CurDir
+            )
+        })
+    {
+        return Err(Error::UnsafePath);
+    }
+    let mut current = PathBuf::new();
+    for part in path.components() {
+        current.push(part.as_os_str());
+        match fs::symlink_metadata(&current) {
+            Ok(info) if info.file_type().is_symlink() => return Err(Error::UnsafePath),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(Error::Storage),
+        }
+    }
+    Ok(())
+}
+fn read_regular(path: &Path, maximum: u64) -> Result<Vec<u8>, Error> {
+    check_components(path)?;
+    let before = fs::symlink_metadata(path).map_err(|_| Error::Storage)?;
+    if !before.is_file() {
+        return Err(Error::UnsafePath);
+    }
+    if before.len() > maximum {
+        return Err(Error::Limit);
+    }
+    let mut file = File::open(path).map_err(|_| Error::Storage)?;
+    let opened = file.metadata().map_err(|_| Error::Storage)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if opened.ino() != before.ino() || opened.dev() != before.dev() {
+            return Err(Error::Mutated);
+        }
+    }
+    if !opened.is_file() || opened.len() != before.len() {
+        return Err(Error::Mutated);
+    }
+    let mut bytes = Vec::with_capacity(opened.len() as usize);
+    (&mut file)
+        .take(maximum + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| Error::Storage)?;
+    let after = fs::symlink_metadata(path).map_err(|_| Error::Mutated)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if after.ino() != before.ino() || after.dev() != before.dev() {
+            return Err(Error::Mutated);
+        }
+    }
+    if after.file_type().is_symlink()
+        || after.len() != before.len()
+        || bytes.len() as u64 != before.len()
+        || after.modified().ok() != before.modified().ok()
+    {
+        return Err(Error::Mutated);
+    }
+    Ok(bytes)
+}
+fn numeric(value: &str) -> bool {
+    !value.is_empty()
+        && (value == "0" || !value.starts_with('0'))
+        && value.bytes().all(|b| b.is_ascii_digit())
+        && value.parse::<u64>().is_ok()
+}
+fn json_number(value: &str) -> bool {
+    value.strip_suffix(".json").is_some_and(numeric)
+}
+fn allowed_file(path: &str) -> bool {
+    if MUTABLE.contains(&path) {
+        return true;
+    }
+    let parts = path.split('/').collect::<Vec<_>>();
+    match parts.as_slice() {
+        ["publications", sequence] => json_number(sequence),
+        ["prices", "anchors", digest] => digest.strip_suffix(".json").is_some_and(valid_digest),
+        ["prices", universe, hour, timestamp] => {
+            valid_digest(universe) && numeric(hour) && json_number(timestamp)
+        }
+        _ => false,
+    }
+}
+fn allowed_directory(path: &str) -> bool {
+    let parts = path.split('/').collect::<Vec<_>>();
+    match parts.as_slice() {
+        ["prices"] | ["publications"] | ["prices", "anchors"] => true,
+        ["prices", universe] => valid_digest(universe),
+        ["prices", universe, hour] => valid_digest(universe) && numeric(hour),
+        _ => false,
+    }
+}
+fn mutable_values(config: &Config) -> Result<Vec<(String, Option<Vec<u8>>)>, Error> {
+    MUTABLE
+        .iter()
+        .map(|path| {
+            let local = config.state_directory.join(path);
+            match fs::symlink_metadata(&local) {
+                Ok(_) => read_regular(&local, config.max_file_bytes)
+                    .map(|value| ((*path).into(), Some(value))),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    Ok(((*path).into(), None))
+                }
+                Err(_) => Err(Error::Storage),
+            }
+        })
+        .collect()
+}
+fn walk(
+    config: &Config,
+    directory: &Path,
+    relative: &str,
+    paths: &mut Vec<String>,
+    seen: &mut usize,
+) -> Result<(), Error> {
+    if relative.split('/').count() > MAX_DEPTH {
+        return Err(Error::Limit);
+    }
+    let mut names = Vec::new();
+    for entry in fs::read_dir(directory).map_err(|_| Error::Storage)? {
+        *seen += 1;
+        if *seen > config.max_files.saturating_mul(8).saturating_add(1000) {
+            return Err(Error::Limit);
+        }
+        let entry = entry.map_err(|_| Error::Storage)?;
+        names.push(
+            entry
+                .file_name()
+                .into_string()
+                .map_err(|_| Error::UnsafePath)?,
+        );
+    }
+    names.sort();
+    for name in names {
+        let path = if relative.is_empty() {
+            name
+        } else {
+            format!("{relative}/{name}")
+        };
+        let local = config.state_directory.join(&path);
+        if allowed_directory(&path) {
+            let info = fs::symlink_metadata(&local).map_err(|_| Error::Storage)?;
+            if !info.is_dir() || info.file_type().is_symlink() {
+                return Err(Error::UnsafePath);
+            }
+            walk(config, &local, &path, paths, seen)?;
+        } else if allowed_file(&path) {
+            paths.push(path);
+            if paths.len() > config.max_files {
+                return Err(Error::Limit);
+            }
+        }
+    }
+    Ok(())
+}
+pub fn capture(config: &Config) -> Result<Manifest, Error> {
+    capture_snapshot(config).map(|(manifest, _)| manifest)
+}
+fn capture_snapshot(
+    config: &Config,
+) -> Result<(Manifest, std::collections::BTreeMap<String, Vec<u8>>), Error> {
+    config.validate()?;
+    check_components(&config.state_directory)?;
+    let pointers = mutable_values(config)?;
+    if pointers != mutable_values(config)? {
+        return Err(Error::Mutated);
+    }
+    let frozen = pointers
+        .into_iter()
+        .filter_map(|(path, bytes)| bytes.map(|bytes| (path, bytes)))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut paths = Vec::new();
+    walk(config, &config.state_directory, "", &mut paths, &mut 0)?;
+    paths.sort();
+    let mut entries = Vec::with_capacity(paths.len());
+    let mut total = 0_u64;
+    paths.retain(|path| !MUTABLE.contains(&path.as_str()));
+    paths.extend(frozen.keys().cloned());
+    paths.sort();
+    for path in paths {
+        let bytes = match frozen.get(&path) {
+            Some(bytes) => bytes.clone(),
+            None => read_regular(&config.state_directory.join(&path), config.max_file_bytes)?,
+        };
+        total = total.checked_add(bytes.len() as u64).ok_or(Error::Limit)?;
+        if total > config.max_total_bytes {
+            return Err(Error::Limit);
+        }
+        entries.push(Entry {
+            path,
+            bytes: bytes.len() as u64,
+            sha256: digest(&bytes),
+            crc32c: crc32c(&bytes),
+        });
+    }
+    let identity_sha256 = entries
+        .iter()
+        .find(|entry| entry.path == "identity.json")
+        .ok_or(Error::Manifest)?
+        .sha256
+        .clone();
+    let manifest = Manifest {
+        schema: "relative.backup-manifest/v1".into(),
+        prefix: config.prefix.clone(),
+        identity_sha256,
+        entries,
+    };
+    validate_manifest(&manifest, config)?;
+    Ok((manifest, frozen))
+}
+fn validate_manifest(manifest: &Manifest, config: &Config) -> Result<(), Error> {
+    if manifest.schema != "relative.backup-manifest/v1"
+        || manifest.prefix != config.prefix
+        || !valid_digest(&manifest.identity_sha256)
+        || manifest.entries.is_empty()
+        || manifest.entries.len() > config.max_files
+    {
+        return Err(Error::Manifest);
+    }
+    let mut paths = BTreeSet::new();
+    let mut previous: Option<&str> = None;
+    let mut total = 0_u64;
+    for entry in &manifest.entries {
+        if !segments(&entry.path)
+            || !allowed_file(&entry.path)
+            || !paths.insert(&entry.path)
+            || previous.is_some_and(|prior| prior >= entry.path.as_str())
+            || !valid_digest(&entry.sha256)
+            || STANDARD
+                .decode(&entry.crc32c)
+                .map_err(|_| Error::Manifest)?
+                .len()
+                != 4
+            || entry.bytes > config.max_file_bytes
+        {
+            return Err(Error::Manifest);
+        }
+        previous = Some(&entry.path);
+        total = total.checked_add(entry.bytes).ok_or(Error::Limit)?;
+    }
+    if total > config.max_total_bytes
+        || !manifest
+            .entries
+            .iter()
+            .any(|entry| entry.path == "identity.json" && entry.sha256 == manifest.identity_sha256)
+    {
+        return Err(Error::Manifest);
+    }
+    if serde_json::to_vec(manifest)
+        .map_err(|_| Error::Manifest)?
+        .len()
+        > MAX_MANIFEST_BYTES
+    {
+        return Err(Error::Limit);
+    }
+    Ok(())
+}
+fn content_object(prefix: &str, sha256: &str) -> String {
+    format!("{prefix}/objects/{sha256}")
+}
+fn check_remote(metadata: &RemoteMetadata, object: &str, bytes: &[u8]) -> Result<(), Error> {
+    if metadata.name != object
+        || !numeric(&metadata.generation)
+        || metadata.generation == "0"
+        || metadata.bytes != bytes.len() as u64
+        || metadata.sha256 != digest(bytes)
+        || metadata.crc32c != crc32c(bytes)
+    {
+        return Err(Error::Checksum);
+    }
+    Ok(())
+}
+async fn ensure<T: Transport>(transport: &T, object: &str, bytes: &[u8]) -> Result<(), Error> {
+    match transport.create(object, bytes, &digest(bytes)).await? {
+        Created::New(metadata) => check_remote(&metadata, object, bytes),
+        Created::Exists => {
+            let prior = transport.get(object, bytes.len() as u64).await?;
+            check_remote(&prior.metadata, object, &prior.body)?;
+            if prior.body != bytes {
+                return Err(Error::Conflict);
+            }
+            Ok(())
+        }
+    }
+}
+pub async fn backup<T: Transport>(config: &Config, transport: &T) -> Result<Report, Error> {
+    let (manifest, frozen) = capture_snapshot(config)?;
+    for entry in &manifest.entries {
+        let bytes = match frozen.get(&entry.path) {
+            Some(bytes) => bytes.clone(),
+            None => read_regular(
+                &config.state_directory.join(&entry.path),
+                config.max_file_bytes,
+            )?,
+        };
+        if bytes.len() as u64 != entry.bytes
+            || digest(&bytes) != entry.sha256
+            || crc32c(&bytes) != entry.crc32c
+        {
+            return Err(Error::Mutated);
+        }
+        ensure(
+            transport,
+            &content_object(&config.prefix, &entry.sha256),
+            &bytes,
+        )
+        .await?;
+    }
+    let bytes = serde_json::to_vec(&manifest).map_err(|_| Error::Manifest)?;
+    let sha256 = digest(&bytes);
+    let object = format!("{}/manifests/{sha256}.json", config.prefix);
+    ensure(transport, &object, &bytes).await?;
+    check_components(&config.markers_directory)?;
+    crate::journal::atomic_write(
+        &config.markers_directory.join(format!("{sha256}.json")),
+        &manifest,
+    )
+    .map_err(|_| Error::Storage)?;
+    Ok(Report {
+        manifest_object: object,
+        manifest_sha256: sha256,
+        files: manifest.entries.len(),
+        bytes: manifest.entries.iter().map(|entry| entry.bytes).sum(),
+    })
+}
+pub async fn restore<T: Transport>(
+    config: &Config,
+    transport: &T,
+    manifest_sha256: &str,
+    destination: &Path,
+) -> Result<Manifest, Error> {
+    config.validate()?;
+    if !valid_digest(manifest_sha256) {
+        return Err(Error::Manifest);
+    }
+    check_components(destination)?;
+    if !destination.is_absolute() || destination.exists() {
+        return Err(Error::UnsafePath);
+    }
+    let object = format!("{}/manifests/{manifest_sha256}.json", config.prefix);
+    let remote = transport.get(&object, MAX_MANIFEST_BYTES as u64).await?;
+    check_remote(&remote.metadata, &object, &remote.body)?;
+    if digest(&remote.body) != manifest_sha256 {
+        return Err(Error::Checksum);
+    }
+    let manifest: Manifest = serde_json::from_slice(&remote.body).map_err(|_| Error::Manifest)?;
+    validate_manifest(&manifest, config)?;
+    fs::create_dir(destination).map_err(|_| Error::Storage)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(destination, fs::Permissions::from_mode(0o700))
+            .map_err(|_| Error::Storage)?;
+    }
+    for entry in &manifest.entries {
+        let object = content_object(&config.prefix, &entry.sha256);
+        let remote = transport.get(&object, config.max_file_bytes).await?;
+        check_remote(&remote.metadata, &object, &remote.body)?;
+        if digest(&remote.body) != entry.sha256
+            || remote.body.len() as u64 != entry.bytes
+            || crc32c(&remote.body) != entry.crc32c
+        {
+            return Err(Error::Checksum);
+        }
+        let local = destination.join(&entry.path);
+        let parent = local.parent().ok_or(Error::UnsafePath)?;
+        fs::create_dir_all(parent).map_err(|_| Error::Storage)?;
+        check_components(&local)?;
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&local).map_err(|_| Error::Storage)?;
+        file.write_all(&remote.body)
+            .and_then(|_| file.sync_all())
+            .map_err(|_| Error::Storage)?;
+    }
+    File::open(destination)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|_| Error::Storage)?;
+    Ok(manifest)
+}
+
+#[derive(Deserialize)]
+struct Token {
+    access_token: String,
+    expires_in: u64,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GcsMetadata {
+    name: String,
+    generation: String,
+    size: String,
+    crc32c: String,
+    metadata: std::collections::BTreeMap<String, String>,
+}
+impl GcsMetadata {
+    fn checked(self) -> Result<RemoteMetadata, Error> {
+        Ok(RemoteMetadata {
+            name: self.name,
+            generation: self.generation,
+            bytes: self.size.parse().map_err(|_| Error::Checksum)?,
+            crc32c: self.crc32c,
+            sha256: self.metadata.get("sha256").ok_or(Error::Checksum)?.clone(),
+        })
+    }
+}
+pub struct Gcs {
+    client: Client,
+    bucket: String,
+    token: Mutex<Option<(String, u64)>>,
+}
+impl Gcs {
+    pub fn new(config: &Config) -> Result<Self, Error> {
+        config.validate()?;
+        Ok(Self {
+            client: Client::builder()
+                .timeout(Duration::from_secs(30))
+                .connect_timeout(Duration::from_secs(3))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .map_err(|_| Error::Network)?,
+            bucket: config.bucket.clone(),
+            token: Mutex::new(None),
+        })
+    }
+    async fn token(&self) -> Result<String, Error> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| Error::Credentials)?
+            .as_secs();
+        let mut cached = self.token.lock().await;
+        if let Some((token, expiry)) = &*cached {
+            if *expiry > now + 60 {
+                return Ok(token.clone());
+            }
+        }
+        let response = self.client.get("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token")
+            .header("Metadata-Flavor", "Google").send().await.map_err(|_| Error::Credentials)?;
+        if !response.status().is_success()
+            || response
+                .headers()
+                .get("Metadata-Flavor")
+                .and_then(|value| value.to_str().ok())
+                != Some("Google")
+        {
+            return Err(Error::Credentials);
+        }
+        let token: Token = serde_json::from_slice(&bounded(response, MAX_CONFIG_BYTES).await?)
+            .map_err(|_| Error::Credentials)?;
+        if token.access_token.is_empty() || token.expires_in <= 60 || token.expires_in > 86_400 {
+            return Err(Error::Credentials);
+        }
+        let expiry = now
+            .checked_add(token.expires_in)
+            .ok_or(Error::Credentials)?;
+        *cached = Some((token.access_token.clone(), expiry));
+        Ok(token.access_token)
+    }
+    fn url(&self, object: &str, upload: bool) -> Result<Url, Error> {
+        let mut url = Url::parse(if upload {
+            "https://storage.googleapis.com/upload/storage/v1/b/"
+        } else {
+            "https://storage.googleapis.com/storage/v1/b/"
+        })
+        .map_err(|_| Error::Configuration)?;
+        let mut path = url.path_segments_mut().map_err(|_| Error::Configuration)?;
+        path.pop_if_empty().push(&self.bucket).push("o");
+        if !upload {
+            path.push(object);
+        }
+        drop(path);
+        Ok(url)
+    }
+}
+async fn bounded(mut response: reqwest::Response, maximum: u64) -> Result<Vec<u8>, Error> {
+    if response.content_length().is_some_and(|size| size > maximum) {
+        return Err(Error::Limit);
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|_| Error::Network)? {
+        if bytes.len() as u64 + chunk.len() as u64 > maximum {
+            return Err(Error::Limit);
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+impl Transport for Gcs {
+    async fn create(&self, object: &str, bytes: &[u8], sha256: &str) -> Result<Created, Error> {
+        if !segments(object) || !valid_digest(sha256) || digest(bytes) != sha256 {
+            return Err(Error::Configuration);
+        }
+        let mut url = self.url(object, true)?;
+        url.query_pairs_mut()
+            .append_pair("uploadType", "multipart")
+            .append_pair("ifGenerationMatch", "0")
+            .append_pair("name", object);
+        let boundary = format!("relative-{sha256}");
+        let metadata =
+            serde_json::json!({"name":object,"metadata":{"sha256":sha256},"crc32c":crc32c(bytes)});
+        let mut body = format!("--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{metadata}\r\n--{boundary}\r\nContent-Type: application/octet-stream\r\n\r\n").into_bytes();
+        body.extend_from_slice(bytes);
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        let response = self
+            .client
+            .post(url)
+            .bearer_auth(self.token().await?)
+            .header(
+                "Content-Type",
+                format!("multipart/related; boundary={boundary}"),
+            )
+            .body(body)
+            .send()
+            .await
+            .map_err(|_| Error::Network)?;
+        if response.status() == StatusCode::PRECONDITION_FAILED {
+            return Ok(Created::Exists);
+        }
+        if !response.status().is_success() {
+            return Err(Error::Network);
+        }
+        let metadata: GcsMetadata =
+            serde_json::from_slice(&bounded(response, MAX_CONFIG_BYTES).await?)
+                .map_err(|_| Error::Checksum)?;
+        Ok(Created::New(metadata.checked()?))
+    }
+    async fn get(&self, object: &str, max_bytes: u64) -> Result<RemoteObject, Error> {
+        if !segments(object) {
+            return Err(Error::Configuration);
+        }
+        let token = self.token().await?;
+        let url = self.url(object, false)?;
+        let response = self
+            .client
+            .get(url.clone())
+            .bearer_auth(&token)
+            .send()
+            .await
+            .map_err(|_| Error::Network)?;
+        if !response.status().is_success() {
+            return Err(Error::Network);
+        }
+        let metadata: GcsMetadata =
+            serde_json::from_slice(&bounded(response, MAX_CONFIG_BYTES).await?)
+                .map_err(|_| Error::Checksum)?;
+        let metadata = metadata.checked()?;
+        if metadata.name != object
+            || !numeric(&metadata.generation)
+            || metadata.generation == "0"
+            || metadata.bytes > max_bytes
+        {
+            return Err(Error::Checksum);
+        }
+        let mut media = url;
+        media
+            .query_pairs_mut()
+            .append_pair("alt", "media")
+            .append_pair("generation", &metadata.generation);
+        let response = self
+            .client
+            .get(media)
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|_| Error::Network)?;
+        if !response.status().is_success() {
+            return Err(Error::Network);
+        }
+        let body = bounded(response, max_bytes).await?;
+        check_remote(&metadata, object, &body)?;
+        Ok(RemoteObject { metadata, body })
+    }
+}

@@ -187,3 +187,53 @@ reconciliation. Never overwrite live recovery files while the service runs.
 - [Signer deployment and authentication](../../apps/signer/README.md)
 - [RPC proxy deployment](../../apps/rpc-proxy/README.md)
 - [Solana program deployment](../../packages/cox/deploy/README.md)
+
+## Preparing the native publisher release
+
+The source-only [native Dockerfile](../../apps/cox-publisher/native/Dockerfile)
+uses Rust 1.90.0, the committed native Cargo lockfile and explicit path
+dependencies. Its runtime is non-root and includes the system certificate
+bundle. Configuration, credentials, journal state and build targets are not
+copied into the image. The repository must first contain the approved committed
+release; the staging command rejects dirty or untracked release inputs.
+
+```sh
+python3 deploy/dev/native-publisher-release.py stage \
+  --approved-commit FULL_APPROVED_COMMIT \
+  --basic-binary /reviewed/basic.so --epoch-binary /reviewed/epoch.so \
+  --basic-sha256 REVIEWED_BASIC_SHA256 --epoch-sha256 REVIEWED_EPOCH_SHA256 \
+  --output /private/release-bundle
+
+python3 deploy/dev/native-publisher-release.py build \
+  --bundle /private/release-bundle \
+  --rust-image 'rust:1.90.0-bookworm@sha256:REVIEWED_IMAGE_DIGEST' \
+  --runtime-image 'gcr.io/distroless/cc-debian12:nonroot@sha256:REVIEWED_IMAGE_DIGEST'
+
+python3 deploy/dev/native-publisher-release.py verify \
+  --bundle /private/release-bundle \
+  --config /private/native.json --intent /private/activation-intent.json
+```
+
+Resolve and review both image digests before building; the release command
+rejects floating tags. `build` exports an ELF64 x86-64 Linux executable and
+records its hash and image inputs. The Dockerfile's `runtime` target can package
+the same build as a container for a later reviewed rollout. Build reproducibility
+means pinned source, dependencies, compiler and image inputs; compare independent
+build hashes before claiming bit-for-bit reproduction.
+
+`verify` needs `ALCHEMY_API_KEY` through the environment, checks direct Alchemy
+with public devnet RPC as fallback, and never prints the authenticated URL. It
+checks committed and staged source hashes, the supplied Basic/Epoch binary
+hashes, both committed IDLs, Linux executable architecture and hash, a disabled
+publisher configuration, and a matching unarmed activation intent at a future
+four-hour UTC boundary. Origin and admission remain distinct. The contract
+artifacts still require their separate reviewed build records and compiled
+runtime test evidence; copying an artifact into the bundle does not prove its
+provenance.
+
+These commands do not install or start services, authorize remote signing,
+create or activate pools, submit transactions, or grant deployment approval.
+Keep private configuration and secrets outside the build context and release
+bundle. After readiness and release approval, the service account needs write
+access to its durable state directory and read-only mounted configuration;
+credentials are supplied at runtime through the existing identity/secret paths.

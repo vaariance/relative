@@ -1,5 +1,5 @@
 [Unit]
-Description=COX devnet publisher
+Description=Relative native devnet publisher
 After=network-online.target
 Wants=network-online.target
 
@@ -8,11 +8,12 @@ Type=simple
 User=cox-publisher
 Group=cox-publisher
 WorkingDirectory=/opt/cox-publisher/current
-ExecStart=/usr/bin/flock --nonblock --no-fork /var/lib/cox-publisher/state.json.flock /opt/cox-publisher/runtime/node-v24.21.0-linux-x64/bin/node --import /opt/cox-publisher/current/apps/cox-publisher/node_modules/tsx/dist/loader.mjs /opt/cox-publisher/current/apps/cox-publisher/src/main.ts --config /etc/cox-publisher/dev.json --locked
+ExecStart=/opt/cox-publisher/current/apps/cox-publisher/native/target/release/relative-publisher run --config /etc/cox-publisher/native.json
 Restart=on-failure
 RestartSec=5
 RuntimeDirectory=cox-publisher
 StateDirectory=cox-publisher
+EnvironmentFile=/etc/cox-publisher/native.env
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true

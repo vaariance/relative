@@ -1,11 +1,13 @@
 [Unit]
-Description=Back up COX publication history and recovery journal
+Description=Back up Relative native publisher recovery state
 After=network-online.target
+Wants=network-online.target
 [Service]
 Type=oneshot
 User=cox-publisher
 Group=cox-publisher
-ExecStart=/opt/cox-publisher/runtime/node-v24.21.0-linux-x64/bin/node /opt/cox-publisher/cox-publication-backup.ts
+WorkingDirectory=/opt/cox-publisher/current
+ExecStart=/opt/cox-publisher/current/apps/cox-publisher/native/target/release/relative-publisher backup --config /etc/cox-publisher/native-backup.json
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true

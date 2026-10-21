@@ -72,9 +72,27 @@ importers:
       '@eox/signing':
         specifier: workspace:*
         version: link:../../packages/signing
+      '@pythnetwork/pyth-lazer-sdk':
+        specifier: 7.0.0
+        version: 7.0.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+      '@solana/addresses':
+        specifier: 7.1.1
+        version: 7.1.1(typescript@5.9.3)
+      '@solana/rpc-types':
+        specifier: 7.1.1
+        version: 7.1.1(typescript@5.9.3)
+      '@solana/transaction-messages':
+        specifier: 7.1.1
+        version: 7.1.1(typescript@5.9.3)
+      '@solana/transactions':
+        specifier: 7.1.1
+        version: 7.1.1(typescript@5.9.3)
       '@solana/web3.js':
         specifier: ^1.98.0
         version: 1.99.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
+      '@triton-one/yellowstone-grpc':
+        specifier: 9.0.0
+        version: 9.0.0(typescript@5.9.3)
       tsx:
         specifier: ^4.16.0
         version: 4.23.15
@@ -128,6 +146,12 @@ importers:
       '@eox/signing':
         specifier: workspace:*
         version: link:../../packages/signing
+      '@solana/transaction-messages':
+        specifier: 7.1.1
+        version: 7.1.1(typescript@5.9.3)
+      '@solana/transactions':
+        specifier: 7.1.1
+        version: 7.1.1(typescript@5.9.3)
       '@solana/web3.js':
         specifier: ^1.98.0
         version: 1.99.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
@@ -452,6 +476,9 @@ packages:
     peerDependenciesMeta:
       '@types/react':
         optional: true
+
+  '@bufbuild/protobuf@2.16.0':
+    resolution: {integrity: sha512-FWa0sPlqYGJgpTs6OxBRcL/AW4JT0OIO+W1ajerluoTVh8CV0B7XM1qsNCRgnkSCkRCgOICKHRQlY17jrsm0+Q==}
 
   '@coinbase/cdp-sdk@1.58.0':
     resolution: {integrity: sha512-AH3Iifi8TgQHdGX+h2oEwXc417tBbk59ch3LT0uA3JwaCCksaFeD4ozxDFEGbDIbwFGZKX8fSEN89SjRF+IHgA==}
@@ -1043,6 +1070,10 @@ packages:
     resolution: {integrity: sha512-RQgQ4uQ+pLbqXfOmieB91ejmLwvSgv9nLx6sT6sD83s7umBypgg+OIBOBbEUiJXrfpnp9j0mRhYYdzp9uqq3lA==}
     engines: {node: '>=12'}
 
+  '@isaacs/ttlcache@2.1.5':
+    resolution: {integrity: sha512-VwGZqqjAWPICTmxUZnbpEfO60LhPWzquik+bmyXGY7pYRn6diEvCI5i6Ca+J6o2y4vS73HrpuMTo2dOvUevH8w==}
+    engines: {node: '>=12'}
+
   '@jest/schemas@29.6.3':
     resolution: {integrity: sha512-mo5j5X+jIZmJQveBKeS/clAueipV7KgiX1vMgCxam1RNYiqE1w62n0/tJJnHtjW8ZHcQco5gY85jA3mi0L+nSA==}
     engines: {node: ^14.15.0 || ^16.10.0 || >=18.0.0}
@@ -1389,6 +1420,10 @@ packages:
 
   '@privy-io/urls@0.0.5':
     resolution: {integrity: sha512-cy4SQY60I9aGm+Er/gL4P+Rrsw2B7RoD6GKw5ZlwEN3jCm3tfclWeZI+xlJSKIwIu71YV9fWpO0bjLTs0tMLgQ==}
+
+  '@pythnetwork/pyth-lazer-sdk@7.0.0':
+    resolution: {integrity: sha512-oxVvAt5ygr3X/kb2mJpMeA5KgzQyPiZ6mykjlQEdkVIVcKCNCsQUz+DouqJMqwFp1o1ETRx1KH1gdXM7uqQ3Dg==}
+    engines: {node: ^24.0.0}
 
   '@react-aria/focus@3.22.1':
     resolution: {integrity: sha512-CPxtkyrBi/HYY5P3lE/57sQ6qfa0lN8E55TOm89H0kNGv0lKt+/0zP7lWERzBjRr5IxBVrQX4gFEowBN52LPaA==}
@@ -2740,6 +2775,30 @@ packages:
   '@tanstack/virtual-core@3.19.5':
     resolution: {integrity: sha512-X/wq6DtSK/XClznMM+I4JE63yyIwmyPk4Ts83bD0VKaIbwHNdRsO5QipCPX+3OovqYyr0puQNpbmp8+SPhspNg==}
 
+  '@triton-one/yellowstone-grpc-napi-darwin-arm64@0.3.0':
+    resolution: {integrity: sha512-Mu3qmKII1qunVtyghYvB7kRiaI8dXyp8r5sBTGwsbtONOsdz4t3cFG2jJBi+PB7atqv7vFIW4gf42R9BqHyjSg==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@triton-one/yellowstone-grpc-napi-darwin-x64@0.3.0':
+    resolution: {integrity: sha512-Vldz3ydep3DWx2sxwwenUdoqldmnOJakByEApZpqWUbSdYn4hPKq3I/104z9qsX49ym1hEOVrShhF9PoOy4lsA==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@triton-one/yellowstone-grpc-napi-linux-x64-gnu@0.3.0':
+    resolution: {integrity: sha512-jeMxWzARTBg9TTHMhBEQN7qNwBj/LkD73kT1L1KSRXXrbj3Qjft9OhNK3d6IX3K/1ZIv3IOqmd79PYGJkfFHUg==}
+    cpu: [x64]
+    os: [linux]
+
+  '@triton-one/yellowstone-grpc-napi-linux-x64-musl@0.3.0':
+    resolution: {integrity: sha512-1JoPkNIPlm8op72vr4nRSNe/QWWPucQJeT4IBMKT2CIZWROGIetK+eluB2hOqBdAD62q+zlSaM5xZrgOK/3T1A==}
+    cpu: [x64]
+    os: [linux]
+
+  '@triton-one/yellowstone-grpc@9.0.0':
+    resolution: {integrity: sha512-MbxGYPg6js8/Dl2b3rqNZ9/mlVwGC6ab5BwQvNsIMBM9l1z0oWxYlGUK3UqC17BnwUowam2C/YdRrZNMty8mkA==}
+    engines: {node: '>=20.18.0'}
+
   '@types/bn.js@5.2.0':
     resolution: {integrity: sha512-DLbJ1BPqxvQhIGbeu8VbUC1DiAiahHtAYvA0ZEAa4P31F7IaArc8z3C3BRQdWX4mtLQuABG4yzp76ZrS02Ui1Q==}
 
@@ -3938,6 +3997,11 @@ packages:
 
   isomorphic-ws@4.0.1:
     resolution: {integrity: sha512-BhBvN2MBpWTaSHdWRb/bwdZJ1WaehQ2L1KngkCkfLUGF0mAWAT1sQUQacEmQ0jXkFw/czDXPNQSL5u2/Krsz1w==}
+    peerDependencies:
+      ws: '*'
+
+  isomorphic-ws@5.0.0:
+    resolution: {integrity: sha512-muId7Zzn9ywDsyXgTIafTry2sV3nySZeUDe6YedVd1Hvuuep5AsIlqK+XefWpYTyJG5e503F2xIuT2lcU6rCSw==}
     peerDependencies:
       ws: '*'
 
@@ -5211,6 +5275,10 @@ packages:
   tr46@0.0.3:
     resolution: {integrity: sha512-N3WMsuqV66lT30CrXNbEjx4GEwlow3v6rr4mCcv6prnfwhS01rkgyFdjPNBYd9br7LpXV1+Emh01fHnq2Gdgrw==}
 
+  ts-log@3.0.3:
+    resolution: {integrity: sha512-4uxVlS/cbNFeSmZbXgBCq+MRkbck1iW7B2Vqd+gziasf//uZP/HFI2IcoHlyYWFgFRl+5G5iqHe4RvY/h/qUxw==}
+    engines: {node: '>=20', npm: '>=10'}
+
   tslib@1.14.1:
     resolution: {integrity: sha512-Xni35NKzjgMrwevysHTCArtLDpPvye8zV/0E4EyYn43P7/7qvQwPh9BGkHewbMulVntbigmcT7rdX3BNo9wRJg==}
 
@@ -5897,6 +5965,8 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.3.0
 
+  '@bufbuild/protobuf@2.16.0': {}
+
   '@coinbase/cdp-sdk@1.58.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)':
     dependencies:
       '@solana-program/system': 0.10.0(@solana/kit@5.5.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6))
@@ -6352,6 +6422,8 @@ snapshots:
       '@swc/helpers': 0.5.23
 
   '@isaacs/ttlcache@1.4.1': {}
+
+  '@isaacs/ttlcache@2.1.5': {}
 
   '@jest/schemas@29.6.3':
     dependencies:
@@ -6843,6 +6915,17 @@ snapshots:
   '@privy-io/std@0.0.2': {}
 
   '@privy-io/urls@0.0.5': {}
+
+  '@pythnetwork/pyth-lazer-sdk@7.0.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)':
+    dependencies:
+      '@isaacs/ttlcache': 2.1.5
+      buffer: 6.0.3
+      isomorphic-ws: 5.0.0(ws@8.22.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))
+      ts-log: 3.0.3
+      ws: 8.22.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
 
   '@react-aria/focus@3.22.1(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
@@ -8898,6 +8981,33 @@ snapshots:
       react-dom: 19.3.0(react@19.3.0)
 
   '@tanstack/virtual-core@3.19.5': {}
+
+  '@triton-one/yellowstone-grpc-napi-darwin-arm64@0.3.0':
+    optional: true
+
+  '@triton-one/yellowstone-grpc-napi-darwin-x64@0.3.0':
+    optional: true
+
+  '@triton-one/yellowstone-grpc-napi-linux-x64-gnu@0.3.0':
+    optional: true
+
+  '@triton-one/yellowstone-grpc-napi-linux-x64-musl@0.3.0':
+    optional: true
+
+  '@triton-one/yellowstone-grpc@9.0.0(typescript@5.9.3)':
+    dependencies:
+      '@bufbuild/protobuf': 2.16.0
+      '@solana/addresses': 7.1.1(typescript@5.9.3)
+      '@solana/rpc-api': 7.1.1(typescript@5.9.3)
+      '@solana/rpc-types': 7.1.1(typescript@5.9.3)
+    optionalDependencies:
+      '@triton-one/yellowstone-grpc-napi-darwin-arm64': 0.3.0
+      '@triton-one/yellowstone-grpc-napi-darwin-x64': 0.3.0
+      '@triton-one/yellowstone-grpc-napi-linux-x64-gnu': 0.3.0
+      '@triton-one/yellowstone-grpc-napi-linux-x64-musl': 0.3.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+      - typescript
 
   '@types/bn.js@5.2.0':
     dependencies:
@@ -11017,6 +11127,10 @@ snapshots:
     dependencies:
       ws: 7.5.13(bufferutil@4.1.0)(utf-8-validate@6.0.6)
 
+  isomorphic-ws@5.0.0(ws@8.22.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)):
+    dependencies:
+      ws: 8.22.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+
   isows@1.0.6(ws@8.18.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)):
     dependencies:
       ws: 8.18.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
@@ -12483,6 +12597,8 @@ snapshots:
   toml@3.0.0: {}
 
   tr46@0.0.3: {}
+
+  ts-log@3.0.3: {}
 
   tslib@1.14.1: {}
 

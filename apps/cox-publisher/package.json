@@ -5,9 +5,12 @@
   "type": "module",
   "engines": { "node": ">=24" },
   "scripts": {
-    "start": "node --import tsx src/main.ts",
-    "test": "node --import tsx --test test/*.test.ts",
-    "build": "tsc --noEmit"
+    "start": "cargo run --release --locked --manifest-path native/Cargo.toml -- run",
+    "test": "cargo test --locked --manifest-path native/Cargo.toml",
+    "build": "cargo build --release --locked --manifest-path native/Cargo.toml",
+    "check": "cargo check --locked --manifest-path native/Cargo.toml",
+    "test:legacy": "node --import tsx --test test/*.test.ts",
+    "check:legacy": "tsc --noEmit"
   },
   "dependencies": {
     "@coral-xyz/anchor": "0.31.1",
@@ -15,6 +18,12 @@
     "@cox/client": "workspace:*",
     "@cox/methodology": "workspace:*",
     "@eox/signing": "workspace:*",
+    "@pythnetwork/pyth-lazer-sdk": "7.0.0",
+    "@triton-one/yellowstone-grpc": "9.0.0",
+    "@solana/addresses": "7.1.1",
+    "@solana/rpc-types": "7.1.1",
+    "@solana/transaction-messages": "7.1.1",
+    "@solana/transactions": "7.1.1",
     "tsx": "^4.16.0"
   },
   "devDependencies": { "@types/node": "^22.0.0", "typescript": "^5.5.0" }

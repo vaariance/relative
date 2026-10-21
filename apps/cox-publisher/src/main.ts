@@ -1,5 +1,5 @@
 import anchor, { type Idl } from "@coral-xyz/anchor";
-import { Connection, PublicKey } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 import { createSigningClient } from "@eox/signing";
 import { addresses } from "@cox/client";
 import { mkdir, readFile } from "node:fs/promises";
@@ -14,6 +14,7 @@ import { SolanaChain } from "./transport.ts";
 import { Publisher } from "./worker.ts";
 import { createPublisherIdentityToken } from "./identity.ts";
 import { PublicationHistory } from "./history.ts";
+import { createDirectDevnetConnection } from "./rpc.ts";
 
 export const boundedFetch: typeof fetch = (input, init) => fetch(input, {
   ...init, signal: init?.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
@@ -42,7 +43,7 @@ async function main(): Promise<void> {
   }
   const clock = { nowSeconds: () => BigInt(Math.floor(Date.now() / 1000)) };
   const policy = { assets: config.assets, origin: BigInt(config.origin), bybit: config.bybit, digest: config.methodologyDigest };
-  const connection = new Connection(config.rpcUrl, { commitment: "finalized", fetch: boundedFetch, disableRetryOnRateLimit: true });
+  const connection = createDirectDevnetConnection(process.env, "finalized");
   const idl = JSON.parse(await readFile(new URL("../../../packages/cox/idl/cox.json", import.meta.url), "utf8")) as Idl;
   const deployment = JSON.parse(await readFile(new URL("../../../packages/cox/deploy/deployed-devnet.json", import.meta.url), "utf8")) as { programId: string; deployedBuildSha256: string };
   const required = JSON.parse(await readFile(new URL("../../../packages/cox/deploy/publisher-build.json", import.meta.url), "utf8")) as { programId: string; sbfBuildSha256: string };
