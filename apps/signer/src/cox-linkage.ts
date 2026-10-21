@@ -1,5 +1,6 @@
+import type { PolicyTransaction } from "./solana.js";
 import { createHash } from "node:crypto";
-import { PublicKey, type VersionedTransaction } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 import type { CoxLinkage, SolanaProgramBinding } from "./config.js";
 import { PolicyRejection } from "./policy.js";
 
@@ -28,7 +29,7 @@ function u64(value: bigint): Buffer {
   return out;
 }
 
-export async function checkCoxLinkage(binding: SolanaProgramBinding, linkage: CoxLinkage, transaction: VersionedTransaction, fetch: AccountFetcher): Promise<void> {
+export async function checkCoxLinkage(binding: SolanaProgramBinding, linkage: CoxLinkage, transaction: PolicyTransaction, fetch: AccountFetcher): Promise<void> {
   const program = new PublicKey(binding.programId);
   const pool = new PublicKey(linkage.pool);
   const pda = (...seeds: Buffer[]) => PublicKey.findProgramAddressSync(seeds, program)[0];

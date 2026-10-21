@@ -76,8 +76,8 @@ test("refuses fee administration, treasury withdrawal and user trades", () => {
   }
 });
 
-test("the fee upgrade IDL keeps every bound runtime instruction's discriminator and account order", () => {
-  const idl = JSON.parse(readFileSync(new URL("../../../packages/cox/idl/cox.json", import.meta.url), "utf8")) as { instructions: { name: string; discriminator: number[]; accounts: { name: string }[] }[] };
+test("the current IDL preserves legacy runtime indices with one trailing optional vault", () => {
+  const idl = JSON.parse(readFileSync(new URL("../../../packages/cox/idl/cox.json", import.meta.url), "utf8")) as { instructions: { name: string; discriminator: number[]; accounts: { name: string; optional?: boolean; writable?: boolean }[] }[] };
   const expected: Record<string, string[]> = {
     publish: ["payer", "runtime", "registry", "pool", "methodology", "batch", "vault", "system_program"],
     evaluate: ["registry", "pool", "batch", "request", "position", "vault"],
@@ -89,6 +89,7 @@ test("the fee upgrade IDL keeps every bound runtime instruction's discriminator 
   for (const name of ["publish", "evaluate", "safety", "seal_evaluation", "execute", "finalize"]) {
     const entry = idl.instructions.find((i) => i.name === name)!;
     assert.equal(Buffer.from(entry.discriminator).toString("hex"), discriminator(name), name);
-    assert.deepEqual(entry.accounts.map((a) => a.name), expected[name], name);
+    assert.deepEqual(entry.accounts.slice(0, -1).map((a) => a.name), expected[name], name);
+    assert.deepEqual(entry.accounts.at(-1), { name: "test_vault", optional: true });
   }
 });

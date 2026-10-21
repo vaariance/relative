@@ -12,7 +12,9 @@
   "dependencies": {
     "@eox/signing": "workspace:*",
     "@solana/web3.js": "^1.98.0",
-    "google-auth-library": "^9.15.0"
+    "google-auth-library": "^9.15.0",
+    "@solana/transactions": "7.1.1",
+    "@solana/transaction-messages": "7.1.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

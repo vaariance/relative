@@ -46,6 +46,11 @@ Each request carries an ID, role, network, key version, operation identity, expi
 
 For the devnet COX binding, only `publish`, `evaluate`, `safety`, `seal_evaluation`, `execute` and `finalize` are authorized. Policy checks enforce the configured registry, pool, vault, sealed methodology, reusable batch and publication accounts. Request and position linkage is checked against live accounts. The signing key must be the fee payer.
 
+Future Basic bindings use `cox-adaptive-v1` with an explicit pool ID (pool 1 is refused), pool address, operator, sealed methodology address and digest. Adaptive linkage requires methodology account schema 2, verifies the canonical byte hash and adaptive domain, and refuses the legacy minute policy schema 1. The `cox-v2` compatibility path is unchanged. Dual-collateral devnet bindings additionally set `testCollateralMint`. This requires the canonical trailing `test-vault` account on each runtime instruction and validates its classic SPL ownership, mint, pool authority and safe initialized state. Single-collateral bindings permit the trailing optional account to be omitted or represented by the program-ID sentinel; an arbitrary extra vault is refused. These checks preserve the preceding instruction account indices.
+
+Future Epoch bindings use `epoch-v1`, pinning config ID/address, admin, operator and methodology digest. `close_snapshot` can return snapshot rent only to that operator, after validating the canonical snapshot and its seal/methodology or a valid earlier publication in the same transaction. It does not authorize closing epoch custody accounts. New bindings and transaction-V1 signing remain explicit configuration changes; this source support does not enable them in the current live configuration.
+
+
 Transactions may include the bound instructions and permitted compute-budget instructions. Address lookup tables, other programs and other compute-budget operations are rejected. The devnet limits are 1,400,000 compute units and 1,000 micro-lamports per compute unit. Set a target's `enabled` flag to `false` to refuse signing for it.
 
 RPC providers are checked against the configured network at startup. Account reads fail over on network failures, timeouts, HTTP 429 and server errors. Provider credentials belong in a secret store; failover logs identify hosts rather than complete URLs.

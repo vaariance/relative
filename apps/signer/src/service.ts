@@ -10,7 +10,8 @@ import {
 } from "@eox/signing";
 import type { SignerConfig } from "./config.js";
 import type { ResolvedKey } from "./directory.js";
-import { checkCoxLinkage, type AccountFetcher } from "./cox-linkage.js";
+import { type AccountFetcher } from "./cox-linkage.js";
+import { checkProtocolLinkage } from "./protocol-linkage.js";
 import { checkSolanaPolicy, PolicyRejection } from "./policy.js";
 import { parseSolanaTransaction, requiredSignerIndex } from "./solana.js";
 import type { DecisionStore } from "./store.js";
@@ -87,7 +88,7 @@ export function createSigningService(deps: SigningServiceDeps) {
       for (const program of bindings?.solana?.programs ?? []) {
         if (!program.linkage) continue;
         if (!deps.solanaAccounts) throw new PolicyRejection("TARGET_NOT_BOUND", "COX linkage needs a Solana RPC to verify accounts");
-        await checkCoxLinkage(program, program.linkage, transaction, deps.solanaAccounts);
+        await checkProtocolLinkage(program, program.linkage, transaction, deps.solanaAccounts);
       }
     } catch (error) {
       if (error instanceof PolicyRejection) return rejection(request.requestId, payloadSha256, error.code, error.message);
