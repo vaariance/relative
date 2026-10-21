@@ -10,21 +10,24 @@
   "anchorVersion": "0.31.1",
   "sbfToolsVersion": "2.2.1",
   "livePoolActive": false,
-  "status": "deployed-retirement-pool-1-retired-owners-paid",
-  "deployedCommit": "e7beb503d81c6ca0f27446f3b996a9aa4287be02",
-  "deployedBuildSha256": "453dd32179ea2fad1813138f4c83738c742bfeeb34ff097a76e4d0e9332837ad",
-  "deploymentSignature": "59pKWqVEf4w1H63Hfz88VwBkXDXGHKLbSmXoBmwo6e8P23qx5z9MrRBAcEX1SBQWMzEASmuJWM7WaJ6yfjcnnavf",
+  "status": "deployed-adaptive-program-pools-inactive-legacy-retired",
+  "deployedCommit": "5f1e382c6bb23301110e12872beab5d826bbf0d5",
+  "deployedBuildSha256": "675c77dc7ef4822c099fdccf8bf83cbf8259b81713388dbe2431512711cc92ee",
+  "deploymentSignature": "2oUfV4oGzZc8Y58DuTaUwvXgFjKLB15roGQZmXH8cahnygnxrRupz9SZistoxtEoMkJ5z7mdiARJbXrgaT3NSVMV",
   "platformToolsVersion": "v1.48",
   "sbfRustVersion": "rustc 1.84.1-dev",
-  "binarySha256": "453dd32179ea2fad1813138f4c83738c742bfeeb34ff097a76e4d0e9332837ad",
-  "deployedDumpSha256": "453dd32179ea2fad1813138f4c83738c742bfeeb34ff097a76e4d0e9332837ad",
-  "verifiedAt": "2026-10-20T20:00:57.612Z",
+  "binarySha256": "675c77dc7ef4822c099fdccf8bf83cbf8259b81713388dbe2431512711cc92ee",
+  "deployedDumpSha256": "ee3cba80f55acf783c9fdf88a04e0452ee240661432b39c9266b0d35f8ab8376",
+  "verifiedAt": "2026-10-21T22:26:26.800057+00:00",
   "finalizedSlot": 513273832,
   "programAccount": {
+    "programId": "G6iQGoupNSfduw1QJxQ9vcVi9FnCC6cbippXsi4QQzJF",
+    "owner": "BPFLoaderUpgradeab1e11111111111111111111111",
     "programdataAddress": "9na87Wyc6wMMaVfk2JVf3ReP1XQUbEg38SUi7jh2b6KQ",
     "authority": "4yHCCpEmBvaCKAdfiY2kULM8qFJcDQR4uSrfAT3EWbw5",
+    "lastDeploySlot": 513672480,
     "dataLen": 1245520,
-    "lastDeploySlot": "513273832"
+    "lamports": 6328120440
   },
   "retirement": {
     "pool": "F44g6A58N3cu9TGaDE1LiDB3r1BCxCrfFkMQV1DcEv37",
@@ -74,5 +77,15 @@
         "finalizedSlot": 513274032
       }
     ]
-  }
+  },
+  "previousProgramRelease": {
+    "deployedCommit": "e7beb503d81c6ca0f27446f3b996a9aa4287be02",
+    "deployedBuildSha256": "453dd32179ea2fad1813138f4c83738c742bfeeb34ff097a76e4d0e9332837ad",
+    "deploymentSignature": "59pKWqVEf4w1H63Hfz88VwBkXDXGHKLbSmXoBmwo6e8P23qx5z9MrRBAcEX1SBQWMzEASmuJWM7WaJ6yfjcnnavf"
+  },
+  "features": [
+    "devnet-collateral"
+  ],
+  "poolsInitialized": false,
+  "activationArmed": false
 }

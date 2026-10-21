@@ -13,9 +13,24 @@
   "programId": "4RRBbmzExtPDMYNUgCaetfz3wNYkF2mrAYKZVY4iXz2w",
   "programKeyPath": ".cox/keys/epoch-program-keypair.json",
   "livePoolActive": false,
-  "deployed": false,
-  "status": "prepared-not-deployed",
-  "deployedCommit": null,
-  "deployedBuildSha256": null,
-  "deploymentSignature": null
+  "deployed": true,
+  "status": "deployed-epoch-program-no-pools",
+  "deployedCommit": "5f1e382c6bb23301110e12872beab5d826bbf0d5",
+  "deployedBuildSha256": "b6dd486b206f4038daab1bc3a6696cffc3f40ad389e8b9b15eec797a5a20f6d7",
+  "deploymentSignature": "564HDv1vBMEjQuLx4aNai8PTCKx4fLHFUso5PBCJuPKeMqSSxBXfDhX4Sud3eBjcYpoX8uexMdehLDKB1fMVFVvY",
+  "programAccount": {
+    "programId": "4RRBbmzExtPDMYNUgCaetfz3wNYkF2mrAYKZVY4iXz2w",
+    "owner": "BPFLoaderUpgradeab1e11111111111111111111111",
+    "programdataAddress": "J2LArF5sApVPBZBczBq5zTofFtWC7ZfAjEbAB9b9xWaS",
+    "authority": "4yHCCpEmBvaCKAdfiY2kULM8qFJcDQR4uSrfAT3EWbw5",
+    "lastDeploySlot": 513672604,
+    "dataLen": 640312,
+    "lamports": 3253663800
+  },
+  "verifiedAt": "2026-10-21T22:26:26.800057+00:00",
+  "features": [
+    "devnet-collateral"
+  ],
+  "poolsInitialized": false,
+  "activationArmed": false
 }
