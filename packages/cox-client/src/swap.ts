@@ -1,6 +1,6 @@
 import { Buffer } from "buffer";
 import type { Program } from "@coral-xyz/anchor";
-import { PublicKey, SYSVAR_CLOCK_PUBKEY, TransactionMessage, VersionedTransaction, type TransactionInstruction } from "@solana/web3.js";
+import { type AccountInfo, PublicKey, SYSVAR_CLOCK_PUBKEY, TransactionMessage, VersionedTransaction, type TransactionInstruction } from "@solana/web3.js";
 import { CoxInstructions } from "./builders.ts";
 import { PROGRAM_ID, addresses } from "./pdas.ts";
 import { CoxReader, committedPosition, committedRequest, decodeAccount } from "./readers.ts";
@@ -110,6 +110,7 @@ export class CoxSwapSdk {
     const keys = [this.poolKey, this.pdas.registry(), initial.methodology, this.options.collateralMint,
       this.pdas.vault(this.poolKey), SYSVAR_CLOCK_PUBKEY];
     if (owner) keys.push(this.pdas.position(this.poolKey, owner));
+    if (initial.testCollateralMint) keys.push(this.pdas.testVault(this.poolKey));
     const response = await connection.getMultipleAccountsInfoAndContext(keys, { commitment: "finalized" });
     const [poolInfo, registryInfo, methodologyInfo, mint, vault, clock, positionInfo] = response.value;
     check(!!poolInfo && !!registryInfo && !!methodologyInfo && !!mint && !!vault && !!clock, "SwapSetupMissing");
@@ -118,7 +119,9 @@ export class CoxSwapSdk {
     const methodology = decodeAccount(this.program, "methodology", methodologyInfo);
     check(pool.poolId.toString() === this.options.poolId.toString() && pool.registry.equals(keys[1]!)
       && pool.methodology.equals(keys[2]!) && pool.vault.equals(keys[4]!), "SwapPoolMismatch");
-    check(pool.collateralMint.equals(this.options.collateralMint), "SwapCollateralMismatch");
+    check((pool.collateralMint.equals(this.options.collateralMint)
+      || (pool.schemaVersion === 4 && !!pool.testCollateralMint?.equals(this.options.collateralMint)))
+      && (pool.testCollateralMint?.toBase58() ?? null) === (initial.testCollateralMint?.toBase58() ?? null), "SwapCollateralMismatch");
     check(methodology.sealed && methodology.origin.eq(pool.origin)
       && this.pdas.methodology(Buffer.from(methodology.digest)).equals(pool.methodology)
       && methodology.canonical.length === methodology.expectedLength
@@ -127,27 +130,37 @@ export class CoxSwapSdk {
       && pool.references.length === pool.classes.length
       && pool.classes.reduce((sum, value) => sum + number(value.backing), 0n) === number(pool.active), "SwapPoolLedgerMismatch");
     check(mint.owner.equals(TOKEN_PROGRAM) && mint.data.length === 82 && mint.data[44] === 6 && mint.data[45] === 1, "SwapCollateralMismatch");
-    check(vault.owner.equals(TOKEN_PROGRAM) && vault.data.length === 165 && vault.data[108] === 1
-      && vault.data.subarray(0, 32).equals(this.options.collateralMint.toBuffer())
-      && vault.data.subarray(32, 64).equals(this.poolKey.toBuffer()), "SwapVaultMismatch");
-    check(vault.data.readBigUInt64LE(64) >= number(pool.active) + number(pool.pending) + number(pool.payable) + number(pool.residual) + number(pool.fees), "SwapCollateralShortfall");
+    const vaultBalance = (info: AccountInfo<Buffer> | null | undefined, expectedMint: PublicKey) => {
+      check(!!info && info.owner.equals(TOKEN_PROGRAM) && info.data.length === 165 && info.data[108] === 1
+        && info.data.subarray(0, 32).equals(expectedMint.toBuffer())
+        && info.data.subarray(32, 64).equals(this.poolKey.toBuffer())
+        && info.data.readUInt32LE(72) === 0 && info.data.readUInt32LE(109) === 0
+        && info.data.readUInt32LE(129) === 0, "SwapVaultMismatch");
+      return info.data.readBigUInt64LE(64);
+    };
+    const primaryBalance = vaultBalance(vault, pool.collateralMint);
+    const secondaryBalance = pool.testCollateralMint
+      ? vaultBalance(response.value[owner ? 7 : 6], pool.testCollateralMint) : 0n;
+    check(primaryBalance + secondaryBalance >= number(pool.active) + number(pool.pending) + number(pool.payable) + number(pool.residual) + number(pool.fees), "SwapCollateralShortfall");
+    const selectedVaultBalance = pool.collateralMint.equals(this.options.collateralMint) ? primaryBalance : secondaryBalance;
     check(clock.data.length === 40, "SwapClockMismatch");
     const now = clock.data.readBigInt64LE(32);
     const origin = number(pool.origin);
-    const halted = pool.initialized && now - (origin + number(pool.lastBatch) * 60n) >= 3600n;
+    const halted = pool.schemaVersion !== 4 && pool.initialized && now - (origin + number(pool.lastBatch) * 60n) >= 3600n;
     let position: Position | null = null;
     if (positionInfo && owner) {
       position = decodeAccount(this.program, "position", positionInfo);
       check(position.pool.equals(this.poolKey) && position.owner.equals(owner) && position.classes.length === pool.classes.length, "SwapPositionMismatch");
       position = committedPosition(position, pool);
     }
-    return { pool, registry, methodology, now, halted, position };
+    return { pool, registry, methodology, now, halted, position, selectedVaultBalance };
   }
   private trading(context: Awaited<ReturnType<CoxSwapSdk["context"]>>) {
     check(context.pool.schemaVersion !== 3, "SwapPoolRetired");
     check(context.pool.initialized, "SwapPoolNotInitialized");
     check(!context.registry.paused, "SwapPaused");
     check(!context.halted, "SwapHalted");
+    check(context.pool.schemaVersion !== 4 || context.now >= number(context.pool.tradingOpensAt), "SwapTradingNotOpen");
   }
   private async token(account: PublicKey, owner: PublicKey) {
     const info = await this.program.provider.connection.getAccountInfo(account, "finalized");
@@ -156,8 +169,8 @@ export class CoxSwapSdk {
       && info.data.subarray(32, 64).equals(owner.toBuffer()), "SwapWalletTokenMismatch");
     return info.data.readBigUInt64LE(64);
   }
-  private keys(wallet: WalletAccounts, nonce: bigint) {
-    return { owner: wallet.owner, pool: this.poolKey, vault: this.pdas.vault(this.poolKey),
+  private keys(wallet: WalletAccounts, nonce: bigint, pool: Pool) {
+    return { ...(pool.testCollateralMint ? { testVault: this.pdas.testVault(this.poolKey) } : {}), owner: wallet.owner, pool: this.poolKey, vault: this.pdas.vault(this.poolKey),
       position: this.pdas.position(this.poolKey, wallet.owner), request: this.pdas.request(this.poolKey, nonce), userToken: wallet.tokenAccount };
   }
   private plan(kind: SwapPlan["kind"], owner: PublicKey, pool: Pool, instruction: TransactionInstruction, request: SwapPlan["request"] = null): SwapPlan {
@@ -166,7 +179,7 @@ export class CoxSwapSdk {
   }
   private earliestBatch(context: Awaited<ReturnType<CoxSwapSdk["context"]>>) {
     const { pool, now } = context;
-    return [((now - number(pool.origin)) / 60n) + 1n, number(pool.lastBatch) + 1n,
+    return [((now - number(pool.origin)) / (pool.schemaVersion === 4 ? 1n : 60n)) + 1n, number(pool.lastBatch) + 1n,
       pool.stage ? number(pool.stageBatch) + 1n : 0n].reduce((a, b) => a > b ? a : b);
   }
   private reservation(context: Awaited<ReturnType<CoxSwapSdk["context"]>>, expiryBatch: bigint) {
@@ -184,6 +197,7 @@ export class CoxSwapSdk {
       classes: context.pool.classes.map((_, classId) => ({ classId, assetId: context.methodology.roster[classId] ?? null, benchmark: classId === this.cryptoClass(context.pool) })),
       cryptoUnitDecimals: CRYPTO_UNIT_DECIMALS, cryptoClass: this.cryptoClass(context.pool), testOnly: true as const,
       benchmarkLabel: `CRYPTO (pilot, ${context.methodology.roster.length} assets)`, initialized: context.pool.initialized,
+      tradingOpensAt: number(context.pool.tradingOpensAt), tradingOpen: context.pool.schemaVersion !== 4 || context.now >= number(context.pool.tradingOpensAt),
       retired: context.pool.schemaVersion === 3, paused: context.registry.paused, halted: context.halted, earliestBatchEstimate: this.earliestBatch(context), sequence: number(context.pool.sequence), batch: number(context.pool.lastBatch) };
   }
   async balances(owner: PublicKey) {
@@ -225,7 +239,7 @@ export class CoxSwapSdk {
     const operation = buying ? 0 : 2;
     const selected = this.selectedClass(context.pool, classId);
     const from = buying ? 255 : selected, to = buying ? selected : 255;
-    const feeResult = context.pool.schemaVersion === 2
+    const feeResult = context.pool.schemaVersion !== 1
       ? await simulations.quoteWithFee(this.poolKey, operation, from, to, buying ? input : 0n, buying ? 0n : input, number(context.pool.feeVersion))
       : null;
     const result = feeResult ?? await simulations.quote(this.poolKey, operation, from, to, buying ? input : 0n, buying ? 0n : input);
@@ -265,9 +279,9 @@ export class CoxSwapSdk {
     const request = this.reservation(context, input.expiryBatch);
     const selected = this.selectedClass(context.pool, classId);
     return this.plan(kind, input.owner, context.pool,
-      (context.pool.schemaVersion === 2
-        ? this.builder.depositWithFee(this.keys(input, request.nonce), selected, input.amount, input.minimumUnits, input.expiryBatch, number(context.pool.feeVersion))
-        : this.builder.deposit(this.keys(input, request.nonce), selected, input.amount, input.minimumUnits, input.expiryBatch)), request);
+      (context.pool.schemaVersion !== 1
+        ? this.builder.depositWithFee(this.keys(input, request.nonce, context.pool), selected, input.amount, input.minimumUnits, input.expiryBatch, number(context.pool.feeVersion))
+        : this.builder.deposit(this.keys(input, request.nonce, context.pool), selected, input.amount, input.minimumUnits, input.expiryBatch)), request);
   }
   async prepareSell(input: SellCrypto): Promise<SwapPlan> {
     return this.redeem(input, "sell-crypto");
@@ -286,9 +300,9 @@ export class CoxSwapSdk {
     await this.token(input.tokenAccount, input.owner);
     const request = this.reservation(context, input.expiryBatch);
     return this.plan(kind, input.owner, context.pool,
-      (context.pool.schemaVersion === 2
-        ? this.builder.redeemWithFee(this.keys(input, request.nonce), selected, input.units, input.minimumProceeds, input.expiryBatch, number(context.pool.feeVersion))
-        : this.builder.redeem(this.keys(input, request.nonce), selected, input.units, input.minimumProceeds, input.expiryBatch)), request);
+      (context.pool.schemaVersion !== 1
+        ? this.builder.redeemWithFee(this.keys(input, request.nonce, context.pool), selected, input.units, input.minimumProceeds, input.expiryBatch, number(context.pool.feeVersion))
+        : this.builder.redeem(this.keys(input, request.nonce, context.pool), selected, input.units, input.minimumProceeds, input.expiryBatch)), request);
   }
   private async ownedRequest(owner: PublicKey, nonce: bigint, pool: Pool, classId?: number) {
     uint(nonce, U64_MAX);
@@ -299,6 +313,7 @@ export class CoxSwapSdk {
     const selected = this.selectedClass(pool, classId);
     check((value.operation === 0 && value.to === selected && value.from === 255)
       || (value.operation === 2 && value.from === selected && value.to === 255), classId === undefined ? "SwapRequestNotBenchmark" : "SwapRequestClassMismatch");
+    check(number(value.refundedAmount) <= number(value.amount), "SwapRequestRefundMismatch");
     return committedRequest(value, pool);
   }
   async request(owner: PublicKey, nonce: bigint, classId?: number) {
@@ -312,6 +327,7 @@ export class CoxSwapSdk {
       targetBatch: number(value.targetBatch), expiryBatch: number(value.expiryBatch),
       mintedUnits: value.status === 1 ? number(value.minted) : 0n,
       proceeds: value.status === 1 ? number(value.proceeds) : 0n,
+      remainingRefund: number(value.amount) - number(value.refundedAmount),
       refundRequired: value.operation === 0 && [2, 3, 4, 5, 7].includes(value.status),
       createsPayable: value.operation === 2 && value.status === 1 && number(value.proceeds) > 0n };
   }
@@ -320,17 +336,24 @@ export class CoxSwapSdk {
     const context = await this.context(input.owner);
     check(context.pool.schemaVersion === 3 || !context.halted, "SwapHalted");
     check(!!context.position && number(context.position.payable) >= input.amount, "SwapInsufficientPayable");
+    check(context.selectedVaultBalance >= input.amount, "SwapSelectedCollateralShortfall");
     await this.token(input.tokenAccount, input.owner);
-    const { request: _, ...keys } = this.keys(input, 0n);
+    const { request: _, ...keys } = this.keys(input, 0n, context.pool);
     return this.plan("withdraw", input.owner, context.pool, this.builder.withdraw(keys, input.amount));
   }
-  async prepareRefund(input: WalletAccounts & { nonce: bigint; classId?: number }): Promise<SwapPlan> {
+  async prepareRefund(input: WalletAccounts & { nonce: bigint; classId?: number; amount?: bigint }): Promise<SwapPlan> {
     const context = await this.context(input.owner);
     const request = await this.ownedRequest(input.owner, input.nonce, context.pool, input.classId);
+    const remaining = number(request.amount) - number(request.refundedAmount);
+    const amount = input.amount ?? remaining;
+    uint(amount, U64_MAX, true);
     check(request.operation === 0 && [2, 3, 4, 5, 7].includes(request.status)
-      && !!context.position && number(context.position.refundable) >= number(request.amount), "SwapNotRefundable");
+      && amount <= remaining && !!context.position && number(context.position.refundable) >= amount, "SwapNotRefundable");
+    check(context.selectedVaultBalance >= amount, "SwapSelectedCollateralShortfall");
+    check(input.amount === undefined || context.pool.schemaVersion === 4, "SwapPartialRefundUnsupported");
     await this.token(input.tokenAccount, input.owner);
-    return this.plan("refund", input.owner, context.pool, this.builder.refund(this.keys(input, input.nonce)));
+    return this.plan("refund", input.owner, context.pool, input.amount === undefined ? this.builder.refund(this.keys(input, input.nonce, context.pool))
+      : this.builder.refundPartial(this.keys(input, input.nonce, context.pool), amount));
   }
   async prepareCancel(owner: PublicKey, nonce: bigint, classId?: number): Promise<SwapPlan> {
     return this.manage(owner, nonce, false, classId);
@@ -345,13 +368,14 @@ export class CoxSwapSdk {
     check(request.status === 0, "SwapRequestAlreadyProcessed");
     check(!request.evaluated || request.boundSequence.lte(pool.sequence), "SwapCancellationClosed");
     check(!pool.stage || nonce >= number(pool.stageClosedEnd) || request.targetBatch.gt(pool.stageBatch), "SwapCancellationClosed");
-    if (expire) check((now - number(pool.origin)) / 60n > number(request.expiryBatch), "SwapNotExpired");
+    if (expire) check((now - number(pool.origin)) / (pool.schemaVersion === 4 ? 1n : 60n) > number(request.expiryBatch), "SwapNotExpired");
     else {
       const rolled = pool.lastBatch.gte(request.targetBatch) ? number(pool.lastBatch) + 1n : number(request.targetBatch);
-      check(now < number(pool.origin) + rolled * 60n || context.halted || context.registry.paused, "SwapCancellationClosed");
+      check(now < number(pool.origin) + rolled * (pool.schemaVersion === 4 ? 1n : 60n) || context.halted || context.registry.paused, "SwapCancellationClosed");
     }
-    const keys = { owner, pool: this.poolKey, vault: this.pdas.vault(this.poolKey), position: this.pdas.position(this.poolKey, owner), request: this.pdas.request(this.poolKey, nonce) };
-    const instruction = expire ? this.builder.expire({ authority: owner, pool: keys.pool, vault: keys.vault, position: keys.position, request: keys.request }) : this.builder.cancel(keys);
+    const keys = { ...(pool.testCollateralMint ? { testVault: this.pdas.testVault(this.poolKey) } : {}), owner, pool: this.poolKey, vault: this.pdas.vault(this.poolKey), position: this.pdas.position(this.poolKey, owner), request: this.pdas.request(this.poolKey, nonce) };
+    const { owner: _, ...expiryKeys } = keys;
+    const instruction = expire ? this.builder.expire({ ...expiryKeys, authority: owner }) : this.builder.cancel(keys);
     return this.plan(expire ? "expire" : "cancel", owner, pool, instruction);
   }
   async transaction(plan: SwapPlan): Promise<PreparedTransaction> {

@@ -181,7 +181,7 @@ test("every unsigned builder uses actual IDL account flags and instruction bytes
     instruction.keys.forEach((key, index) => {
       const account = definition.accounts[index]!;
       assert.ok(!("accounts" in account));
-      assert.equal(key.isSigner, account.signer ?? false); assert.equal(key.isWritable, account.writable ?? false);
+      assert.equal(key.isSigner, account.signer ?? false); assert.equal(key.isWritable, account.optional && key.pubkey.equals(program.programId) ? false : account.writable ?? false);
     });
   }
   assert.equal(instructions[12]!.data.subarray(0, 8).toString("hex"), discriminator("global", "publish").toString("hex"));
@@ -204,7 +204,7 @@ test("fee-aware and treasury builders match the generated program ABI", () => {
     assert.equal(instruction.keys.length, definition.accounts.length);
     instruction.keys.forEach((key, i) => {
       const account = definition.accounts[i]!;
-      assert.ok(!("accounts" in account)); assert.equal(key.isSigner, account.signer ?? false); assert.equal(key.isWritable, account.writable ?? false);
+      assert.ok(!("accounts" in account)); assert.equal(key.isSigner, account.signer ?? false); assert.equal(key.isWritable, account.optional && key.pubkey.equals(program.programId) ? false : account.writable ?? false);
     });
     if ("expectedFeeVersion" in decoded.data) assert.equal((decoded.data.expectedFeeVersion as anchor.BN).toString(), "7");
   }
@@ -216,7 +216,7 @@ test("legacy accounts decode without requiring appended fee bytes", () => {
   for (const name of ["pool", "request", "batch"] as const) {
     const value = fixture(name);
     const legacyIdl = structuredClone(program.idl);
-    const feeFields = name === "pool" ? ["feeVersion", "feeBps", "feeCap", "fees", "feeNextVersion", "feePending", "feePendingVersion", "feePendingBps", "feePendingCap", "feePendingCutoff", "feeInitialScheduled"] : name === "request" ? ["feeVersion", "feeBps", "feeCap", "gross", "fee"] : ["fees"];
+    const feeFields = name === "pool" ? ["feeVersion", "feeBps", "feeCap", "fees", "feeNextVersion", "feePending", "feePendingVersion", "feePendingBps", "feePendingCap", "feePendingCutoff", "feeInitialScheduled", "tradingOpensAt"] : name === "request" ? ["feeVersion", "feeBps", "feeCap", "gross", "fee"] : ["fees"];
     const type = legacyIdl.types!.find(type => type.name === name)!;
     assert.equal(type.type.kind, "struct");
     if (type.type.kind !== "struct" || !type.type.fields || !type.type.fields.every(field => typeof field === "object" && "name" in field)) throw new Error("InvalidFixtureType");
@@ -261,5 +261,49 @@ test("thirty-price publication fits a legacy packet with a separate payer", () =
   const transaction = new Transaction({ feePayer: position.owner, recentBlockhash: PublicKey.default.toBase58() }).add(
     ComputeBudgetProgram.setComputeUnitLimit({ units: 1400000 }), ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 0n }), instruction);
   assert.equal(instruction.data.length, 700);
-  assert.equal(transaction.serialize({ requireAllSignatures: false, verifySignatures: false }).length, 1218);
+  assert.equal(transaction.serialize({ requireAllSignatures: false, verifySignatures: false }).length, 1219);
+});
+
+
+test("adaptive pool initializer binds the immutable admission timestamp in its signed ABI", () => {
+  const { account: pool } = fixture("pool");
+  const owner = fixture("position").account.owner;
+  const opensAt = 1792627200n;
+  const instruction = builder.initializeAdaptivePool(owner, pool.methodology, pool.collateralMint, 7n, opensAt);
+  assert.deepEqual(instruction.data, Buffer.concat([discriminator("global", "initialize_adaptive_pool"), Buffer.from("0700000000000000", "hex"), Buffer.from("0052d96a00000000", "hex")]));
+  const decoded = new anchor.BorshInstructionCoder(program.idl).decode(instruction.data)!;
+  assert.equal(decoded.name, "initializeAdaptivePool");
+  assert.equal((decoded.data as { poolId: anchor.BN }).poolId.toString(), "7");
+  assert.equal((decoded.data as { tradingOpensAt: anchor.BN }).tradingOpensAt.toString(), opensAt.toString());
+  assert.ok(instruction.keys.some(value => value.pubkey.equals(builder.pdas.pool(7n))));
+});
+
+test("legacy and retired pools default their reserved admission field to zero", () => {
+  assert.equal(fixture("pool").account.tradingOpensAt.toString(), "0");
+  const release = JSON.parse(readFileSync(new URL("../../cox/fixtures/fee-accounts.json", import.meta.url), "utf8")) as { accounts: Fixture[] };
+  const value = release.accounts.find(value => value.name === "pool")!;
+  for (const schema of [2, 3]) {
+    const bytes = Buffer.from(value.dataHex, "hex"); bytes.writeUInt16LE(schema, 8);
+    assert.equal(decodeAccount(program, "pool", { ...info(value), data: bytes }).tradingOpensAt.toString(), "0");
+  }
+});
+
+test("adaptive methodology seal encodes exact feed and origin bindings with schema-two readers", () => {
+  const config = { version: "relative-adaptive-v1", roster: [0, 1], pythFeedIds: [1, 2],
+    origin: 120001n, originPrices: [100000000n, 200000000n], universeDigest: Buffer.alloc(32, 43),
+    feedCheckDigest: Buffer.alloc(32, 42), maxPriceAgeMs: 5000n, maxFeedAgeMs: 60000n };
+  const digest = Buffer.alloc(32, 7), admin = PublicKey.default;
+  const instruction = builder.sealAdaptiveMethodology(admin, digest, config);
+  const decoded = new anchor.BorshInstructionCoder(program.idl).decode(instruction.data)!;
+  assert.equal(decoded.name, "sealAdaptiveMethodology");
+  const data = (decoded.data as { config: { roster: Buffer; pythFeedIds: number[]; origin: anchor.BN; originPrices: anchor.BN[]; maxPriceAgeMs: anchor.BN } }).config;
+  assert.deepEqual([...data.roster], config.roster);
+  assert.deepEqual(data.pythFeedIds, config.pythFeedIds);
+  assert.equal(data.origin.toString(), "120001");
+  assert.deepEqual(data.originPrices.map(value => value.toString()), ["100000000", "200000000"]);
+  assert.equal(data.maxPriceAgeMs.toString(), "5000");
+  const original = fixture("methodology");
+  const bytes = Buffer.from(original.info.data);
+  bytes.writeUInt16LE(2, 8);
+  assert.equal(decodeAccount(program, "methodology", { ...original.info, data: bytes }).schemaVersion, 2);
 });

@@ -206,6 +206,11 @@ Submission reserves collateral or units. It does not guarantee execution at the 
 
 Refund and withdrawal are distinct operations. Redemption creates a payable after finalization; it does not immediately transfer tokens to the wallet. Supply the owner's token account for the configured mint, rather than assuming devnet test collateral is genuine USDC.
 
+Adaptive pools use methodology schema 2. Upload the canonical bytes produced by the Rust `prepare-methodology` command, then call `sealAdaptiveMethodology` with its exact config before `initializeAdaptivePool`. The sealed policy binds Pyth numeric feed IDs, origin prices, the universe digest, freshness bounds and the geometric calculation. Legacy methodology schema 1 remains readable and is restricted to legacy pool initialization. Publication is operator-attested; this policy commitment does not prove the supplied benchmark on chain.
+
+New adaptive devnet pools may configure a second six-decimal classic SPL test mint. Create a `CoxSwapSdk` with either configured mint; both fund one ledger at 1:1 test-dollar value. Preparation validates combined custody and includes the canonical second vault. Withdrawals and refunds pay the selected mint and require sufficient liquidity in that vault. A combined reserve balance does not guarantee either mint is individually liquid. `prepareRefund({ owner, tokenAccount, nonce, classId, amount })` prepares a partial refund for schema-4 pools; `request(...).remainingRefund` reports the unreturned principal. Omitting `amount` requests the full remainder. Legacy pools retain their single-mint behaviour. These are tested SDK/contract capabilities, not an activated deployment.
+
+
 ## Read simulations
 
 `CoxSimulations.reference`, `position` and `quote` execute unsigned versioned transactions with `sigVerify: false` at finalized commitment. Results are accepted only when return data comes from the configured program. Simulation makes no trade and reserves nothing.

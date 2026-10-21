@@ -7,8 +7,20 @@ import { bytes32 } from "./wire.ts";
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const bn = (value: bigint) => new BN(value.toString());
 export interface ManifestConfig { version: string; roster: number[]; origin: bigint; bybit: boolean; feedCheckDigest: Uint8Array }
+export interface AdaptiveManifestConfig {
+  version: string;
+  roster: number[];
+  pythFeedIds: number[];
+  origin: bigint;
+  originPrices: bigint[];
+  universeDigest: Uint8Array;
+  feedCheckDigest: Uint8Array;
+  maxPriceAgeMs: bigint;
+  maxFeedAgeMs: bigint;
+}
 export interface PublishPrice { priceE8: bigint; venue: 0 | 1 | 2; step: 1 | 2 | 3 | 4; candleStart: bigint; tradeAgeMinutes: number }
-export interface PoolKeys { pool: PublicKey; vault: PublicKey }
+export interface AdaptivePublishPrice { priceE8: bigint; venue: 3; step: 0; candleStart: bigint; tradeAgeMinutes: 0 }
+export interface PoolKeys { pool: PublicKey; vault: PublicKey; testVault?: PublicKey }
 export interface OwnerKeys extends PoolKeys { owner: PublicKey; position: PublicKey; request: PublicKey; userToken: PublicKey }
 export interface ProcessKeys extends PoolKeys { batch: PublicKey; request: PublicKey; position: PublicKey }
 export class CoxInstructions {
@@ -21,10 +33,13 @@ export class CoxInstructions {
     const keys = definition.accounts.map(account => {
       if ("accounts" in account) throw new Error("UnexpectedAccountGroup");
       const pubkey = accounts[account.name];
-      if (!pubkey) throw new Error(`InstructionAccountMissing:${account.name}`);
+      if (!pubkey) {
+        if (account.optional) return { pubkey: this.program.programId, isSigner: false, isWritable: false };
+        throw new Error(`InstructionAccountMissing:${account.name}`);
+      }
       return { pubkey, isSigner: account.signer ?? false, isWritable: account.writable ?? false };
     });
-    if (Object.keys(accounts).length !== definition.accounts.length) throw new Error("UnexpectedInstructionAccounts");
+    if (Object.keys(accounts).some(name => !definition.accounts.some(account => account.name === name))) throw new Error("UnexpectedInstructionAccounts");
     return new TransactionInstruction({ programId: this.program.programId, keys, data: this.program.coder.instruction.encode(name, args) });
   }
   initializeRegistry(admin: PublicKey, runtime: PublicKey, upgradeAuthority: PublicKey) {
@@ -41,9 +56,25 @@ export class CoxInstructions {
   sealMethodology(admin: PublicKey, digest: Uint8Array, config: ManifestConfig) {
     return this.build("sealMethodology", { config: { ...config, roster: Buffer.from(config.roster), origin: bn(config.origin), feedCheckDigest: [...bytes32(config.feedCheckDigest)] } }, { admin, registry: this.pdas.registry(), methodology: this.pdas.methodology(digest) });
   }
+  sealAdaptiveMethodology(admin: PublicKey, digest: Uint8Array, config: AdaptiveManifestConfig) {
+    return this.build("sealAdaptiveMethodology", { config: {
+      ...config, roster: Buffer.from(config.roster), origin: bn(config.origin),
+      originPrices: config.originPrices.map(bn), universeDigest: [...bytes32(config.universeDigest)],
+      feedCheckDigest: [...bytes32(config.feedCheckDigest)], maxPriceAgeMs: bn(config.maxPriceAgeMs),
+      maxFeedAgeMs: bn(config.maxFeedAgeMs),
+    } }, { admin, registry: this.pdas.registry(), methodology: this.pdas.methodology(digest) });
+  }
   initializePool(admin: PublicKey, methodology: PublicKey, mint: PublicKey, poolId: bigint) {
     const pool = this.pdas.pool(poolId);
     return this.build("initializePool", { poolId: bn(poolId) }, { admin, registry: this.pdas.registry(), methodology, pool, mint, vault: this.pdas.vault(pool), tokenProgram: TOKEN_PROGRAM, systemProgram: SystemProgram.programId });
+  }
+  initializeAdaptivePool(admin: PublicKey, methodology: PublicKey, mint: PublicKey, poolId: bigint, tradingOpensAt: bigint) {
+    const pool = this.pdas.pool(poolId);
+    return this.build("initializeAdaptivePool", { poolId: bn(poolId), tradingOpensAt: bn(tradingOpensAt) }, { admin, registry: this.pdas.registry(), methodology, pool, mint, vault: this.pdas.vault(pool), tokenProgram: TOKEN_PROGRAM, systemProgram: SystemProgram.programId });
+  }
+  initializeDevnetCollateral(admin: PublicKey, keys: PoolKeys, testMint: PublicKey) {
+    return this.build("initializeDevnetCollateral", {}, { admin, registry: this.pdas.registry(), pool: keys.pool, vault: keys.vault,
+      testMint, testVault: this.pdas.testVault(keys.pool), tokenProgram: TOKEN_PROGRAM, systemProgram: SystemProgram.programId });
   }
   private submit(name: string, args: object, keys: OwnerKeys) {
     return this.build(name, args, { ...keys, registry: this.pdas.registry(), tokenProgram: TOKEN_PROGRAM, systemProgram: SystemProgram.programId });
@@ -74,12 +105,17 @@ export class CoxInstructions {
     return this.build("expire", {}, { ...keys, registry: this.pdas.registry() });
   }
   refund(keys: OwnerKeys) { return this.build("refund", {}, { ...keys, registry: this.pdas.registry(), tokenProgram: TOKEN_PROGRAM }); }
+  refundPartial(keys: OwnerKeys, amount: bigint) { return this.build("refundPartial", { amount: bn(amount) }, { ...keys, registry: this.pdas.registry(), tokenProgram: TOKEN_PROGRAM }); }
   withdraw(keys: Omit<OwnerKeys, "request">, amount: bigint) { return this.build("withdraw", { amount: bn(amount) }, { ...keys, registry: this.pdas.registry(), tokenProgram: TOKEN_PROGRAM }); }
   payRetirement(keys: PoolKeys & { position: PublicKey; userToken: PublicKey }) {
     return this.build("payRetirement", {}, { ...keys, tokenProgram: TOKEN_PROGRAM });
   }
   publish(keys: PoolKeys & { payer: PublicKey; runtime: PublicKey; methodology: PublicKey }, batchId: bigint, sequence: bigint, predecessor: Uint8Array, prices: readonly PublishPrice[], snapshot: Uint8Array, archiveTime: bigint) {
     return this.build("publish", { batchId: bn(batchId), sequence: bn(sequence), predecessor: [...bytes32(predecessor)], prices: prices.map(price => ({ ...price, priceE8: bn(price.priceE8), candleStart: bn(price.candleStart) })), snapshot: [...bytes32(snapshot)], archiveTime: bn(archiveTime) },
+      { ...keys, registry: this.pdas.registry(), batch: this.pdas.batch(keys.pool), systemProgram: SystemProgram.programId });
+  }
+  publishAdaptive(keys: PoolKeys & { payer: PublicKey; runtime: PublicKey; methodology: PublicKey }, batchId: bigint, sequence: bigint, predecessor: Uint8Array, prices: readonly AdaptivePublishPrice[], snapshot: Uint8Array, archiveTime: bigint, benchmark: bigint) {
+    return this.build("publishAdaptive", { batchId: bn(batchId), sequence: bn(sequence), predecessor: [...bytes32(predecessor)], prices: prices.map(price => ({ ...price, priceE8: bn(price.priceE8), candleStart: bn(price.candleStart) })), snapshot: [...bytes32(snapshot)], archiveTime: bn(archiveTime), benchmark: bn(benchmark) },
       { ...keys, registry: this.pdas.registry(), batch: this.pdas.batch(keys.pool), systemProgram: SystemProgram.programId });
   }
   evaluate(keys: ProcessKeys) { return this.build("evaluate", {}, { ...keys, registry: this.pdas.registry() }); }

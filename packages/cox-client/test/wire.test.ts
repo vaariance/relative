@@ -79,3 +79,31 @@ test("published V2 vectors reproduce every receipt and the state commitment", ()
   assert.equal(Buffer.from(decoded.previousState).toString("hex"), vectors.stateDigest);
   assert.equal(Buffer.from(decoded.receiptRoot).toString("hex"), fixture.receiptPrefixRoots.at(-1));
 });
+
+test("operator geometric state uses a distinct domain and retains verified fee commitments", () => {
+  const fixture = JSON.parse(readFileSync(new URL("../../cox/fixtures/fee-state-vectors.json", import.meta.url), "utf8"));
+  const decoded = decodeState(Buffer.from(fixture.stateBytes, "hex"));
+  const adaptive: State = { ...decoded, benchmarkMode: "operator-geometric", tradingOpensAt: 1_792_627_200n, testCollateralMint: null };
+  assert.deepEqual(decodeState(stateBytes(adaptive)), adaptive);
+  assert.notDeepEqual(stateDigest(adaptive), stateDigest(decoded));
+  const encoded = stateBytes(adaptive);
+  assert.equal(encoded.readBigUInt64LE(encoded.length - 9), adaptive.tradingOpensAt);
+  assert.equal(encoded.length, stateBytes(decoded).length + 18);
+  assert.notDeepEqual(stateDigest(adaptive), stateDigest({ ...adaptive, tradingOpensAt: adaptive.tradingOpensAt! + 1n }));
+  assert.throws(() => decodeState(encoded.subarray(0, encoded.length - 8)), /TruncatedState/);
+  assert.throws(() => stateBytes({ ...adaptive, tradingOpensAt: undefined }), /AdaptiveStateRequiresTradingTime/);
+  assert.throws(() => stateBytes({ ...adaptive, tradingOpensAt: -1n }), /IntegerOutOfRange/);
+  assert.throws(() => stateBytes({ ...adaptive, tradingOpensAt: 1n << 64n }), /IntegerOutOfRange/);
+  assert.throws(() => stateBytes({ ...decoded, tradingOpensAt: 0n }), /UnexpectedAdaptiveTradingTime/);
+  assert.throws(() => stateBytes({ ...adaptive, feeState: undefined }), /AdaptiveStateRequiresFeeFields/);
+});
+
+test("adaptive full roster snapshot matches the native publisher commitment and rejects malformed inputs", async () => {
+  const { adaptiveSnapshotDigest } = await import("../src/wire.ts");
+  const snapshot = { timestamp: 1800000017n, benchmark: 110000000000000n,
+    roster: Array.from({ length: 30 }, (_, index) => index), prices: Array.from({ length: 30 }, (_, index) => 100000000n + BigInt(index)) };
+  assert.equal(adaptiveSnapshotDigest(snapshot).toString("hex"), "da1985b0aa8be1c68f1bafa82a76a25da4ff5b3c21b6f7f6ac843fb13302d558");
+  assert.notDeepEqual(adaptiveSnapshotDigest(snapshot), adaptiveSnapshotDigest({ ...snapshot, benchmark: snapshot.benchmark + 1n }));
+  assert.throws(() => adaptiveSnapshotDigest({ ...snapshot, roster: [1, 0] }), /InvalidAdaptiveSnapshot/);
+  assert.throws(() => adaptiveSnapshotDigest({ ...snapshot, prices: [] }), /InvalidAdaptiveSnapshot/);
+});

@@ -441,3 +441,95 @@ test("direct configuration is captured and selected-class staged units remain un
   await assert.rejects(sdk.prepareRedeem({ owner: s.owner, tokenAccount: s.tokenAccount, classId: 0,
     units: 1n, minimumProceeds: 0n, expiryBatch: s.buy.expiryBatch }), /SwapInsufficientUnlockedUnits/);
 });
+
+test("adaptive Basic wakes after idle and queues fee-aware entry for a strictly later second", async () => {
+  const s = setup();
+  s.pool.schemaVersion = 4; s.pool.feeVersion = bn(1); s.pool.feeBps = 2; s.pool.feeCap = bn(2000000); s.pool.lastBatch = bn(0);
+  s.put("pool", s.poolKey, s.pool);
+  const clock = Buffer.from(s.map.get(SYSVAR_CLOCK_PUBKEY.toBase58())!.data);
+  clock.writeBigInt64LE(BigInt(s.pool.origin.toString()) + 14400n, 32);
+  s.map.set(SYSVAR_CLOCK_PUBKEY.toBase58(), account(clock, PublicKey.default));
+  const market = await s.sdk.market();
+  assert.equal(market.halted, false); assert.equal(market.earliestBatchEstimate, 14401n);
+  const quote = await s.sdk.quoteBuy(s.owner, 2000000n);
+  assert.equal(quote.fee, 400n);
+  const plan = await s.sdk.prepareBuy({ ...s.buy, expiryBatch: 14402n, expectedFeeVersion: 1n });
+  assert.equal(plan.request!.earliestBatchEstimate, 14401n);
+  assert.equal(s.decode(plan).name, "depositWithFee");
+  await assert.rejects(s.sdk.prepareBuy({ ...s.buy, expiryBatch: 14400n }), /SwapExpiryTooEarly/);
+});
+
+
+test("adaptive Basic quotes and wallet preparation wait for admission while market remains readable", async () => {
+  const s = setup();
+  s.pool.schemaVersion = 4;
+  s.pool.feeVersion = bn(1);
+  s.pool.tradingOpensAt = bn(s.now + 1n);
+  s.put("pool", s.poolKey, s.pool);
+  const market = await s.sdk.market();
+  assert.equal(market.tradingOpensAt, s.now + 1n);
+  assert.equal(market.tradingOpen, false);
+  await assert.rejects(s.sdk.quoteDeposit(s.owner, 0, s.buy.amount), /SwapTradingNotOpen/);
+  await assert.rejects(s.sdk.prepareDeposit({ ...s.buy, classId: 0 }), /SwapTradingNotOpen/);
+  assert.equal(s.quoteInstructions.length, 0);
+  const clock = s.map.get(SYSVAR_CLOCK_PUBKEY.toBase58())!;
+  clock.data.writeBigInt64LE(s.now + 1n, 32);
+  assert.equal((await s.sdk.market()).tradingOpen, true);
+  assert.equal((await s.sdk.quoteDeposit(s.owner, 0, s.buy.amount)).classId, 0);
+  assert.equal(s.quoteInstructions.length, 1);
+});
+
+function dualSetup() {
+  const s = setup();
+  const mint = new PublicKey(new Uint8Array(32).fill(67));
+  s.pool.schemaVersion = 4; s.pool.tradingOpensAt = bn(0); s.pool.testCollateralMint = mint;
+  s.put("pool", s.poolKey, s.pool);
+  const second = Buffer.from(s.map.get(s.pool.vault.toBase58())!.data);
+  mint.toBuffer().copy(second); second.writeBigUInt64LE(50_000_000n, 64);
+  s.map.set(s.pdas.testVault(s.poolKey).toBase58(), account(second, new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")));
+  s.map.set(mint.toBase58(), s.map.get(s.pool.collateralMint.toBase58())!);
+  mint.toBuffer().copy(s.map.get(s.tokenAccount.toBase58())!.data);
+  const sdk = new CoxSwapSdk(s.program, { poolId: s.poolId, collateralMint: mint });
+  const buy = { ...s.buy, expiryBatch: BigInt(s.pool.lastBatch.toString()) * 60n + 100n };
+  return { ...s, sdk, buy, mint, second };
+}
+
+test("adaptive dual collateral accepts either mint against combined reserves and binds both vaults", async () => {
+  const s = dualSetup();
+  const plan = await s.sdk.prepareDeposit({ ...s.buy, classId: 0 });
+  assert.ok(plan.collateralMint.equals(s.mint));
+  assert.equal(s.decode(plan).name, "depositWithFee");
+  const tail = plan.instructions[0]!.keys.at(-1)!;
+  assert.ok(tail.pubkey.equals(s.pdas.testVault(s.poolKey))); assert.equal(tail.isWritable, true);
+  s.position.staged = false; s.position.payable = bn(3_000_000);
+  s.put("position", s.pdas.position(s.poolKey, s.owner), s.position);
+  s.second.writeBigUInt64LE(1_000_000n, 64);
+  await assert.rejects(s.sdk.prepareWithdraw({ owner: s.owner, tokenAccount: s.tokenAccount, amount: 2_000_000n }), /SwapSelectedCollateralShortfall/);
+  s.second.writeBigUInt64LE(3_000_000n, 64);
+  assert.equal(s.decode(await s.sdk.prepareWithdraw({ owner: s.owner, tokenAccount: s.tokenAccount, amount: 2_000_000n })).name, "withdraw");
+  s.second.writeUInt32LE(1, 72);
+  await assert.rejects(s.sdk.market(), /SwapVaultMismatch/);
+  s.second.writeUInt32LE(0, 72);
+  s.map.delete(s.pdas.testVault(s.poolKey).toBase58());
+  await assert.rejects(s.sdk.market(), /SwapVaultMismatch/);
+});
+
+test("partial dual refunds preserve original principal and cap each selected-mint payout", async () => {
+  const s = dualSetup();
+  const request = s.get("request");
+  request.schemaVersion = 4; request.owner = s.owner; request.operation = 0; request.from = 255; request.to = 0;
+  request.status = 3; request.amount = bn(5_000_000); request.refundedAmount = bn(2_000_000);
+  const nonce = BigInt(request.nonce.toString());
+  s.put("request", s.pdas.request(s.poolKey, nonce), request);
+  s.position.staged = false; s.position.refundable = bn(3_000_000);
+  s.put("position", s.pdas.position(s.poolKey, s.owner), s.position);
+  s.second.writeBigUInt64LE(1_000_000n, 64);
+  assert.equal((await s.sdk.request(s.owner, nonce, 0)).remainingRefund, 3_000_000n);
+  const input = { owner: s.owner, tokenAccount: s.tokenAccount, nonce, classId: 0 };
+  await assert.rejects(s.sdk.prepareRefund(input), /SwapSelectedCollateralShortfall/);
+  const partial = s.decode(await s.sdk.prepareRefund({ ...input, amount: 1_000_000n }));
+  assert.equal(partial.name, "refundPartial");
+  assert.equal((partial.data as { amount: anchor.BN }).amount.toString(), "1000000");
+  await assert.rejects(s.sdk.prepareRefund({ ...input, amount: 4_000_000n }), /SwapNotRefundable/);
+  await assert.rejects(s.sdk.prepareRefund({ ...input, classId: 1, amount: 1n }), /SwapRequestClassMismatch/);
+});

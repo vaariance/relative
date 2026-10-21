@@ -6,23 +6,27 @@ import { addresses } from "./pdas.ts";
 import { decodeState, sha256 } from "./wire.ts";
 
 const appended = {
-  pool: ["feeVersion", "feeBps", "feeCap", "fees", "feeNextVersion", "feePending", "feePendingVersion", "feePendingBps", "feePendingCap", "feePendingCutoff", "feeInitialScheduled"],
+  pool: ["feeVersion", "feeBps", "feeCap", "fees", "feeNextVersion", "feePending", "feePendingVersion", "feePendingBps", "feePendingCap", "feePendingCutoff", "feeInitialScheduled", "tradingOpensAt"],
   request: ["feeVersion", "feeBps", "feeCap", "gross", "fee"],
   batch: ["fees"],
 };
-const legacyCoders = new WeakMap<Program, BorshAccountsCoder>();
-function legacyCoder(program: Program): BorshAccountsCoder {
-  let coder = legacyCoders.get(program);
+const compatibilityCoders = new WeakMap<Program, Map<string, BorshAccountsCoder>>();
+function compatibilityCoder(program: Program, name: keyof Accounts, schema: number, fields: readonly string[]): BorshAccountsCoder {
+  let coders = compatibilityCoders.get(program);
+  if (!coders) {
+    coders = new Map();
+    compatibilityCoders.set(program, coders);
+  }
+  const key = `${name}:${schema}`;
+  let coder = coders.get(key);
   if (!coder) {
     const idl = structuredClone(program.idl) as Idl;
-    for (const type of idl.types ?? []) {
-      const fields = appended[type.name as keyof typeof appended];
-      if (fields && type.type.kind === "struct" && type.type.fields && type.type.fields.every(field => typeof field === "object" && "name" in field)) {
-        type.type.fields = type.type.fields.filter(field => typeof field === "object" && "name" in field && !fields.includes(field.name));
-      }
+    const type = idl.types?.find(type => type.name === name);
+    if (type?.type.kind === "struct" && type.type.fields && type.type.fields.every(field => typeof field === "object" && "name" in field)) {
+      type.type.fields = type.type.fields.filter(field => typeof field === "object" && "name" in field && !fields.includes(field.name));
     }
     coder = new BorshAccountsCoder(idl);
-    legacyCoders.set(program, coder);
+    coders.set(key, coder);
   }
   return coder;
 }
@@ -31,15 +35,17 @@ export function decodeAccount<K extends keyof Accounts>(program: Program, name: 
   if (info.data.length < 10) throw new Error("AccountVersionMismatch");
   const schema = info.data.readUInt16LE(8);
   const legacy = name === "pool" || name === "request" ? schema === 1 : name === "batch" ? schema === 2 : false;
-  const supported = name === "pool" ? schema === 1 || schema === 2 || schema === 3 : name === "request" ? schema === 1 || schema === 2
-    : name === "batch" || name === "publication" ? schema === 2 || schema === 3 : schema === 1;
+  const supported = name === "pool" ? schema === 1 || schema === 2 || schema === 3 || schema === 4 : name === "request" ? schema === 1 || schema === 2 || schema === 4
+    : name === "batch" || name === "publication" ? schema === 2 || schema === 3 : name === "methodology" ? schema === 1 || schema === 2 : schema === 1;
   if (!supported) throw new Error("AccountVersionMismatch");
-  const account = (legacy ? legacyCoder(program) : program.coder.accounts).decode(name, info.data) as Accounts[K];
-  if (legacy) {
-    for (const field of appended[name as keyof typeof appended] ?? []) {
-      const value = field === "feeBps" || field === "feePendingBps" ? 0 : field === "feePending" || field === "feeInitialScheduled" ? false : new BN(0);
-      Object.assign(account, { [field]: value });
-    }
+  const fields: string[] = [...(legacy ? appended[name as keyof typeof appended] ?? [] : [])];
+  if (name === "pool" && schema !== 4) fields.push("tradingOpensAt", "testCollateralMint");
+  if (name === "request" && schema !== 4) fields.push("refundedAmount");
+  const account = (fields.length ? compatibilityCoder(program, name, schema, fields) : program.coder.accounts).decode(name, info.data) as Accounts[K];
+  for (const field of fields) {
+    const value = field === "testCollateralMint" ? null : field === "feeBps" || field === "feePendingBps" ? 0
+      : field === "feePending" || field === "feeInitialScheduled" ? false : new BN(0);
+    Object.assign(account, { [field]: value });
   }
   return account;
 }

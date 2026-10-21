@@ -8,7 +8,8 @@
     "./wire": "./src/wire.ts",
     "./swap": "./src/swap.ts",
     "./routed": "./src/routed.ts",
-    "./jupiter": "./src/jupiter.ts"
+    "./jupiter": "./src/jupiter.ts",
+    "./epoch": "./src/epoch.ts"
   },
   "scripts": {
     "test": "node --test test/*.test.ts",
