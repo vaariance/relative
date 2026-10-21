@@ -3,9 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./geometric": "./src/geometric.ts",
+    "./inclusion": "./src/inclusion.ts"
+  },
   "scripts": {
-    "test": "node --test test/*.test.ts",
+    "test": "cargo test --locked --manifest-path rust/Cargo.toml",
+    "build": "cargo check --locked --manifest-path rust/Cargo.toml",
+    "test:legacy": "node --test test/*.test.ts",
     "fixtures": "node src/fixtures.ts"
   },
   "engines": { "node": ">=24" }

@@ -1,4 +1,20 @@
-# COX methodology
+# Relative methodology
+
+The native implementation is the `relative-methodology` Rust crate in `rust/`. It exposes inclusion lifecycle rules and canonical commitments, immutable four-hour universe selection, exact-rational Epoch research simulation, and the shared `cox-math` geometric benchmark. The Rust publisher consumes this crate without invoking TypeScript.
+
+```sh
+pnpm --filter @cox/methodology build
+pnpm --filter @cox/methodology test
+```
+
+Use Rust 1.90 or later for this standalone workspace. The inclusion capacity of 256 is separate from a personal basket's 30 members. The current publisher/contracts still bind a sealed Basic roster of at most 30; library support does not activate dynamic inclusion. Epoch simulation preserves the candidate score, 2-basis-point fee capped at 200,000 six-decimal units ($0.20), all-zero refunds and chart-only sensitivity. Exact research fractions are not a replacement for the contract's bounded arithmetic safeguards.
+
+Legacy TypeScript exports and fixture tooling remain temporarily because Joel's app API fixture generator imports `src/index.ts` and `src/vectors.ts`. Joel has been asked to migrate that consumer to the Rust `cox-cli` JSON interface and update provenance. Do not delete those files before the handoff. Run their comparison suite using `pnpm --filter @cox/methodology test:legacy`.
+
+## Legacy catalogue, manifest and fixture reference
+
+The following describes the retained TypeScript compatibility implementation.
+
 
 `@cox/methodology` defines the asset catalogue, canonical methodology manifest and price/snapshot encodings for COX. It also provides a TypeScript arithmetic specification used to generate cross-language test vectors.
 
