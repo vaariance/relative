@@ -1009,3 +1009,71 @@ another agent needs to know.
 - **Rules for agents:** Errors thrown in `(app)/layout.tsx` are caught by `src/app/error.tsx`, not `(app)/error.tsx`; keep that root boundary. The down page shows no error detail or digest.
 - **Open:** Joel/Peter: the RPC proxy upstream (likely the same outage as Peter's 2026-10-18 "Market halt traced to publisher RPC failure" entry) and whether the API's start-up genesis check should fail over to the next RPC instead of exiting. Joel: `packages/app-api/src/cox-client.ts` calls `res.json()` on any response, so an HTML 500 surfaces as "Unexpected token '<'" instead of an HTTP status. Not redeployed to Vercel.
 - **Refs:** commit `322af5d`.
+
+### 2026-10-20 · Peter (Codex) · Legacy pool retired and owners paid automatically
+
+- **Area:** `packages/cox`, `packages/cox-client`; devnet pool 1.
+- **What:** Peter approved retirement-only commit `e7beb50`, program upgrade and automatic owner payouts. Deployed executable SHA-256 `453dd32179ea2fad1813138f4c83738c742bfeeb34ff097a76e4d0e9332837ad` matches the isolated committed build. Paused registry, froze sequence 9756 and its existing state digest, retired all four positions and paid 247.077151 official devnet USDC directly to their owner-controlled token accounts. All four payments finalized; final audit slot 513274208 confirms zero active backing, pending principal, owner payables, refundable balances, position units and locks. Vault retains 0.059409 protocol fees plus 0.020429 residual; deployment buffer was consumed.
+- **Rules for agents:** Pool 1 is irreversibly retired (pool schema 3) and registry remains paused. Do not resume its publisher or treat retained publication references as live trading. Preserve historical publications and owner receipts. `pay_retirement` requires no owner signature, pays only the position owner's collateral token account and cannot redirect custody. New Basic/Epoch work remains separate and uncommitted.
+- **Open:** Deployment-record and agent-log updates remain uncommitted; no new pool activation or service rollout occurred. The retirement-only commit is local on `working`.
+- **Refs:** `packages/cox/deploy/deployed-devnet.json`; 68 SDK tests/type check, 34 compiled contract tests and captured-live-account payout rehearsal passed before deployment.
+
+### 2026-10-21 · Peter (Codex) · Native rewrite ownership boundary
+
+- **Area:** Peter-owned protocol publisher, oracle verification, benchmark calculation and settlement workers.
+- **What:** Peter requested a native rewrite for critical server paths and clarified ownership: APIs belong to Joel, web to Godwin, protocol and contracts to Peter. Rust is the selected publisher implementation; existing TypeScript remains a behavioural comparison during migration.
+- **Rules for agents:** Do not rewrite Joel's API/signing service or Godwin's web application under this migration. Proxy retirement may change private RPC configuration using their existing interfaces. Keep the legacy pool retired and its publisher stopped. Do not claim a language change guarantees one-second end-to-end latency; measure calculation, signing, RPC and confirmation separately.
+- **Open:** Native implementation and measured verification; no replacement pool or native service activation.
+
+### 2026-10-21 · Peter (Codex) · Protocol signer scope and direct developer follow-ups
+
+- **Area:** Protocol publisher and `apps/signer`; developer handoffs.
+- **What:** Peter explicitly authorised protocol-required signer changes and instructed the agent to email Joel and Godwin whenever their fixes and pushes are needed, without waiting for immediate replies. This supersedes the signing-service exclusion in the preceding Native rewrite ownership boundary entry; API and web ownership remains unchanged.
+- **Rules for agents:** Keep signing authentication, key separation and instruction restrictions intact. New transaction formats and protocol bindings require explicit configuration; do not broaden live signing permissions automatically. Send concrete integration requests and ask developers to push shared work to `working`.
+- **Open:** Native publisher runtime composition and new protocol signing bindings remain unfinished; no new pool or native-service activation.
+
+### 2026-10-21 · Peter (Codex) · Native publisher entry point and reusable Rust methodology
+
+- **Area:** `apps/cox-publisher/native`, `packages/cox-methodology/rust`, publisher package scripts and service template.
+- **What:** Connected native Pyth verification, independent geometric calculation/history, processed gRPC wakeups, confirmed account reads, bounded Basic/Epoch execution, remote signing and durable transaction recovery. Default publisher commands and service template now select Rust; TypeScript is explicitly retained for legacy comparison. Moved inclusion and exact-rational Epoch research simulation into the reusable `relative-methodology` crate. Verified 53 publisher and 15 methodology Rust tests, 130 publisher and 33 methodology legacy tests, legacy publisher type-check and disabled CLI startup. Read-only Alchemy devnet simulation accepts a 1,790-byte V1 transaction after explicitly setting its loaded-account data budget; zero transactions submitted.
+- **Rules for agents:** A partial port is not a runtime migration: distinguish implemented modules, selected entry points and live deployment. Preserve publisher state and archive-before-overwrite protection. Native archive v2 records are confirmed observations, not finalized evidence. Keep legacy TS methodology until Joel migrates API fixture/provenance imports; Joel was emailed with Godwin copied. Retain shared price feeds and the independent monitor. Native service expects private `native.json` and `native.env`; old minute-publisher configuration is incompatible.
+- **Open:** No commit, new pool deployment or service activation. New protocol signer bindings, larger-pool account discovery/pagination, dynamic inclusion integration and historical Pyth backfill remain separate work. Retired pool 1 remains rejected. Whole-directory deletion is not yet safe; retirement scope is publisher TS implementation, methodology TS protocol implementation after consumer migration, and the protocol RPC-proxy dependency.
+- **Refs:** `apps/cox-publisher/README.md`, `packages/cox-methodology/README.md`; native tests and ignored `.cox/native-transaction-verification.json`.
+
+### 2026-10-21 · Peter (Codex) · Adaptive custody and native recovery verification
+
+- **Area:** `packages/cox`, `packages/cox-client`, `apps/signer`, `apps/cox-publisher/native`, publisher service templates.
+- **What:** Verified default Basic compiled runtime (42 passing, one captured-live test ignored) and devnet dual collateral (45 passing, one ignored). SDK accepts either configured mint against combined reserves, binds the second vault, checks selected-mint liquidity and supports partial refunds without changing original principal. All 78 client tests and TypeScript checks pass. Signer pins optional dual custody and Epoch snapshot closure; 49 tests and type checks pass. Native publisher passes 82 tests, including paged discovery, optional custody ABI and 11 local backup/recovery tests; backup service template now selects Rust.
+- **Rules for agents:** Combined reserves do not guarantee liquidity in each mint. Dual collateral is a default-off devnet feature; never enable it in production. Snapshot rent returns only to the configured operator after references are copied. Native archive v2 remains confirmed provenance. No new protocol was committed, deployed or activated by this verification.
+- **Open:** Truthful adaptive methodology commitment, dynamic inclusion integration, deployment/configuration and actual Cloud Storage backup/IAM verification remain unfinished. Do not treat green local tests as live signer/service integration.
+- **Refs:** `packages/cox-client/README.md`, `apps/signer/README.md`, `apps/cox-publisher/README.md`.
+
+### 2026-10-21 · Peter (Codex) · Activation target postponed twelve hours
+
+- **Area:** New Basic/Epoch rollout timing and developer handoff.
+- **What:** Peter moved the target from 2026-10-22 00:00 UTC to 2026-10-22 12:00 UTC (13:00 Lagos), because Joel is temporarily unavailable. Updated the private activation intent and emailed Joel with Godwin copied.
+- **Rules for agents:** This is an unarmed target. Complete protocol verification and Joel's new-deployment API integration before configuring activation. Godwin's UI deployment remains independent. Legacy pool 1 stays retired and paused; shared work continues on `working`.
+- **Open:** New pools and native service have not been activated.
+
+### 2026-10-21 · Peter (Codex) · Versioned adaptive methodology and cross-pool verification
+
+- **Area:** `packages/cox`, `packages/cox-client`, `apps/signer`, `apps/cox-publisher/native`, Epoch compiled tests.
+- **What:** Added typed canonical adaptive methodology, schema-2 sealing and legacy/schema separation without changing Methodology account layout. Genesis prices must match the sealed origin. Native publisher validates canonical bytes and binds feed IDs, original prices, universe, geometric origin and freshness settings; Basic and Epoch must share the methodology digest. SDK adds the seal builder and schema-2 readers. Three compiled combined tests verify shared-snapshot Basic/Epoch execution, snapshot rent recovery and rollback when either pool fails late.
+- **Rules for agents:** Legacy JSON/minute policy is schema 1; adaptive canonical policy is typed Borsh schema 2. Sealed policy is a commitment, not an on-chain Pyth/formula proof. Preserve permanent origins separately from scheduled admission. Combined compiled runtime success is not live V1 transport or remote-signer evidence.
+- **Open:** Release remains uncommitted and undeployed; live signer bindings, V1 end-to-end and API integration remain readiness requirements.
+- **Refs:** `apps/cox-publisher/README.md`, `packages/cox-client/README.md`; final verification: 46 default Basic and 49 dual Basic compiled tests (one captured-live test ignored in each), 79 client tests, 52 signer tests, 91 native tests, 14 Epoch compiled tests including 3 cross-pool tests. Client/signer type checks pass.
+
+### 2026-10-21 · Peter (Codex) · Immutable inclusion and methodology preparation
+
+- **Area:** Rust methodology transition module and native preparation commands.
+- **What:** Added strict create-only `prepare-inclusion` and `prepare-methodology` commands. Inclusion artifacts bind universe lineage, explicit asset/feed mappings, retained permanent references and outstanding activation blockers. Methodology artifacts produce actual canonical bytes, digest, PDA and seal/admission arguments. Native benchmark supports 256 assets; methodology has 17 passing tests.
+- **Rules for agents:** Preparation does not activate assets or authenticate operator-supplied historical references. Current Basic runtime remains limited to 30 assets. Dynamic Basic roster, Epoch snapshot staging, verified activation price capture and runtime transition integration remain outstanding; do not claim live continuous inclusion is complete.
+- **Refs:** `apps/cox-publisher/README.md`, `packages/cox-methodology/rust/src/transition.rs`.
+
+### 2026-10-21 · Peter (Codex) · Deployable Epoch identity and guarded infrastructure preparation
+
+- **Area:** `packages/cox-epoch`, native Dockerfile, `deploy/dev/native-publisher-release.py`.
+- **What:** Read-only devnet check found the earlier Epoch placeholder undeployed and without a local program key. Generated a separate ignored mode-0600 program key and updated the declared identity, IDL and public prepared deployment record to `4RRBbmzExtPDMYNUgCaetfz3wNYkF2mrAYKZVY4iXz2w`. Rebuilt both Epoch variants and reran all 14 compiled tests. Added source-only committed-release staging, reviewed artifact hashes, pinned Linux build inputs and disabled/unarmed devnet preflight; four infrastructure tests pass. New read-only native feed probe verified 30 Pyth signatures/prices, whole-second alignment and Alchemy gRPC with zero submitted transactions.
+- **Rules for agents:** Program identity generation does not deploy a program. Operator keys remain in KMS. Never stage secrets or claim hash integrity proves source-build provenance. Docker daemon was unavailable; Linux release build and live backup/remote-signer rollout are unverified. Target remains 2026-10-22 12:00 UTC, unarmed. Joel received endpoints and the existing Secret Manager reference only; Peter declined emailing live API keys.
+- **Open:** Commit approval, committed Linux build, contract/service deployments, explicit signing bindings and live end-to-end/recovery verification.
+- **Refs:** `packages/cox-epoch/deploy/devnet.json`, `deploy/dev/README.md`; Epoch single SHA-256 `f53f3f29c5e795a8f1d1af73aab474283f0da4282de790cb5e108b73542fd3a7`, dual `b6dd486b206f4038daab1bc3a6696cffc3f40ad389e8b9b15eec797a5a20f6d7`.
