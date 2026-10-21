@@ -9,21 +9,70 @@
   "runtimeAuthority": "GNmM11ZMFqEu3FYewGNDunpSSJBw8KnkDxzCGpSbpGj6",
   "anchorVersion": "0.31.1",
   "sbfToolsVersion": "2.2.1",
-  "livePoolActive": true,
-  "status": "deployed-fee-upgrade-pool-1-live-fees-disabled",
-  "deployedCommit": "658afd5bca8ac381b5de4fd79c0cc914d1118d9f",
-  "deployedBuildSha256": "865dcb315e2b9359294df8640c9d6aa04b3f9c308e2f1b74ff5a8db0e36a9b3c",
-  "deploymentSignature": "2p2HtT5cUu2BEsrAAAW5jnvNPfbsXZX5mM17G3qynyH9MyoaS9KmGYaC2ngkRP6JVUfdvKZUEjjGwpPeVXGfb7tD",
+  "livePoolActive": false,
+  "status": "deployed-retirement-pool-1-retired-owners-paid",
+  "deployedCommit": "e7beb503d81c6ca0f27446f3b996a9aa4287be02",
+  "deployedBuildSha256": "453dd32179ea2fad1813138f4c83738c742bfeeb34ff097a76e4d0e9332837ad",
+  "deploymentSignature": "59pKWqVEf4w1H63Hfz88VwBkXDXGHKLbSmXoBmwo6e8P23qx5z9MrRBAcEX1SBQWMzEASmuJWM7WaJ6yfjcnnavf",
   "platformToolsVersion": "v1.48",
   "sbfRustVersion": "rustc 1.84.1-dev",
-  "binarySha256": "865dcb315e2b9359294df8640c9d6aa04b3f9c308e2f1b74ff5a8db0e36a9b3c",
-  "deployedDumpSha256": "865dcb315e2b9359294df8640c9d6aa04b3f9c308e2f1b74ff5a8db0e36a9b3c",
-  "verifiedAt": "2026-10-11T15:28:05.070Z",
-  "finalizedSlot": 509947231,
+  "binarySha256": "453dd32179ea2fad1813138f4c83738c742bfeeb34ff097a76e4d0e9332837ad",
+  "deployedDumpSha256": "453dd32179ea2fad1813138f4c83738c742bfeeb34ff097a76e4d0e9332837ad",
+  "verifiedAt": "2026-10-20T20:00:57.612Z",
+  "finalizedSlot": 513273832,
   "programAccount": {
     "programdataAddress": "9na87Wyc6wMMaVfk2JVf3ReP1XQUbEg38SUi7jh2b6KQ",
     "authority": "4yHCCpEmBvaCKAdfiY2kULM8qFJcDQR4uSrfAT3EWbw5",
-    "dataLen": 1029528,
-    "lastDeploySlot": "509947231"
+    "dataLen": 1245520,
+    "lastDeploySlot": "513273832"
+  },
+  "retirement": {
+    "pool": "F44g6A58N3cu9TGaDE1LiDB3r1BCxCrfFkMQV1DcEv37",
+    "sequence": "9756",
+    "stateDigest": "0d0c2cc98a87af1846fb40a0ea75e8e73cc29b58bc9c606a58dfa7f15a9af6e5",
+    "paused": true,
+    "retired": true,
+    "beginSignature": "3bS5JgxD8TbeYniaEyNmCYAu8yMKLryAuW2qmujxLs2a66qT9BK99gwymLXgLy8EU4U18jETaPoYym2h8MgEaQui",
+    "completedAt": "2026-10-20T20:00:16.333Z",
+    "verifiedSlot": 513274208,
+    "ownerCount": 4,
+    "totalPaidBaseUnits": "247077151",
+    "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+    "activeBaseUnits": "0",
+    "pendingBaseUnits": "0",
+    "payableBaseUnits": "0",
+    "remainingVaultBaseUnits": "79838",
+    "feesBaseUnits": "59409",
+    "residualBaseUnits": "20429",
+    "payments": [
+      {
+        "owner": "GpgFFekDB8usn1pCZCQ3pQ42GxUSd5WjuUbRdkZnnepN",
+        "tokenAccount": "CzFnSSP83x269rUWDqezF4fe1YfuvHYy5u581B6nLdPK",
+        "amountBaseUnits": "19025319",
+        "signature": "5tzYLdfPLYVLu6HQwv3TR2oAKcw1c284oTgsQwxqNHbVEpqgK1r8M7ZTGkGcVvvJKLg6kzTKNysjN8CR51Dnfyz5",
+        "finalizedSlot": 513274000
+      },
+      {
+        "owner": "8h3nCvoAprnvBFyov3Utnk1q4zbeEYxBVwvhR2FoEDEq",
+        "tokenAccount": "8p6MFrQHRq7vRePT4agyYZyu1N9p6uQ3vPeXfnwbhR3B",
+        "amountBaseUnits": "15326062",
+        "signature": "2rcXp5p9qyTGgHwvwakRLRxPVfuZvriaELqv8AMH68HqANJtNKFSzhSRMVXQ34X8bUWzp2Yq4whXDngkHyT6hegp",
+        "finalizedSlot": 513274010
+      },
+      {
+        "owner": "2vxYoyZMnsx4T2oVNSbM3HgtRzu6QGXKNYfuWDJX2dQ1",
+        "tokenAccount": "Hq2KQkNfEk5DoSfFK4G2ox2r3dwhAK7u4QHgB9VNAM7e",
+        "amountBaseUnits": "200663928",
+        "signature": "BjiQ8TcX5e8TMPaAthYfyVcmqooN7Eukn21ztKrakkynvbP8zFHH1v2hudzHwr7uYAouriFGBcthZYeLCRX5vJ1",
+        "finalizedSlot": 513274022
+      },
+      {
+        "owner": "4ECs2a5XnDkRHLPRLsYzJHtoSfbgxUYPuGzsmggLoqya",
+        "tokenAccount": "5NimcPAu6BmyW3XV3C3BiMK1dbxFESoknTXKfvDfqh1Y",
+        "amountBaseUnits": "12061842",
+        "signature": "5K8TJRk1nDCJSEk9S5o84dnz3BaaitekhPm5QPhN9yDRqSiDUidc1GBywdUZZy9Jq2YdRKFfDENKa8hzbWzht6cF",
+        "finalizedSlot": 513274032
+      }
+    ]
   }
 }
