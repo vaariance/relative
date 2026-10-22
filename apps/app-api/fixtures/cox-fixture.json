@@ -2,7 +2,7 @@
   "schema": "cox.app-api/fixture/v1",
   "source": {
     "oracle": "packages/cox/crates/cli",
-    "oracleSha256": "0ec4fbf687314333c08fa0cb5d8e44de483e19c208ce4c8f69537100cafb5ef4",
+    "oracleSha256": "51bbc85697acc32f6fe8adc96bfa2400c8d9a7b059c9bd81ba69dbaab843d206",
     "note": "Two synthetic assets and CRYPTO computed with the Rust cox-cli (reference, revalue, batch; legacy arithmetic benchmark). Synthetic prices and wallets; not market data."
   },
   "methodology": {

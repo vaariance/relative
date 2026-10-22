@@ -1,11 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { PublicKey } from "@solana/web3.js";
 
 const COX = new URL("../../../packages/cox/", import.meta.url);
-const ORACLE_FILES = ["Cargo.lock", "crates/math/src/lib.rs", "crates/cli/src/main.rs"];
+const ORACLE_SOURCES = ["crates/math/src", "crates/cli/src"];
 const SCALE = 1_000_000_000_000n;
 const E8 = 100_000_000n;
 
@@ -63,7 +63,8 @@ function batch(classes: ClassState[], requests: Request[], publicationBatch: num
 
 function oracleDigest(): string {
   const hash = createHash("sha256");
-  for (const path of ORACLE_FILES) hash.update(`${path}\n`).update(readFileSync(new URL(path, COX), "utf8").replace(/\r\n/g, "\n"));
+  const files = ["Cargo.lock", ...ORACLE_SOURCES.flatMap((dir) => readdirSync(new URL(dir, COX), { recursive: true, encoding: "utf8" }).filter((name) => name.endsWith(".rs")).map((name) => `${dir}/${name.replace(/\\/g, "/")}`))].sort();
+  for (const path of files) hash.update(`${path}\n`).update(readFileSync(new URL(path, COX), "utf8").replace(/\r\n/g, "\n"));
   return hash.digest("hex");
 }
 const ASSETS = [
