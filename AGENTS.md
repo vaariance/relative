@@ -1139,3 +1139,16 @@ another agent needs to know.
 ### 2026-10-22 · Joel (Claude Code) · Correction: app API test count
 
 - **What:** Corrects the 2026-10-22 "Fixture on the Rust CLI; app API reads Basic pool 2 and Epoch (not deployed)" entry. 67 app API tests pass, not 72, and nothing else in that entry changes.
+
+### 2026-10-22 · Joel (Claude Code) · Live APIs switched to Basic pool 2 and Epoch config 2
+
+- **Area:** Cloud Run `cox-app-api-live`, dev VM `cox-app-api-live`, `deploy/dev`, `pnpm-workspace.yaml`.
+- **What:** With Joel's approval, both live APIs moved off retired pool 1.
+  - **Cloud Run:** revision `cox-app-api-live-00009-jw9` (image `cox-app-api:d03dba2`) serves 100% at `api.getrelative.trade`. Traffic had been pinned to `00007-c8q`; Peter's failed `00008-ksl` never took it. Settings: `COX_POOL_ID=2`, `COX_POLL_MS=1000`, `COX_EPOCH_CONFIG=61Ly…yq9`, and history in `gs://colosseum-cox-app-api-history-dev/pool-2/`. RPC is the direct Alchemy secret `cox-direct-alchemy-devnet-rpc-urls` (Alchemy, then public devnet), and the pool 1 archive variable is removed. Firestore has a TTL policy for `coxSubmissionsPool2`.
+  - **VM:** `cox-app-api-live` runs at `669c0ae` with the same pool, Epoch and polling settings. Its RPC list is the same secret, kept in the root-only `/opt/eox/cox-app-api-live.env`.
+  - **Install fix:** VM installs failed on `working` (`ERR_PNPM_IGNORED_BUILDS`) for `@reown/appkit` and `keccak`, browser-only dependencies of the web login. `pnpm-workspace.yaml` now denies their install scripts.
+  - **Verified from outside:** pool 2 is adaptive, interval 1, gate `paused`, opening 1792670400. Fees show version 0 active and version 1 (2 bps, cap 200,000) scheduled. The Epoch draft `J8c7…VQs` lists 30 members. CORS `*` works, quotes return 409 `TRADING_CLOSED`, and the new revision logged no errors.
+- **Rules for agents:** Peter's native publisher can publish every second while the API polls each second, so a publication overwritten between polls can only be recovered from an archive. Without one the indexer stops at the gap and says so; it never skips it.
+- **Open:**
+  - **Peter:** where the native publisher's pool 2 archive will be readable before 12:00 UTC. The VM API can read a local directory (`COX_PUBLICATION_ARCHIVE`). Cloud Run needs per-sequence records in Cloud Storage; the native backup's object and manifest layout is not that format.
+  - **Fixture API:** `cox-app-api` on Cloud Run still runs the previous image and lacks the new fields.
