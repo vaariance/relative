@@ -51,12 +51,12 @@ function projection(value: unknown, classes: number): PreviewProjection | null {
   integer(p.sequence, "basicProjection.sequence");
   digest(p.stateDigest, "basicProjection.stateDigest");
   integer(p.publicationTimestamp, "basicProjection.publicationTimestamp");
+  amount(p.addedResidual, "basicProjection.addedResidual");
   if (!Array.isArray(p.classes) || p.classes.length !== classes) fail(`basicProjection must list ${classes} classes`);
   p.classes.forEach((row: Record<string, unknown>, i) => {
     if (integer(row?.classId, "basicProjection class") !== i) fail(`basicProjection class ${i} is out of order`);
     amount(row.backing, `basicProjection class ${i} backing`);
     amount(row.units, `basicProjection class ${i} units`);
-    amount(row.addedResidual, `basicProjection class ${i} addedResidual`);
   });
   return value as PreviewProjection;
 }

@@ -36,10 +36,11 @@ function record(timestamp = T, overrides: Record<string, unknown> = {}, sequence
       sequence,
       stateDigest: "ab".repeat(32),
       publicationTimestamp: T - 30,
+      addedResidual: "1",
       classes: [
-        { classId: 0, backing: "3000000", units: "2000000000000000000", addedResidual: "0" },
-        { classId: 1, backing: "0", units: "0", addedResidual: "0" },
-        { classId: 2, backing: "5000000", units: "5000000000000000000", addedResidual: "1" },
+        { classId: 0, backing: "3000000", units: "2000000000000000000" },
+        { classId: 1, backing: "0", units: "0" },
+        { classId: 2, backing: "5000000", units: "5000000000000000000" },
       ],
     },
     ...overrides,
@@ -79,7 +80,8 @@ describe("preview records", () => {
     expect(bad({ assets: [{ classId: 0, assetId: "BTC", priceE8: "0", reference: "1" }, { classId: 1, assetId: "ETH", priceE8: "1", reference: "1" }] })).toThrow("BTC priceE8");
     expect(bad({ cryptoClass: 0 })).toThrow("CRYPTO at class 0");
     expect(bad({ cryptoReference: "100" })).toThrow("CRYPTO reference");
-    expect(bad({ basicProjection: { sequence: 1, stateDigest: "ab".repeat(32), publicationTimestamp: T, classes: [] } })).toThrow("must list 3 classes");
+    expect(bad({ basicProjection: { sequence: 1, stateDigest: "ab".repeat(32), publicationTimestamp: T, addedResidual: "0", classes: [] } })).toThrow("must list 3 classes");
+    expect(bad({ basicProjection: { ...(record().basicProjection as object), addedResidual: undefined } })).toThrow("basicProjection.addedResidual");
     expect(() => parsePreview("{", T, IDENTITY)).toThrow("not JSON");
   });
 });

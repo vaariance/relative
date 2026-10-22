@@ -287,13 +287,13 @@ export interface PreviewProjectionClass {
   classId: number;
   backing: BaseUnits;
   units: UnitQuanta;
-  addedResidual: BaseUnits;
 }
 
 export interface PreviewProjection {
   sequence: number;
   stateDigest: string;
   publicationTimestamp: UnixSeconds;
+  addedResidual: BaseUnits;
   classes: PreviewProjectionClass[];
 }
 
