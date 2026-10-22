@@ -14,7 +14,12 @@ describe("batch clock", () => {
   });
 
   it("rejects an origin that is not on a minute boundary", () => {
-    expect(() => batchFor(origin, origin + 1)).toThrow(/minute-aligned/);
+    expect(() => batchFor(origin, origin + 1)).toThrow(/aligned to the publication interval/);
+  });
+
+  it("counts one-second batches from an origin on any whole second", () => {
+    expect(batchFor(origin + 10, origin + 1, 1, 5)).toEqual({ batch: 10, cutoff: origin + 11, acceptanceDeadline: origin + 16 });
+    expect(batchFor(origin, origin + 1, 1, 5)).toEqual({ batch: 0, cutoff: origin + 1, acceptanceDeadline: origin + 6 });
   });
 });
 

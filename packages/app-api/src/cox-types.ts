@@ -8,6 +8,8 @@ export const COX_TRANSFER_RULE = "COX/TRANSFER/MVP-0";
 export const BATCH_SECONDS = 60;
 export const ARCHIVE_DEADLINE_SECONDS = 30;
 export const ACCEPTANCE_DEADLINE_SECONDS = 55;
+export const ADAPTIVE_INTERVAL_SECONDS = 1;
+export const ADAPTIVE_ACCEPTANCE_DEADLINE_SECONDS = 5;
 export const MAX_TRADE_AGE_MINUTES = 30;
 export const DELAYED_AFTER_MISSED_CUTOFFS = 3;
 export const HALTED_AFTER_MISSED_CUTOFFS = 60;
@@ -19,8 +21,16 @@ export type Scaled = string;
 export type BaseUnits = string;
 export type UnitQuanta = string;
 export type ClassId = string;
-export type PriceVenue = "kraken" | "coinbase" | "bybit";
-export type FallbackStep = 1 | 2 | 3 | 4;
+export type PriceVenue = "kraken" | "coinbase" | "bybit" | "pyth";
+export type FallbackStep = 0 | 1 | 2 | 3 | 4;
+export type PoolMode = "minute" | "adaptive";
+export type TradingGate = "open" | "paused" | "not-initialized" | "before-opening" | "retired";
+
+export interface TradingStatus {
+  open: boolean;
+  gate: TradingGate;
+  opensAt: UnixSeconds | null;
+}
 
 export interface Methodology {
   digest: string | null;
@@ -37,9 +47,13 @@ export interface CoxDeployment {
   poolAddress: string | null;
   collateralMint: string | null;
   collateralDecimals: number | null;
+  secondaryCollateralMint: string | null;
   testCollateral: true;
   transferRule: typeof COX_TRANSFER_RULE;
   methodology: Methodology;
+  mode: PoolMode;
+  publicationIntervalSeconds: number;
+  tradingOpensAt: UnixSeconds | null;
   fixtureSource: string | null;
 }
 
@@ -191,6 +205,7 @@ export interface CoxStatus {
   reconciliation: VaultReconciliation | null;
   fees: FeeStatus | null;
   currentBatch: Batch | null;
+  trading: TradingStatus;
 }
 
 export interface VaultReconciliation {
@@ -288,6 +303,7 @@ export type CoxErrorCode =
   | "TRANSACTION_NOT_FOUND"
   | "RATE_LIMITED"
   | "FEE_CHANGED"
+  | "TRADING_CLOSED"
   | "INVALID_REQUEST"
   | "NOT_FOUND"
   | "METHOD_NOT_ALLOWED"
@@ -307,6 +323,7 @@ export interface DepositInput {
   minimumUnits: UnitQuanta;
   expiryBatch: number;
   expectedFeeVersion?: string;
+  collateralMint?: string;
 }
 
 export interface SwitchInput {
@@ -331,11 +348,13 @@ export interface RedeemInput {
 export interface RequestActionInput {
   owner: string;
   requestId: string;
+  collateralMint?: string;
 }
 
 export interface WithdrawInput {
   owner: string;
   amount: BaseUnits;
+  collateralMint?: string;
 }
 
 export type QuoteOperation = "deposit" | "switch" | "redeem";
@@ -408,13 +427,13 @@ export interface Submission {
   error: string | null;
 }
 
-export function batchFor(now: UnixSeconds, origin: UnixSeconds): Batch {
-  if (!Number.isSafeInteger(now) || !Number.isSafeInteger(origin) || origin % BATCH_SECONDS !== 0) {
-    throw new Error("batch times must be whole seconds with a minute-aligned origin");
+export function batchFor(now: UnixSeconds, origin: UnixSeconds, interval = BATCH_SECONDS, deadline = ACCEPTANCE_DEADLINE_SECONDS): Batch {
+  if (!Number.isSafeInteger(now) || !Number.isSafeInteger(origin) || !Number.isSafeInteger(interval) || interval < 1 || origin % interval !== 0) {
+    throw new Error("batch times must be whole seconds with an origin aligned to the publication interval");
   }
-  const batch = now < origin ? 0 : Math.floor((now - origin) / BATCH_SECONDS) + 1;
-  const cutoff = origin + batch * BATCH_SECONDS;
-  return { batch, cutoff, acceptanceDeadline: cutoff + ACCEPTANCE_DEADLINE_SECONDS };
+  const batch = now < origin ? 0 : Math.floor((now - origin) / interval) + 1;
+  const cutoff = origin + batch * interval;
+  return { batch, cutoff, acceptanceDeadline: cutoff + deadline };
 }
 
 export function systemState(missedCutoffs: number, paused: boolean, incident: boolean): SystemState {

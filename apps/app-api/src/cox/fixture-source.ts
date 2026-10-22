@@ -66,9 +66,13 @@ export class CoxFixtureSource implements CoxSource {
       poolAddress: null,
       collateralMint: null,
       collateralDecimals: null,
+      secondaryCollateralMint: null,
       testCollateral: true,
       transferRule: COX_TRANSFER_RULE,
       methodology: this.fixture.methodology,
+      mode: "minute",
+      publicationIntervalSeconds: BATCH_SECONDS,
+      tradingOpensAt: null,
       fixtureSource: `${this.fixture.source.oracle}@${this.fixture.source.oracleSha256.slice(0, 12)}: ${this.fixture.source.note}`,
     };
   }
@@ -135,6 +139,7 @@ export class CoxFixtureSource implements CoxSource {
       reconciliation: { sequence: latest.identity.sequence, vault: latest.ledger.vault, ledger: latest.ledger.vault, fees: "0", covered: true },
       fees: FEE_STATUS,
       currentBatch: current,
+      trading: { open: false, gate: "not-initialized", opensAt: null },
     };
   }
 
