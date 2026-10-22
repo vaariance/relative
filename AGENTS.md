@@ -1135,3 +1135,7 @@ another agent needs to know.
   - **Previews:** live benchmark and portfolio previews from the Pyth stream need the Pyth key and are not built.
   - **Godwin:** web changes for one-second expiry, `status.trading`, the second mint and the Epoch routes.
 - **Refs:** `apps/app-api/README.md` (Adaptive pools and Epoch), commits `0f42194`..`11c49ed`.
+
+### 2026-10-22 · Joel (Claude Code) · Correction: app API test count
+
+- **What:** Corrects the 2026-10-22 "Fixture on the Rust CLI; app API reads Basic pool 2 and Epoch (not deployed)" entry. 67 app API tests pass, not 72, and nothing else in that entry changes.
