@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import anchor from "@coral-xyz/anchor";
 import type { Methodology, Pool, Registry } from "@cox/client";
+import type { ChainPublication } from "../src/cox/chain.js";
 import { describe, expect, it } from "vitest";
-import { classIds, parseManifest } from "../src/cox/chain.js";
+import { classIds, parseManifest, toPublication } from "../src/cox/chain.js";
 import { feesMigrated, tradingStatus } from "../src/cox/live-source.js";
 
 const ORIGIN = 1_792_623_921n;
@@ -90,5 +91,27 @@ describe("adaptive trading gate", () => {
 
   it("treats adaptive and migrated pools as fee-aware", () => {
     expect([1, 2, 3, 4].map((schemaVersion) => feesMigrated(pool({ schemaVersion })))).toEqual([false, true, false, true]);
+  });
+});
+
+describe("adaptive publications", () => {
+  it("lists no missed batches across idle seconds", () => {
+    const roster = [0, 1];
+    const manifest = parseManifest(methodology(canonical(roster, [1, 2]), roster));
+    const n = (value: number | bigint) => new anchor.BN(value.toString());
+    const side = { preBacking: n(0), preUnits: n(0), postBacking: n(0), postUnits: n(0) };
+    const publication = {
+      prices: roster.map(() => ({ priceE8: n(100), venue: 3, step: 0, candleStart: n(0), tradeAgeMinutes: 0 })),
+      stateDigest: [...Buffer.alloc(32, 1)],
+      committedAt: n(ORIGIN + 43_320n),
+      state: {
+        prices: [n(100), n(100)], sequence: 1n, batch: 43_320n, cutoff: ORIGIN + 43_320n, manifest: [...Buffer.alloc(32)], snapshot: [...Buffer.alloc(32)], benchmark: 1n,
+        references: [1n, 1n, 1n], classes: [side, side, side], active: 0n, pending: 0n, payable: 0n, residual: 0n,
+        executed: 0, rejected: 0, receiptRoot: [...Buffer.alloc(32)], feeState: null,
+      },
+    } as unknown as ChainPublication;
+    const result = toPublication(publication, null, { program: "p", poolId: "2", manifest, predecessorBatch: 0, finalization: { transaction: null, slot: 1, finalized: false } });
+    expect(result.identity).toMatchObject({ sequence: 1, batch: 43_320, predecessorBatch: 0, missedBatches: [] });
+    expect(result.prices.map((p) => [p.venue, p.step])).toEqual([["pyth", 0], ["pyth", 0]]);
   });
 });

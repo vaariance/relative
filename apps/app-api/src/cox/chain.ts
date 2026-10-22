@@ -206,7 +206,7 @@ export function toPublication(publication: ChainPublication, batch: BatchAccount
   const sequence = Number(state.sequence);
   const scheduled = Number(state.batch);
   const missedBatches: number[] = [];
-  if (context.predecessorBatch !== null) for (let b = context.predecessorBatch + 1; b < scheduled; b += 1) missedBatches.push(b);
+  if (context.predecessorBatch !== null && context.manifest.mode === "minute") for (let b = context.predecessorBatch + 1; b < scheduled; b += 1) missedBatches.push(b);
   const feeState = state.feeState ?? null;
   const committedFees = feeState?.fees ?? 0n;
   const batchFees = feeState?.batchFees ?? 0n;

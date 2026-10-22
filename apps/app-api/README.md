@@ -132,7 +132,7 @@ Pools migrated to `COX/FEES/V1` charge `min(floor(gross × bps / 10000), cap)` i
 
 ## Adaptive pools and Epoch
 
-`deployment.mode` is `minute` for the original pools and `adaptive` for schema-4 pools such as Basic pool 2. Adaptive pools publish Pyth prices (`venue: "pyth"`, `step: 0`, no exchange symbols) on a one-second grid from an origin on any whole second, and stay silent while idle. Their batches are seconds since origin, so `expiryBatch` is counted in seconds; builders accept at most a week ahead. `missedCutoffs` stays 0 for them because silence is normal. `deployment.publicationIntervalSeconds` and `status.currentBatch` give the clock to use.
+`deployment.mode` is `minute` for the original pools and `adaptive` for schema-4 pools such as Basic pool 2. Adaptive pools publish Pyth prices (`venue: "pyth"`, `step: 0`, no exchange symbols) on a one-second grid from an origin on any whole second, and stay silent while idle. Their batches are seconds since origin, so `expiryBatch` is counted in seconds; builders accept at most a week ahead. `missedCutoffs` stays 0 and `missedBatches` stays empty for them because silence is normal. `deployment.publicationIntervalSeconds` and `status.currentBatch` give the clock to use.
 
 `status.trading` says whether new requests are accepted: `{ open, gate, opensAt }`, where `gate` is `retired`, `paused` (registry paused), `not-initialized` (no first publication yet), `before-opening` (before `tradingOpensAt`) or `open`. Builders and quotes check the pool before simulating and return `TRADING_CLOSED` with the reason; the program enforces the same rules.
 
