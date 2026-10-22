@@ -29,6 +29,7 @@ usermod -aG docker eox
 rm -rf /opt/eox/app
 mkdir -p /opt/eox/app /opt/eox/logs
 tar xzf "$archive" -C /opt/eox/app
+bash /opt/eox/app/deploy/dev/retire-exchange-stack.sh
 
 if [ ! -f /opt/eox/.env ]; then
   password="$(openssl rand -hex 24)"
@@ -103,16 +104,6 @@ if [ -f /etc/systemd/system/cox-publication-archive-copy.timer ]; then
 fi
 install -d -o eox -g eox -m 0750 /opt/eox/state/cox-app-api-live
 start_service cox-app-api-live 8791
-
-install -m 0644 /opt/eox/app/deploy/dev/cox-archiver.service /etc/systemd/system/cox-archiver.service
-systemctl daemon-reload
-systemctl enable cox-archiver >/dev/null
-systemctl restart cox-archiver
-sleep 5
-if ! systemctl is-active --quiet cox-archiver; then
-  journalctl -u cox-archiver -n 40 --no-pager >&2
-  exit 1
-fi
 
 echo "$commit" > /opt/eox/DEPLOYED_COMMIT
 chown eox:eox /opt/eox/DEPLOYED_COMMIT

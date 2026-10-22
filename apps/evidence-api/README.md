@@ -1,6 +1,6 @@
 # COX evidence API
 
-Read-only HTTP access to archived cutoff prices and their exact source artifacts. The publisher and monitor use this service to read evidence without connecting directly to PostgreSQL. It reports archived observations; it does not calculate references or fetch exchange prices on demand.
+Read-only historical HTTP access to archived exchange cutoff prices and their exact source artifacts. The retired exchange publisher and monitor used this service; the native Pyth publisher reads its own signed-feed archive. Existing consumers can read historical evidence without connecting directly to PostgreSQL. This API does not calculate references or fetch exchange prices on demand.
 
 ## Run
 
@@ -45,4 +45,4 @@ pnpm --filter @eox/evidence-api build
 pnpm --filter @eox/evidence-api test
 ```
 
-See the [archiver](../../packages/ingestion/README.md) for collection behavior and the [deployment guide](../../deploy/dev/README.md) for service operations.
+The exchange archiver and monitor are retired. Existing snapshot, source-artifact and append-only database records remain available as historical evidence. Native Pyth publication does not append new exchange candles to this API. See the [deployment guide](../../deploy/dev/README.md) for service operations and retirement safeguards.

@@ -410,6 +410,11 @@ the Rust math/program suites. Historical expected vectors are retained unchanged
 the retired TypeScript generator is no longer an executable maintenance command.
 These checks do not establish live oracle authenticity or deployment readiness.
 
+The following P1 exchange handoff is historical. The exchange archiver, monitor,
+`price-feeds` and exchange-only ingestion implementation were retired in favor
+of native Pyth validation. Preserve historical evidence and vectors; do not
+recreate exchange polling from this earlier handoff.
+
 Joel: use only `packages/price-feeds` for exchanges; archive source evidence and
 fallback attempts, produce canonical observations/snapshot digests and feed
 report. API must expose publication sequence separately from scheduled batch,

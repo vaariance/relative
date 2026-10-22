@@ -161,19 +161,16 @@ defines the limits, administration and versioned accounting.
 
 ## Verification and trust
 
-The price pipeline archives closed one-minute candles and uses a deterministic
-selection policy: Kraken, then eligible Coinbase and Bybit fallbacks, with exact
-USD conversion where required. The policy also defines bounded last-trade carry
-and rejection rules. It does not average venues or choose whichever price looks
-most favourable. [Price-source policy](packages/price-feeds/README.md)
+The native publisher validates signed Pyth observations and computes the benchmark
+and asset references in Rust. Its adaptive on-chain publications commit the
+operator-controlled benchmark and settle eligible work. Archived inputs,
+methodology identities, publication commitments and receipts make calculations
+inspectable; they do not eliminate operator trust.
 
-The publisher attests to the admitted inputs, and the program checks their
-format, timing, linkage and arithmetic. Archived inputs, methodology hashes,
-publication commitments and receipts make the calculation inspectable.
-Independent monitoring has a separate implementation; its
-[documented verification scope](apps/cox-monitor/README.md) matters when
-interpreting a verdict. Hashes do not establish that an exchange's price was true,
-and archive consistency is not the same as a complete publication audit.
+The old exchange candle archiver, exchange clients and archive monitor are
+retired. Historical evidence remains available through the evidence API and
+append-only database. Recorded exchange samples are retained as historical
+fixtures in `packages/cox/fixtures/legacy-exchange`; they are not live inputs.
 
 Users sign their own trading requests. Runtime publishing uses a restricted,
 non-exportable KMS key. Administrative and upgrade powers remain separate and
@@ -222,8 +219,6 @@ legal review remain necessary before a real-money release.
 | [COX program and math](packages/cox/README.md) | Rust calculation engine, Anchor program, fixtures and custody tests |
 | [Methodology](packages/cox-methodology/README.md) | Rust inclusion lifecycle, geometric benchmark and Epoch research simulation |
 | [Solana client](packages/cox-client/README.md) | Account readers, unsigned instruction builders and simulations |
-| [Price feeds](packages/price-feeds/README.md) | Rate-limited venue clients and exact price conversion |
-| [Ingestion](packages/ingestion/README.md) | Minute snapshot archive and feed reports |
 | `packages/evidence-store` | Append-only PostgreSQL evidence and price storage |
 | [Evidence API](apps/evidence-api/README.md) | Archived snapshots and source artifacts |
 | [App API](apps/app-api/README.md) | Fixture/live data, portfolios and wallet transaction preparation |
@@ -231,7 +226,6 @@ legal review remain necessary before a real-money release.
 | [Publisher](apps/cox-publisher/README.md) | Snapshot publication and persistent batch execution |
 | [Signer](apps/signer/README.md) | Restricted runtime signing through Cloud KMS |
 | [Signing client](packages/signing/README.md) | Typed signing requests and public-key discovery |
-| [Monitor](apps/cox-monitor/README.md) | Independent archive and optional venue checks |
 | [Web app](apps/web/README.md) | Market views and wallet interaction |
 | [Dev infrastructure](deploy/dev/README.md) | VM services, logs, database and backups |
 

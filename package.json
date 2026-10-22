@@ -20,8 +20,6 @@
     "cox:program:build": "node packages/cox/scripts/deployment.ts build",
     "cox:program:test": "cargo test --manifest-path packages/cox/crates/program-tests/Cargo.toml --locked",
     "cox:deploy": "node packages/cox/scripts/deployment.ts deploy",
-    "cox:archiver": "pnpm --filter @eox/ingestion cox:archiver",
-    "cox:feed-check": "pnpm --filter @eox/ingestion cox:feed-check",
     "cox:swap:test": "pnpm --filter @cox/client test:swap"
   }
 }

@@ -1,9 +1,9 @@
 # Development infrastructure
 
 Scripts and systemd templates for a Solana devnet deployment on a Debian Compute
-Engine VM. The shared deployment runs PostgreSQL, the price archiver, evidence
-API, fixture app API and live app API. Publisher and monitor installations are
-separate from the shared deployment. The signing service runs on Cloud Run.
+Engine VM. The shared deployment runs PostgreSQL, the historical evidence
+API, fixture app API and live app API. The Rust/Pyth publisher is installed
+separately. The exchange archiver and monitor are retired. The signing service runs on Cloud Run.
 Server RPC connects directly to Alchemy with public devnet fallback.
 
 The supplied defaults target project `colosseum-eox`, instance `eox-dev`, zone
@@ -31,8 +31,8 @@ The signer's Google identity-token audience is supplied privately at deployment
 and remains unchanged when calling its alias.
 
 The VM hostname does not expose its localhost services. Continue using SSH
-tunnels for evidence, monitor and VM API access. Publisher and archiver are
-background processes with no HTTP endpoint. These aliases do not automatically
+tunnels for evidence and VM API access. The publisher is a
+background process with no HTTP endpoint. These aliases do not automatically
 change application configuration to use the new hostnames.
 
 ## Services
@@ -42,13 +42,27 @@ change application configuration to use the new hostnames.
 | `eox-evidence-api` | Evidence API, `127.0.0.1:8787` |
 | `cox-app-api` | Synthetic fixture API, `127.0.0.1:8790` |
 | `cox-app-api-live` | Devnet-backed app API for Basic pool 2 and Epoch config 2, `127.0.0.1:8791`; RPC URLs (direct Alchemy, then public devnet) in the root-only `/opt/eox/cox-app-api-live.env`; reads missed publications from `gs://colosseum-cox-publication-archives-dev/pool-2/history/` |
-| `cox-archiver` | One-minute venue snapshot archive |
 | `cox-publisher` | Snapshot publication and batch execution; installed separately |
-| `cox-monitor` | Archive verdicts, `127.0.0.1:8792`; installed separately |
 
 PostgreSQL 16 runs in Docker on host port 5433. Live API configuration and
 transaction state are separate from the fixture service. A service reporting
 `active` establishes process status, not successful publications or wallet fills.
+
+## Retired exchange services
+
+`cox-archiver` and `cox-monitor` are stopped, disabled and masked. Their source,
+exchange clients and deploy templates have been removed. Run the idempotent
+retirement helper as root when bringing an older VM forward:
+
+```sh
+sudo bash deploy/dev/retire-exchange-stack.sh
+```
+
+Do not unmask these units or recreate exchange polling. Preserve the database,
+append-only records, archived source payloads, `/opt/eox/state/cox-archiver`,
+`/var/lib/cox-monitor` and historical cloud objects. The evidence API remains a
+read-only historical interface; native Pyth validation, custody checks and
+publisher recovery remain independent of the retired services.
 
 ## Shared service deployment
 
@@ -64,7 +78,8 @@ The script archives committed `HEAD`; uncommitted files are excluded. Overrides:
 `GCP_PROJECT`, `GCP_ZONE`, `GCP_INSTANCE` and `GCP_BACKUP_BUCKET`. Select the cloud
 account explicitly. This is a deployment action: it replaces the shared release,
 runs migrations and restarts its managed services. It does not deploy the Solana
-program, Cloud Run signer or independently installed monitor.
+program or Cloud Run signer. It stops and masks the retired exchange archiver
+and monitor before installing the shared release.
 The publisher unit is supplied as a template and requires its own installation.
 
 `setup.sh` installs Docker and Node.js 22 when missing, then pnpm 11.18.0.
@@ -83,7 +98,7 @@ The native publisher runs as a separately built Rust executable and does not nee
 | `/opt/eox/logs/backup.log` | Database backup log |
 | `/etc/cox-publisher/native.json` | Private native publisher configuration |
 | `/var/lib/cox-publisher` | Publisher journal and recovery state |
-| `/var/lib/cox-monitor/state.json` | Monitor progress and verdicts |
+| `/var/lib/cox-monitor/state.json` | Preserved historical monitor verdicts; no running service |
 
 RPC URLs may contain credentials in their path or query. Store them in private
 runtime configuration and avoid printing complete URLs. Keep the database off
@@ -104,9 +119,7 @@ Then inspect services and follow their logs:
 ```sh
 systemctl list-units 'cox-*' 'eox-*' --type=service --all
 sudo journalctl -u cox-publisher -f
-sudo journalctl -u cox-archiver -n 50 --no-pager
 sudo journalctl -u cox-app-api-live -n 50 --no-pager
-sudo journalctl -u cox-monitor -n 50 --no-pager
 ```
 
 Ctrl+C stops log viewing without stopping the service. Check an installed
@@ -173,7 +186,6 @@ sudo journalctl -u cox-publisher-backup -n 30 --no-pager
 ## Separate components
 
 - [Publisher configuration and recovery](../../apps/cox-publisher/README.md)
-- [Monitor deployment](../../apps/cox-monitor/README.md)
 - [App API configuration](../../apps/app-api/README.md)
 - [Signer deployment and authentication](../../apps/signer/README.md)
 - [Solana program deployment](../../packages/cox/deploy/README.md)
