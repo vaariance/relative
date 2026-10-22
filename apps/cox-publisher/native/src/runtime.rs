@@ -251,7 +251,7 @@ impl Snapshots for SnapshotArchive {
         closing_ms: Option<u64>,
         now_ms: u64,
     ) -> Result<Option<Observation>, worker::Error> {
-        let value = if let Some(close) = closing_ms {
+        let mut value = if let Some(close) = closing_ms {
             if close > now_ms {
                 return Ok(None);
             }
@@ -267,6 +267,14 @@ impl Snapshots for SnapshotArchive {
                 .map_err(|_| worker::Error::Storage)?
                 .clone()
         };
+        if closing_ms.is_none()
+            && value.as_ref().is_some_and(|value| value.timestamp_us / 1000 > now_ms)
+        {
+            value = self.history.exact(
+                &self.anchor.universe_digest,
+                (now_ms / 1000).checked_mul(1_000_000).ok_or(worker::Error::Clock)?,
+            ).map_err(|_| worker::Error::Storage)?;
+        }
         let Some(value) = value else { return Ok(None) };
         self.validate(&value)?;
         let timestamp = value.timestamp_us / 1000;
@@ -539,7 +547,7 @@ pub async fn run(path: &Path) -> Result<(), Error> {
             let delay=match tick{
                 Ok(ref value)=>wake_delay(value,now_ms()?,tokio::time::Instant::now()<notification_until),
                 Err(worker::Error::Storage|worker::Error::Clock|worker::Error::Signer)=>return Err(Error::Publisher),
-                Err(_)=>{eprintln!("Publisher reconciliation deferred");CADENCE_MS},
+                Err(error)=>{eprintln!("Publisher reconciliation deferred: {error:?}");CADENCE_MS},
             };
             let idle=matches!(tick,Ok(Tick::Idle(_)));
             let deadline=tokio::time::Instant::now()+Duration::from_millis(delay);
@@ -745,7 +753,7 @@ mod tests {
         );
         assert!(archive.select(&[], Some(2_500), 80_000).unwrap().is_none());
         assert!(archive.select(&[], None, 9_000).unwrap().is_none());
-        assert!(archive.select(&[], None, 2_000).unwrap().is_none());
+        assert_eq!(archive.select(&[], None, 2_000).unwrap().unwrap().timestamp_us, 2_000_000);
         let work = [Work::Entry {
             id: "basic".into(),
             pool: Pool::Basic,
@@ -753,6 +761,23 @@ mod tests {
         }];
         assert!(archive.select(&work, None, 3_000).unwrap().is_none());
         assert!(archive.select(&[], None, 3_001).unwrap().is_some());
+        std::fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
+    fn a_new_feed_second_during_account_reads_does_not_hide_the_eligible_snapshot() {
+        let path = directory();
+        let mut history = FileHistory { directory: path.clone() };
+        history.append(&observation(2_000_000)).unwrap();
+        history.append(&observation(3_000_000)).unwrap();
+        let archive = SnapshotArchive::new(anchor(), history, 5_000).unwrap();
+        let mut work = [Work::Entry {
+            id: "basic".into(), pool: Pool::Basic, eligible_after_ms: 1_500,
+        }];
+        assert_eq!(archive.select(&work, None, 2_500).unwrap().unwrap().timestamp_us, 2_000_000);
+        work[0] = Work::Entry { id: "basic".into(), pool: Pool::Basic, eligible_after_ms: 2_000 };
+        assert!(archive.select(&work, None, 2_500).unwrap().is_none());
+        assert!(archive.select(&[], None, 1_500).unwrap().is_none());
+        assert!(archive.select(&[], Some(2_500), 4_000).unwrap().is_none());
         std::fs::remove_dir_all(path).unwrap();
     }
     #[test]
