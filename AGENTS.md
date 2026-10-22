@@ -1232,3 +1232,42 @@ another agent needs to know.
 - **Open:**
   - **Peter:** incremental history uploads, and the first real preview record.
   - **Godwin:** preview display.
+
+### 2026-10-22 · Peter (Codex) · Inclusion deferred to prioritize activation
+
+- **Area:** Protocol work sequencing and local unfinished inclusion work.
+- **What:** Peter deferred dynamic inclusion after it expanded beyond the activation window. Approved TypeScript cleanup was committed and pushed in `2fb7a7e` and `1f0642d`, superseding the earlier cleanup entry's pending-approval status. Unfinished inclusion changes were saved privately under `.cox/deferred-inclusion-20261022`, then restored out of the working tree; no inclusion upgrade was deployed.
+- **Rules for agents:** Keep the existing 30-asset release for activation work. Do not resume inclusion or modify API/UI as part of this closeout. Preserve unrelated working-tree files.
+- **Open:** Live Basic deposit/redemption, activation verification and incremental backup/retention remain outstanding.
+
+### 2026-10-22 · Peter (Codex) · Per-second preview export prepared for Joel
+
+- **Area:** Native publisher preview exporter and service template.
+- **What:** Added a separate Rust export command for `pool-2/preview/<unix seconds>.json`, schema `relative.preview/v1`, containing source time, benchmark, 30 prices/references and optional Basic class backing projections using existing protocol maths. Confirmed ledger metadata is exported during existing reads; preview cloud retries do not block settlement. Joel was emailed the format, with Godwin copied, explicitly stating it is not deployed. All 105 native tests pass, including six preview tests; final diff whitespace check passes.
+- **Rules for agents:** Treat previews as estimates, preserve source timestamps and missing seconds, and reconcile actual publications. References alone are not portfolio NAV. Publication history remains a separate archive. No new RPC reads, credentials, financial logic or activation changes belong in this exporter.
+- **Open:** Source awaits scoped commit approval, Linux release and live installation/sample verification. Cloud checks/installation are blocked because automatic approval review hit an account usage limit; the rejected action did not execute. Scheduled targets have passed without activation executed by this work; current chain state requires fresh verification.
+- **Refs:** `apps/cox-publisher/README.md`, `deploy/dev/cox-publisher-preview.service`, `apps/cox-publisher/native/tests/preview.rs`.
+
+### 2026-10-22 · Peter (Codex) · Benchmark archive latency and cloud backup lag measured
+
+- **Area:** Read-only latency audit of native benchmark files and cloud recovery/history.
+- **What:** At 18:47 UTC, 1,790 immutable observations over 30 minutes had source-timestamp-to-local-file-write latency median 135.95 ms, p95 140.64 ms, p99 143.72 ms and maximum 159.61 ms. VM clock reports synchronized; the recent 598-observation ten-minute sample has no missing seconds. This includes feed delivery, validation, computation and file writing, not isolated CPU time or on-chain settlement.
+- **Rules for agents:** Local benchmark availability is distinct from cloud delivery. At 18:48 UTC the newest completed cloud recovery manifest was uploaded at 11:30:02 UTC and contains benchmarks only through 11:28:10 UTC (about 7h20m behind). Recent 30-second/5-minute benchmark objects were absent. Backup service logs show repeated 120-second start timeouts. Cloud publication history still contains only sequence 0, despite local/on-chain progress to 4. APIs must retain honest archive-gap reporting; do not skip publications or label estimates confirmed.
+- **Open:** Incremental uploads and retention must restore cloud progress and prioritize publication history. Per-second preview export remains separate and undeployed. No service, pool or API was changed by this audit.
+- **Refs:** Private `.cox/benchmark-latency-audit-output.txt`, `.cox/benchmark-cloud-lag-audit.json`; existing backup implementation and service timeout in `apps/cox-publisher/native/src/backup.rs` and `deploy/dev/cox-publisher-backup.service`.
+
+### 2026-10-22 · Peter (Codex) · Incremental archive recovery and retention prepared
+
+- **Area:** Native backup/restore, preview release and operational service/policy files.
+- **What:** Peter authorized archive repair, preview rollout and Basic activation after readiness. Prepared opt-in verified upload receipts, exclusive backup lock, publication-first ordering, 32 bounded uploads/restores, and restart progress reuse before a manifest exists. Local price retention accepts 36–48 hours, pruning only after a complete acknowledged cloud snapshot; latest observations, anchors, publication evidence and financial pointers remain. Local receipt garbage collection and three completed markers bound local metadata. Prepared seven-day cloud expiry only for preview and recovery-manifest prefixes; recovery CAS and publication history are preserved. Longer low-priority backup service startup accommodates initial catch-up.
+- **Rules for agents:** Receipt reuse assumes immutable cloud objects; do not delete/overwrite recovery CAS objects or apply lifecycle expiry to that prefix. Clear receipts and fully revalidate if cloud immutability changes. Basic/Epoch remain paused/unsealed during installation and recovery verification. Preview residual is shared at `basicProjection.addedResidual`, not on each class row; Joel was emailed the required API correction.
+- **Open:** Tested source awaits scoped commit approval before release; live catch-up, isolated restore, preview sample/consumer verification and Basic activation remain pending. No API/UI source was changed.
+- **Refs:** `apps/cox-publisher/README.md`, `deploy/dev/cox-publisher-backup.service`, `deploy/dev/cox-publisher-preview.service`, `deploy/dev/cox-archive-lifecycle.json`; 111 native tests pass.
+
+### 2026-10-22 · Peter (Codex) · Epoch lifecycle verified and next draft prepared
+
+- **Area:** Epoch compiled verification, devnet config 2 and its next draft.
+- **What:** Peter requested item 4 (Epoch verification/activation). All 17 engine tests and 13 compiled devnet runtime tests pass against the exact deployed binaries, covering candidate payouts, held fees, zero-score/unexecuted refunds, exact closing/void deadlines, dual custody, snapshot cleanup and combined Basic/Epoch rollback. The production-only dual-collateral rejection test was excluded from this devnet-artifact run; an obsolete single-build artifact initially failed its program-ID binding and was replaced by the verified deployed artifact for the devnet suite. No contract source changed.
+- **Rules for agents:** Prepared 20:00–00:00 UTC draft `6nxNFyTzB8xNtDD1sQpkjTBh4K9xefVBrzmtr6e8ZZHo`, 30 exact configured assets, unsealed with empty vaults, finalized audit slot 513985219. A real devnet unsigned simulation of native V1 publication plus snapshot close succeeded at slot 513985894 (1,853 bytes, 45,416 compute units). This is simulation, not a live prediction or closing. Basic remains paused; existing runtime config identity and earlier drafts remain unchanged. Never seal an expired draft or change the four-hour clock to shorten verification.
+- **Open:** Archive recovery/readiness still blocks enabling entries. Archive/preview release awaits commit approval. Once ready, seal a future boundary and verify a real entry, execution and exact-time closing/claim; a 20:00 epoch cannot complete before 00:00 UTC. If readiness misses opening, prepare a later draft instead.
+- **Refs:** `packages/cox/deploy/adaptive-pool-2-devnet.json`; private `.cox/epoch-20-verification-preparation.json`, `.cox/epoch-live-publication-probe.json`, local test logs.
