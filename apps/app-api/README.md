@@ -36,7 +36,8 @@ The public demonstration endpoint is <https://fixture-api.getrelative.trade>. It
 | `COX_IDL_PATH` | Program IDL | `packages/cox/idl/cox.json` |
 | `COX_EPOCH_CONFIG` | Epoch configuration account; unset disables the Epoch routes | Unset |
 | `COX_EPOCH_IDL_PATH` | Epoch program IDL | `packages/cox-epoch/idl/epoch.json` |
-| `COX_POLL_MS` | Indexer interval, at least 1,000 ms | `5000` |
+| `COX_POLL_MS` | Indexer interval, at least 1,000 ms; used only without `COX_CHAIN_CHANGES_GCS` | `5000` |
+| `COX_CHAIN_CHANGES_GCS` | `gs://bucket/prefix/` of the publisher's chain change notifications; with it the API reads the chain only after a change | Unset |
 | `COX_PUBLICATION_ARCHIVE` | Directory of the publisher's `<sequence>.json` archive records | Unset |
 | `COX_PUBLICATION_ARCHIVE_GCS` | `gs://bucket/prefix/` of content-addressed `<sequence>/<sha256>.json` records; use instead of the directory | Unset |
 | `COX_PREVIEW_GCS` | `gs://bucket/prefix/` of the publisher's per-second `<unix seconds>.json` preview records; unset disables the preview routes | Unset |
@@ -97,7 +98,7 @@ Errors include `NO_PUBLICATION`, `PUBLICATION_NOT_FOUND`, `UNKNOWN_ASSET`, `UNKN
 | `portfolio` | with `?wallet=`, on connect and whenever that wallet's positions, requests or receipts change | `{ owner, portfolio }`; `portfolio` is `null` for a wallet with nothing on chain |
 | `preview` | with `COX_PREVIEW_GCS`, on connect, for each newer per-second record and when the latest becomes stale | `{ record, ageSeconds, stale }`, as `GET /v1/preview` |
 
-Without a cursor the stream starts at the latest publication. Browsers reconnect by themselves, three seconds after a drop, sending the last publication id. The server then resumes publications from there, at most the last 1,440, and repeats the current status and portfolio. Fetch older history with `GET /v1/publications`. Status is checked every 5 seconds and right after each publication. A wallet's portfolio is read after each publication and every 15 seconds, once per wallet however many connections watch it. Each client may hold 8 streams, an instance 500 and 200 distinct wallets. Over those limits the response is HTTP 429 `RATE_LIMITED` with `Retry-After`.
+Without a cursor the stream starts at the latest publication. Browsers reconnect by themselves, three seconds after a drop, sending the last publication id. The server then resumes publications from there, at most the last 1,440, and repeats the current status and portfolio. Fetch older history with `GET /v1/publications`. Status is checked every 5 seconds from memory and right after each publication. A wallet's portfolio is read once per wallet, however many connections watch it: with `COX_CHAIN_CHANGES_GCS`, only after the chain changed; without it, after each publication and every 15 seconds. Each client may hold 8 streams, an instance 500 and 200 distinct wallets. Over those limits the response is HTTP 429 `RATE_LIMITED` with `Retry-After`.
 
 ```ts
 const stream = new EventSource(`${baseUrl}/v1/stream?wallet=${owner}`);
@@ -164,6 +165,17 @@ Indexed publications are sealed in blocks of 360 into immutable history segments
 Submission tracking is in Firestore when `APP_API_SUBMISSIONS_FIRESTORE_PROJECT` is set: one document per signature in `coxSubmissionsPool<pool>`, with an `expireAt` field 30 days after submission for a TTL policy. Otherwise it is kept in `submissions-<pool>.json`. With segments in Cloud Storage and submissions in Firestore, any instance answers any request, so the service can run several instances.
 
 The program keeps only the latest publication on chain. Earlier sequences come from the publisher's archive (`COX_PUBLICATION_ARCHIVE` or `COX_PUBLICATION_ARCHIVE_GCS`). Each record is checked against its content hash, account hash, decoded state and predecessor chain before it is logged, for both legacy and fee-aware publications. Without an archive, the indexer refuses to skip a gap.
+
+### Reading the chain only after a change
+
+With `COX_CHAIN_CHANGES_GCS`, the API makes no Solana calls while nothing happens on chain. The publisher writes a `relative.chain-notification/v1` file to that prefix whenever relevant confirmed activity changes its revision, and a heartbeat every 20 seconds. Each API process lists the prefix from the last file it read, about once a second; this is Cloud Storage, not Solana.
+
+- A higher revision triggers one shared re-read of the pool, registry, vaults, publication and batch. A skipped revision, a new generation, the first start and a return to health do the same. Overlapping triggers share one read.
+- The API reads at finalized commitment while notifications are confirmed. After a change it reads again after 4, 8, 16 and 32 seconds until the finalized slot reaches the notified slot.
+- After each re-read, cached wallet portfolios, Epoch accounts and Epoch lots are dropped, and streams refresh their watched wallets once.
+- Status, publications and streams are served from memory. Building, quoting and submitting transactions still read the chain fresh.
+- One safety re-read runs every 20 minutes per process.
+- `status.chain` reports `readAt`, the finalized `slot` of the last read and `feed`: `healthy`, `unhealthy` (no heartbeat for 60 seconds, the publisher reports an unhealthy stream, or the prefix cannot be listed) or `polling` without the feed. An unhealthy feed never starts fast chain polling.
 
 Live `gross`, `benchmarkGross` and `transferFactor` fields are `null` because they are not stored on chain. `ledger.refundable` is also `null`: the pool combines refundable deposits with pending funds, while individual portfolios expose the split. `status.monitor` is `null`; an archive consistency check is not a publication verification.
 
