@@ -1,0 +1,22 @@
+[Unit]
+Description=Export Relative per-second live estimates
+After=network-online.target cox-publisher.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cox-publisher
+Group=cox-publisher
+WorkingDirectory=/opt/cox-publisher/current
+ExecStart=/opt/cox-publisher/current/apps/cox-publisher/native/target/release/relative-publisher preview --config /etc/cox-publisher/native.json --backup-config /etc/cox-publisher/native-backup.json
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/cox-publisher
+
+[Install]
+WantedBy=multi-user.target

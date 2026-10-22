@@ -38,6 +38,7 @@ pub struct Executor<S> {
     last_state: Option<ChainState>,
     now_ms: u64,
     publication_archive: Option<crate::publications::Archive>,
+    preview_ledger_path: Option<std::path::PathBuf>,
     discovery: crate::chain::Discovery,
     max_price_age_ms: u64,
     max_feed_age_ms: u64,
@@ -160,9 +161,14 @@ impl<S: DraftSigner> Executor<S> {
             now_ms: 0,
             discovery,
             publication_archive: None,
+            preview_ledger_path: None,
             max_price_age_ms: 5_000,
             max_feed_age_ms: 60_000,
         })
+    }
+    pub fn with_preview_ledger(mut self, path: std::path::PathBuf) -> Self {
+        self.preview_ledger_path = Some(path);
+        self
     }
     pub fn with_price_policy_limits(
         mut self,
@@ -617,6 +623,13 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
         self.now_ms = now_ms;
         let state = self.read_state().await?;
         self.validate_anchor(&state)?;
+        if let Some(path) = &self.preview_ledger_path {
+            if let Ok(ledger) = crate::preview::Ledger::from_state(&state) {
+                if ledger.persist(path).is_err() {
+                    eprintln!("Preview ledger export deferred");
+                }
+            }
+        }
         let work = chain_error(state.work(now_ms))?;
         self.last_state = Some(state);
         Ok(work)

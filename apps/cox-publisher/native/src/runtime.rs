@@ -463,6 +463,7 @@ pub async fn run(path: &Path) -> Result<(), Error> {
     .map_err(|_| Error::Configuration)?
     .with_price_policy_limits(config.max_price_age_ms, config.max_feed_age_ms)
     .map_err(|_| Error::Configuration)?
+    .with_preview_ledger(config.state_directory.join("preview-ledger.json"))
     .with_publication_archive(config.state_directory.join("publications"))
     .with_discovery_state(
         config.state_directory.join("discovery.json"),

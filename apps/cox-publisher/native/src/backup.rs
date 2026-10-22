@@ -14,10 +14,11 @@ use tokio::sync::Mutex;
 const MAX_CONFIG_BYTES: u64 = 16_384;
 const MAX_MANIFEST_BYTES: usize = 32 * 1024 * 1024;
 const MAX_DEPTH: usize = 5;
-const MUTABLE: [&str; 5] = [
+const MUTABLE: [&str; 6] = [
     "identity.json",
     "checkpoint.json",
     "discovery.json",
+    "preview-ledger.json",
     "prices/latest.json",
     "prices/active-anchor.json",
 ];
@@ -458,7 +459,7 @@ fn check_remote(metadata: &RemoteMetadata, object: &str, bytes: &[u8]) -> Result
     }
     Ok(())
 }
-async fn ensure<T: Transport>(transport: &T, object: &str, bytes: &[u8]) -> Result<(), Error> {
+pub(crate) async fn ensure<T: Transport>(transport: &T, object: &str, bytes: &[u8]) -> Result<(), Error> {
     match transport.create(object, bytes, &digest(bytes)).await? {
         Created::New(metadata) => check_remote(&metadata, object, bytes),
         Created::Exists => {

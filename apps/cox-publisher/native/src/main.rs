@@ -17,6 +17,7 @@ async fn main() {
         Some("capture-origin") => capture_origin().await,
         Some("prepare-methodology") => prepare_methodology(),
         Some("prepare-inclusion") => prepare_inclusion(),
+        Some("preview") => preview().await,
         Some("backup") => backup().await,
         Some("restore") => restore().await,
         Some("benchmark") => benchmark(),
@@ -263,4 +264,13 @@ async fn capture_origin() -> Result<(), &'static str> {
         .map_err(|_| "Origin capture failed; request, credentials, devnet, signed feed or output validation failed")?;
     println!("{}", serde_json::json!({"captured":true,"signatureVerified":true,"feedCount":artifact.assets.len(),"timestampUs":artifact.timestamp_us,"digest":artifact.digest,"submittedTransactions":0}));
     Ok(())
+}
+
+async fn preview() -> Result<(), &'static str> {
+    let args=std::env::args().skip(2).collect::<Vec<_>>();
+    if args.len()!=4 || args[0]!="--config" || args[2]!="--backup-config" {
+        return Err("Usage: relative-publisher preview --config PATH --backup-config PATH");
+    }
+    relative_publisher::preview::run(std::path::Path::new(&args[1]), std::path::Path::new(&args[3])).await
+        .map_err(|_|"Preview export stopped; configuration, source, storage or upload integrity failed")
 }
