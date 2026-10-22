@@ -146,4 +146,4 @@ pnpm --filter @eox/app-api-server build
 pnpm --filter @eox/app-api-server test
 ```
 
-To regenerate fixture output after a methodology change, run `npx tsx scripts/cox-fixture.ts` from this directory. See the [typed API client](../../packages/app-api/README.md) and [deployment guide](../../deploy/dev/README.md).
+The fixture's arithmetic comes from the Rust `cox` CLI in `packages/cox/crates/cli` (`reference`, `revalue`, `batch`), so building the fixture and running its provenance test need either `cargo` on the path or `COX_CLI` set to a built `cox` binary. To regenerate fixture output after a change to that CLI, run `npx tsx scripts/cox-fixture.ts` from this directory. See the [typed API client](../../packages/app-api/README.md) and [deployment guide](../../deploy/dev/README.md).
