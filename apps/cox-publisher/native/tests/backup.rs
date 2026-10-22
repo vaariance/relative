@@ -56,6 +56,9 @@ impl Fixture {
                 publication_identity: None,
                 state_directory: state,
                 markers_directory: root.join("markers"),
+                incremental: false,
+                retain_price_seconds: None,
+                retain_publications: None,
                 max_file_bytes: 1024,
                 max_files: 100,
                 max_total_bytes: 100_000,
@@ -237,9 +240,14 @@ async fn checksum_mismatch_never_writes_a_success_marker_or_manifest() {
         .all(|path| !path.contains("/manifests/")));
 }
 #[tokio::test]
-async fn immutable_file_mutation_between_capture_and_upload_fails_closed() {
+async fn immutable_file_mutation_before_its_upload_fails_closed() {
     let f = Fixture::new();
-    let path = f.config.state_directory.join("publications/0.json");
+    let path = f
+        .config
+        .state_directory
+        .join("prices")
+        .join("a".repeat(64))
+        .join("0/1000000.json");
     let transport = Memory {
         mutation: Mutex::new(Some((path, b"changed".to_vec()))),
         ..Memory::default()
@@ -562,4 +570,260 @@ fn history_configuration_requires_safe_disjoint_prefix_and_explicit_devnet_ident
         .unwrap()
         .validate()
         .unwrap();
+}
+
+#[tokio::test]
+async fn incremental_restart_reuses_verified_receipts_and_uploads_only_new_content() {
+    let mut f = Fixture::new();
+    f.config.incremental = true;
+    let t = Memory::default();
+    backup::backup(&f.config, &t).await.unwrap();
+    let first = t.uploads.lock().unwrap().clone();
+    assert!(first[0].ends_with(&digest(b"publication")));
+    t.uploads.lock().unwrap().clear();
+    backup::backup(&f.config, &t).await.unwrap();
+    assert_eq!(t.uploads.lock().unwrap().len(), 1);
+    fs::write(
+        f.config
+            .state_directory
+            .join("prices")
+            .join("a".repeat(64))
+            .join("0/2000000.json"),
+        b"new price",
+    )
+    .unwrap();
+    t.uploads.lock().unwrap().clear();
+    let report = backup::backup(&f.config, &t).await.unwrap();
+    let uploads = t.uploads.lock().unwrap().clone();
+    assert_eq!(uploads.len(), 2);
+    assert!(uploads[0].ends_with(&digest(b"new price")));
+    let restored = backup::restore(
+        &f.config,
+        &t,
+        &report.manifest_sha256,
+        &f.root.join("incremental-restored"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(restored.entries.len(), 9);
+}
+#[tokio::test]
+async fn retention_prunes_only_cloud_backed_old_prices_and_preserves_restorable_evidence() {
+    let mut f = Fixture::new();
+    f.config.incremental = true;
+    f.config.retain_price_seconds = Some(129600);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        * 1000000;
+    let p = f
+        .config
+        .state_directory
+        .join("prices")
+        .join("a".repeat(64))
+        .join((now / 3600000000).to_string());
+    fs::create_dir_all(&p).unwrap();
+    fs::write(p.join(format!("{now}.json")), b"recent").unwrap();
+    let t = Memory::default();
+    let report = backup::backup(&f.config, &t).await.unwrap();
+    assert!(!f
+        .config
+        .state_directory
+        .join("prices")
+        .join("a".repeat(64))
+        .join("0/1000000.json")
+        .exists());
+    for name in [
+        "checkpoint.json",
+        "identity.json",
+        "prices/latest.json",
+        "prices/active-anchor.json",
+        "publications/0.json",
+    ] {
+        assert!(f.config.state_directory.join(name).exists());
+    }
+    backup::restore(
+        &f.config,
+        &t,
+        &report.manifest_sha256,
+        &f.root.join("retention-restored"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        fs::read(
+            f.root
+                .join("retention-restored/prices")
+                .join("a".repeat(64))
+                .join("0/1000000.json")
+        )
+        .unwrap(),
+        b"price"
+    );
+    assert!(p.join(format!("{now}.json")).exists());
+}
+#[tokio::test]
+async fn failed_incremental_upload_never_prunes_or_acknowledges_corrupt_bytes() {
+    let mut f = Fixture::new();
+    f.config.incremental = true;
+    f.config.retain_price_seconds = Some(129600);
+    let t = Memory {
+        corrupt_ack: true,
+        ..Memory::default()
+    };
+    assert_eq!(backup::backup(&f.config, &t).await, Err(Error::Checksum));
+    assert!(f
+        .config
+        .state_directory
+        .join("prices")
+        .join("a".repeat(64))
+        .join("0/1000000.json")
+        .exists());
+    assert!(!t
+        .uploads
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|n| n.contains("/manifests/")));
+    assert_eq!(
+        f.config
+            .markers_directory
+            .read_dir()
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+            .count(),
+        0
+    );
+}
+
+struct Flaky {
+    memory: Memory,
+    remaining: Mutex<Option<usize>>,
+}
+impl Transport for Flaky {
+    async fn create(&self, object: &str, body: &[u8], sha: &str) -> Result<Created, Error> {
+        {
+            let mut count = self.remaining.lock().unwrap();
+            if let Some(n) = count.as_mut() {
+                if *n == 0 {
+                    *count = None;
+                    return Err(Error::Network);
+                }
+                *n -= 1;
+            }
+        }
+        self.memory.create(object, body, sha).await
+    }
+    async fn get(&self, object: &str, max: u64) -> Result<RemoteObject, Error> {
+        self.memory.get(object, max).await
+    }
+}
+#[tokio::test]
+async fn interrupted_backup_reuses_acknowledged_progress_before_a_manifest_exists() {
+    let mut f = Fixture::new();
+    f.config.incremental = true;
+    let t = Flaky {
+        memory: Memory::default(),
+        remaining: Mutex::new(Some(2)),
+    };
+    assert_eq!(backup::backup(&f.config, &t).await, Err(Error::Network));
+    let verified = t.memory.uploads.lock().unwrap().clone();
+    assert_eq!(verified.len(), 2);
+    t.memory.uploads.lock().unwrap().clear();
+    let report = backup::backup(&f.config, &t).await.unwrap();
+    let retried = t.memory.uploads.lock().unwrap().clone();
+    for object in verified {
+        assert!(!retried.contains(&object));
+    }
+    backup::restore(
+        &f.config,
+        &t,
+        &report.manifest_sha256,
+        &f.root.join("resumed-restored"),
+    )
+    .await
+    .unwrap();
+}
+#[test]
+fn retention_cannot_remove_prices_inside_the_epoch_recovery_window() {
+    let mut f = Fixture::new();
+    f.config.incremental = true;
+    f.config.retain_price_seconds = Some(86400);
+    assert_eq!(f.config.validate(), Err(Error::Configuration));
+    f.config.retain_price_seconds = Some(129600);
+    assert_eq!(f.config.validate(), Ok(()));
+    f.config.incremental = false;
+    assert_eq!(f.config.validate(), Err(Error::Configuration));
+}
+
+#[tokio::test]
+async fn publication_retention_preserves_cloud_history_and_the_local_predecessor_chain() {
+    let mut f = Fixture::new();
+    enable_history(&mut f);
+    f.config.incremental = true;
+    f.config.retain_publications = Some(2);
+    let program = Address::new_from_array([1; 32]);
+    let pool = Address::new_from_array([2; 32]);
+    let archive = relative_publisher::publications::Archive::new(
+        f.config.state_directory.join("publications"),
+        program,
+        pool,
+    );
+    let (_, mut previous) = publication_fixture(program, pool, 0, [0; 32]);
+    for n in 1..4 {
+        let (bytes, d) = publication_fixture(program, pool, n, previous);
+        archive
+            .preserve(program, archive.address(), &bytes, 123 + n, n, d)
+            .unwrap();
+        previous = d;
+    }
+    let t = Memory::default();
+    let report = backup::backup(&f.config, &t).await.unwrap();
+    assert!(!f
+        .config
+        .state_directory
+        .join("publications/0.json")
+        .exists());
+    assert!(!f
+        .config
+        .state_directory
+        .join("publications/1.json")
+        .exists());
+    assert!(f
+        .config
+        .state_directory
+        .join("publications/2.json")
+        .exists());
+    assert!(f
+        .config
+        .state_directory
+        .join("publications/3.json")
+        .exists());
+    assert_eq!(
+        t.values
+            .lock()
+            .unwrap()
+            .keys()
+            .filter(|s| s.starts_with("pool-2/history/"))
+            .count(),
+        4
+    );
+    let (bytes, d) = publication_fixture(program, pool, 4, previous);
+    archive
+        .preserve(program, archive.address(), &bytes, 130, 4, d)
+        .unwrap();
+    backup::restore(
+        &f.config,
+        &t,
+        &report.manifest_sha256,
+        &f.root.join("full-publication-recovery"),
+    )
+    .await
+    .unwrap();
+    assert!(f
+        .root
+        .join("full-publication-recovery/publications/0.json")
+        .exists());
 }

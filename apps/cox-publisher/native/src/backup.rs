@@ -1,4 +1,5 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
+use futures_util::{stream, StreamExt, TryStreamExt};
 use reqwest::{Client, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -12,7 +13,7 @@ use std::{
 use tokio::sync::Mutex;
 
 const MAX_CONFIG_BYTES: u64 = 16_384;
-const MAX_MANIFEST_BYTES: usize = 32 * 1024 * 1024;
+const MAX_MANIFEST_BYTES: usize = 64 * 1024 * 1024;
 const MAX_DEPTH: usize = 5;
 const MUTABLE: [&str; 6] = [
     "identity.json",
@@ -34,6 +35,12 @@ pub struct Config {
     pub publication_identity: Option<crate::publications::Identity>,
     pub state_directory: PathBuf,
     pub markers_directory: PathBuf,
+    #[serde(default)]
+    pub incremental: bool,
+    #[serde(default)]
+    pub retain_price_seconds: Option<u64>,
+    #[serde(default)]
+    pub retain_publications: Option<usize>,
     pub max_file_bytes: u64,
     pub max_files: usize,
     pub max_total_bytes: u64,
@@ -156,7 +163,15 @@ impl Config {
             || self.max_file_bytes == 0
             || self.max_file_bytes > 16 * 1024 * 1024
             || self.max_files == 0
-            || self.max_files > 100_000
+            || self.max_files > 200_000
+            || self
+                .retain_price_seconds
+                .is_some_and(|n| !self.incremental || !(129_600..=172_800).contains(&n))
+            || self.retain_publications.is_some_and(|n| {
+                !self.incremental
+                    || self.publication_history_prefix.is_none()
+                    || !(2..=100_000).contains(&n)
+            })
             || self.max_total_bytes < self.max_file_bytes
             || self.max_total_bytes > 64 * 1024 * 1024 * 1024
         {
@@ -459,7 +474,11 @@ fn check_remote(metadata: &RemoteMetadata, object: &str, bytes: &[u8]) -> Result
     }
     Ok(())
 }
-pub(crate) async fn ensure<T: Transport>(transport: &T, object: &str, bytes: &[u8]) -> Result<(), Error> {
+pub(crate) async fn ensure<T: Transport>(
+    transport: &T,
+    object: &str,
+    bytes: &[u8],
+) -> Result<(), Error> {
     match transport.create(object, bytes, &digest(bytes)).await? {
         Created::New(metadata) => check_remote(&metadata, object, bytes),
         Created::Exists => {
@@ -472,7 +491,167 @@ pub(crate) async fn ensure<T: Transport>(transport: &T, object: &str, bytes: &[u
         }
     }
 }
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct Receipt {
+    object: String,
+    sha256: String,
+    bytes: u64,
+    crc32c: String,
+}
+fn receipt_path(root: &Path, object: &str) -> PathBuf {
+    let key = digest(object.as_bytes());
+    root.join(&key[..2]).join(format!("{key}.json"))
+}
+async fn ensure_incremental<T: Transport>(
+    transport: &T,
+    root: &Path,
+    enabled: bool,
+    object: &str,
+    bytes: &[u8],
+) -> Result<(), Error> {
+    if !enabled {
+        return ensure(transport, object, bytes).await;
+    }
+    let expected = Receipt {
+        object: object.into(),
+        sha256: digest(bytes),
+        bytes: bytes.len() as u64,
+        crc32c: crc32c(bytes),
+    };
+    let path = receipt_path(root, object);
+    check_components(&path)?;
+    if let Some(receipt) = crate::journal::read::<Receipt>(&path).map_err(|_| Error::Storage)? {
+        return if receipt == expected {
+            Ok(())
+        } else {
+            Err(Error::Conflict)
+        };
+    }
+    ensure(transport, object, bytes).await?;
+    crate::journal::atomic_write(&path, &expected).map_err(|_| Error::Storage)
+}
+fn prune(config: &Config, manifest: &Manifest, receipts: &Path) -> Result<(), Error> {
+    if config.retain_price_seconds.is_none() && config.retain_publications.is_none() {
+        return Ok(());
+    }
+    let retain = config.retain_price_seconds.unwrap_or(u64::MAX);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| Error::Storage)?
+        .as_secs();
+    let cutoff = now.saturating_sub(retain).saturating_mul(1_000_000);
+    let latest = manifest
+        .entries
+        .iter()
+        .filter_map(|e| price_timestamp(&e.path))
+        .max()
+        .unwrap_or(0);
+    let mut publications = manifest
+        .entries
+        .iter()
+        .filter_map(|entry| publication_sequence(&entry.path))
+        .collect::<Vec<_>>();
+    publications.sort_unstable();
+    let first_kept = config.retain_publications.and_then(|n| {
+        publications
+            .get(publications.len().saturating_sub(n))
+            .copied()
+    });
+    let mut keep = BTreeSet::new();
+    for entry in &manifest.entries {
+        let object = content_object(&config.prefix, &entry.sha256);
+        let old = price_timestamp(&entry.path).is_some_and(|t| t < cutoff && t < latest)
+            || publication_sequence(&entry.path)
+                .zip(first_kept)
+                .is_some_and(|(n, first)| n < first);
+        if old {
+            let path = config.state_directory.join(&entry.path);
+            if digest(&read_regular(&path, config.max_file_bytes)?) != entry.sha256 {
+                return Err(Error::Mutated);
+            }
+            fs::remove_file(path).map_err(|_| Error::Storage)?;
+        } else {
+            keep.insert(receipt_path(receipts, &object));
+        }
+        if let Some(prefix) = config.publication_history_prefix.as_ref().filter(|_| !old) {
+            if let Some(sequence) = entry
+                .path
+                .strip_prefix("publications/")
+                .and_then(|s| s.strip_suffix(".json"))
+            {
+                keep.insert(receipt_path(
+                    receipts,
+                    &format!("{prefix}/{sequence}/{}.json", entry.sha256),
+                ));
+            }
+        }
+    }
+    if receipts.exists() {
+        for shard in fs::read_dir(receipts).map_err(|_| Error::Storage)? {
+            let shard = shard.map_err(|_| Error::Storage)?.path();
+            check_components(&shard)?;
+            if !shard.is_dir() {
+                return Err(Error::UnsafePath);
+            }
+            for file in fs::read_dir(&shard).map_err(|_| Error::Storage)? {
+                let path = file.map_err(|_| Error::Storage)?.path();
+                check_components(&path)?;
+                if !keep.contains(&path) {
+                    fs::remove_file(path).map_err(|_| Error::Storage)?;
+                }
+            }
+        }
+    }
+    let mut markers = fs::read_dir(&config.markers_directory)
+        .map_err(|_| Error::Storage)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.file_stem()
+                .and_then(|s| s.to_str())
+                .is_some_and(valid_digest)
+        })
+        .collect::<Vec<_>>();
+    markers.sort_by_key(|p| fs::metadata(p).and_then(|m| m.modified()).ok());
+    let drop_count = markers.len().saturating_sub(3);
+    for path in markers.into_iter().take(drop_count) {
+        check_components(&path)?;
+        fs::remove_file(path).map_err(|_| Error::Storage)?;
+    }
+    Ok(())
+}
+fn publication_sequence(path: &str) -> Option<u64> {
+    path.strip_prefix("publications/")?
+        .strip_suffix(".json")?
+        .parse()
+        .ok()
+}
+fn price_timestamp(path: &str) -> Option<u64> {
+    let parts = path.split('/').collect::<Vec<_>>();
+    match parts.as_slice() {
+        ["prices", universe, hour, name] if valid_digest(universe) && numeric(hour) => {
+            name.strip_suffix(".json")?.parse().ok()
+        }
+        _ => None,
+    }
+}
 pub async fn backup<T: Transport>(config: &Config, transport: &T) -> Result<Report, Error> {
+    config.validate()?;
+    let _lock = if config.incremental {
+        check_components(&config.markers_directory)?;
+        fs::create_dir_all(&config.markers_directory).map_err(|_| Error::Storage)?;
+        check_components(&config.markers_directory.join("backup.lock"))?;
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(config.markers_directory.join("backup.lock"))
+            .map_err(|_| Error::Storage)?;
+        file.try_lock().map_err(|_| Error::Storage)?;
+        Some(file)
+    } else {
+        None
+    };
     let (manifest, frozen) = capture_snapshot(config)?;
     let publication_archive = config
         .publication_identity
@@ -488,51 +667,75 @@ pub async fn backup<T: Transport>(config: &Config, transport: &T) -> Result<Repo
             Ok::<_, Error>(archive)
         })
         .transpose()?;
-    for entry in &manifest.entries {
-        let bytes = match frozen.get(&entry.path) {
-            Some(bytes) => bytes.clone(),
-            None => read_regular(
-                &config.state_directory.join(&entry.path),
-                config.max_file_bytes,
-            )?,
-        };
-        if bytes.len() as u64 != entry.bytes
-            || digest(&bytes) != entry.sha256
-            || crc32c(&bytes) != entry.crc32c
-        {
-            return Err(Error::Mutated);
-        }
-        if let (Some(prefix), Some(archive), Some(sequence)) = (
-            &config.publication_history_prefix,
-            &publication_archive,
-            entry
-                .path
-                .strip_prefix("publications/")
-                .and_then(|name| name.strip_suffix(".json")),
-        ) {
-            let sequence = sequence.parse::<u64>().map_err(|_| Error::Manifest)?;
-            let record = archive
-                .validate_record(sequence, &bytes)
-                .map_err(|_| Error::Manifest)?;
-            if record
-                .observed_slot
-                .or(record.finalized_slot)
-                .is_some_and(|slot| slot > 9_007_199_254_740_991)
+    let receipt_root = config.markers_directory.join("receipts").join(digest(
+        format!(
+            "{}:{}:{}:{}",
+            config.bucket,
+            config.prefix,
+            config.publication_history_prefix.as_deref().unwrap_or(""),
+            manifest.identity_sha256
+        )
+        .as_bytes(),
+    ));
+    let mut ordered = manifest.entries.iter().collect::<Vec<_>>();
+    ordered.sort_by_key(|entry| (!entry.path.starts_with("publications/"), entry.path.clone()));
+    let publication_count = ordered
+        .iter()
+        .take_while(|e| e.path.starts_with("publications/"))
+        .count();
+    for group in [&ordered[..publication_count], &ordered[publication_count..]] {
+        stream::iter(group.iter().map(|entry| async {
+            let bytes = match frozen.get(&entry.path) {
+                Some(bytes) => bytes.clone(),
+                None => read_regular(
+                    &config.state_directory.join(&entry.path),
+                    config.max_file_bytes,
+                )?,
+            };
+            if bytes.len() as u64 != entry.bytes
+                || digest(&bytes) != entry.sha256
+                || crc32c(&bytes) != entry.crc32c
             {
-                return Err(Error::Manifest);
+                return Err(Error::Mutated);
             }
-            ensure(
+            if let (Some(prefix), Some(archive), Some(sequence)) = (
+                &config.publication_history_prefix,
+                &publication_archive,
+                entry
+                    .path
+                    .strip_prefix("publications/")
+                    .and_then(|name| name.strip_suffix(".json")),
+            ) {
+                let record = archive
+                    .validate_record(sequence.parse().map_err(|_| Error::Manifest)?, &bytes)
+                    .map_err(|_| Error::Manifest)?;
+                if record
+                    .observed_slot
+                    .or(record.finalized_slot)
+                    .is_some_and(|slot| slot > 9_007_199_254_740_991)
+                {
+                    return Err(Error::Manifest);
+                }
+                ensure_incremental(
+                    transport,
+                    &receipt_root,
+                    config.incremental,
+                    &format!("{prefix}/{sequence}/{}.json", entry.sha256),
+                    &bytes,
+                )
+                .await?;
+            }
+            ensure_incremental(
                 transport,
-                &format!("{prefix}/{sequence}/{}.json", entry.sha256),
+                &receipt_root,
+                config.incremental,
+                &content_object(&config.prefix, &entry.sha256),
                 &bytes,
             )
-            .await?;
-        }
-        ensure(
-            transport,
-            &content_object(&config.prefix, &entry.sha256),
-            &bytes,
-        )
+            .await
+        }))
+        .buffer_unordered(if config.incremental { 32 } else { 1 })
+        .try_collect::<Vec<_>>()
         .await?;
     }
     let bytes = serde_json::to_vec(&manifest).map_err(|_| Error::Manifest)?;
@@ -545,6 +748,9 @@ pub async fn backup<T: Transport>(config: &Config, transport: &T) -> Result<Repo
         &manifest,
     )
     .map_err(|_| Error::Storage)?;
+    if config.incremental {
+        prune(config, &manifest, &receipt_root)?;
+    }
     Ok(Report {
         manifest_object: object,
         manifest_sha256: sha256,
@@ -581,7 +787,7 @@ pub async fn restore<T: Transport>(
         fs::set_permissions(destination, fs::Permissions::from_mode(0o700))
             .map_err(|_| Error::Storage)?;
     }
-    for entry in &manifest.entries {
+    stream::iter(manifest.entries.iter().map(|entry| async {
         let object = content_object(&config.prefix, &entry.sha256);
         let remote = transport.get(&object, config.max_file_bytes).await?;
         check_remote(&remote.metadata, &object, &remote.body)?;
@@ -606,7 +812,11 @@ pub async fn restore<T: Transport>(
         file.write_all(&remote.body)
             .and_then(|_| file.sync_all())
             .map_err(|_| Error::Storage)?;
-    }
+        Ok::<(), Error>(())
+    }))
+    .buffer_unordered(32)
+    .try_collect::<Vec<_>>()
+    .await?;
     File::open(destination)
         .and_then(|directory| directory.sync_all())
         .map_err(|_| Error::Storage)?;
