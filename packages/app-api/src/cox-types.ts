@@ -206,6 +206,13 @@ export interface CoxStatus {
   fees: FeeStatus | null;
   currentBatch: Batch | null;
   trading: TradingStatus;
+  chain?: ChainReadStatus;
+}
+
+export interface ChainReadStatus {
+  readAt: UnixSeconds | null;
+  slot: number | null;
+  feed: "healthy" | "unhealthy" | "polling";
 }
 
 export interface VaultReconciliation {
@@ -312,6 +319,16 @@ export interface PreviewRecord {
   cryptoReference: string;
   scales: { price: number | string; reference: number | string; collateral: number | string };
   basicProjection: PreviewProjection | null;
+  chainChange?: ChainChangeMetadata;
+}
+
+export interface ChainChangeMetadata {
+  schema: "relative.chain-change/v1";
+  generation: string;
+  revision: string;
+  observedSlot: number;
+  commitment: "confirmed";
+  streamHealthy: boolean;
 }
 
 export interface Preview {
