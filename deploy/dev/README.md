@@ -69,9 +69,7 @@ program, Cloud Run signer, Cloudflare proxy or independently installed monitor.
 The publisher unit is supplied as a template and requires its own installation.
 
 `setup.sh` installs Docker and Node.js 22 when missing, then pnpm 11.18.0.
-Components that require Node.js 24, including the publisher, need a separately
-provisioned compatible runtime. Do not assume shared VM setup satisfies those
-components' runtime requirements.
+The native publisher runs as a separately built Rust executable and does not need Node. API/SDK tooling that requires Node.js 24 needs its separately provisioned compatible runtime.
 
 ## Files and credentials
 
@@ -84,7 +82,7 @@ components' runtime requirements.
 | `/opt/eox/state/cox-app-api-live` | Persisted live API state |
 | `/opt/eox/runtime/node-v24.21.0-linux-x64` | Checksum-pinned Node 24 for both app APIs (`@cox/client` needs Node 24) |
 | `/opt/eox/logs/backup.log` | Database backup log |
-| `/etc/cox-publisher/dev.json` | Private publisher configuration, when installed |
+| `/etc/cox-publisher/native.json` | Private native publisher configuration |
 | `/var/lib/cox-publisher` | Publisher journal and recovery state |
 | `/var/lib/cox-monitor/state.json` | Monitor progress and verdicts |
 
@@ -153,31 +151,25 @@ publication archives or monitor state. Those require separate backup and restore
 
 ## Publisher archive backups
 
-The publisher's complete finalized publication files live at
-`/var/lib/cox-publisher/state.json.history/<sequence>.json`. Preserve these
-alongside the journal. The archive gate requires durable local history before
-an on-chain publication can be replaced. The archive is separate from source
-price evidence and does not preserve the full historical trading batch.
+The Rust publisher archives confirmed pool 2 publication records at
+`/var/lib/cox-publisher/basic-2-adaptive/publications/<sequence>.json` before
+overwriting the reusable on-chain account. V2 records retain confirmed provenance;
+backup does not make them finalized.
 
-`cox-publisher-backup.timer` invokes [cox-publication-backup.ts](cox-publication-backup.ts)
-every minute. Its configured private bucket is
-`gs://colosseum-cox-publication-archives-dev`; journal and publication objects
-have SHA-256 names under `pool-0/`. Uploads use create-only access and generation
-preconditions; local markers avoid repeated uploads. No automatic expiration is
-specified for this archive bucket. Check timer and upload failures:
+`cox-publisher-backup.timer` invokes the native `backup` command every minute.
+API records are exported to
+`gs://colosseum-cox-publication-archives-dev/pool-2/history/<sequence>/<sha256>.json`.
+Recovery objects/manifests are separate under `basic-2/native`. The old TypeScript
+backup script has been removed. Preserve historical pool 0/1 cloud objects.
+
+See the [native backup and restore instructions](../../apps/cox-publisher/README.md#native-backup-and-restore)
+for private configuration, workload identity, integrity checks and isolated restore.
+Incremental uploads and explicit retention remain follow-up work. Check failures:
 
 ```sh
 systemctl status cox-publisher-backup.timer
 sudo journalctl -u cox-publisher-backup -n 30 --no-pager
 ```
-
-Offsite backup is asynchronous: a VM failure can lose files not yet uploaded.
-Restore with an authorized operator identity into a separate directory first.
-Verify each file's SHA-256 against its object name and validate sequence,
-predecessor, program/pool identity and state digests. Select a coherent journal
-and history set. Stop the publisher before installing a validated restore,
-preserve restrictive ownership and permissions, then restart for finalized-chain
-reconciliation. Never overwrite live recovery files while the service runs.
 
 ## Separate components
 

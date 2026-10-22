@@ -14,12 +14,14 @@ Peter's approved fee policy below; it does not rewrite any sealed methodology.
 
 ## 1. Deliverables and activation boundary
 
-- `../cox-methodology/src/index.ts`: typed canonical manifest compiler, price
-  and snapshot byte encoders, SHA-256 identities and exact USD conversion.
-- `../cox-methodology/manifest.draft.json`: provisional 30-asset manifest.
-- `fixtures/vectors.json`: exact synthetic reference, transfer, flow and wire vectors.
-- `../cox-methodology/src/vectors.ts`: executable P1 specification oracle,
-  **not** the authoritative P2 Rust crate or Godwin's independent monitor.
+- `crates/math` and `crates/cli`: Rust protocol arithmetic and JSON command interface.
+- `fixtures/vectors.json`: frozen synthetic reference, transfer, flow and wire vectors.
+- `../cox-methodology/rust`: inclusion lifecycle and Epoch research simulation.
+
+Implementation-path update (22 October 2026): the original P1 TypeScript compiler,
+arithmetic oracle and draft-manifest generator have been retired after their
+consumers migrated to Rust. This does not change this historical specification's
+economic rules or any sealed identity.
 
 Joel can use the asset order, identifiers, decimal scales, digest bytes and
 request conditions now. Godwin can use the same references and user outcomes.
@@ -402,12 +404,11 @@ reprice or cancel an accepted batch merely because time has elapsed.
 
 ## 10. Handoff and verification
 
-Run `node packages/cox-methodology/src/fixtures.ts` (Node 24+) to regenerate,
-and `node --test packages/cox-methodology/test/*.test.ts` to verify. Tests check
-manifest determinism/invalid policies, byte hashes, vector parity, independent
-Paper 3 rational accounting, permutation independence, split-order floors,
-zero/full drain and checked overflow. They do not establish Solana runtime
-safety, venue authenticity, production economics or P2 simulation coverage.
+Verify the frozen vectors with `cargo run --manifest-path packages/cox/Cargo.toml
+--locked -p cox-cli -- verify-vectors packages/cox/fixtures/vectors.json` and run
+the Rust math/program suites. Historical expected vectors are retained unchanged;
+the retired TypeScript generator is no longer an executable maintenance command.
+These checks do not establish live oracle authenticity or deployment readiness.
 
 Joel: use only `packages/price-feeds` for exchanges; archive source evidence and
 fallback attempts, produce canonical observations/snapshot digests and feed

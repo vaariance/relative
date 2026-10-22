@@ -220,7 +220,7 @@ legal review remain necessary before a real-money release.
 | Component | Purpose |
 | --- | --- |
 | [COX program and math](packages/cox/README.md) | Rust calculation engine, Anchor program, fixtures and custody tests |
-| [Methodology](packages/cox-methodology/README.md) | Canonical manifests, price encoding and specification vectors |
+| [Methodology](packages/cox-methodology/README.md) | Rust inclusion lifecycle, geometric benchmark and Epoch research simulation |
 | [Solana client](packages/cox-client/README.md) | Account readers, unsigned instruction builders and simulations |
 | [Price feeds](packages/price-feeds/README.md) | Rate-limited venue clients and exact price conversion |
 | [Ingestion](packages/ingestion/README.md) | Minute snapshot archive and feed reports |

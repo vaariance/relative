@@ -9,7 +9,6 @@
     "cox:check": "pnpm cox:math:check && pnpm cox:client:check && pnpm cox:publisher:check",
     "cox:test": "pnpm cox:methodology:test && pnpm cox:math:test && pnpm cox:client:test && pnpm cox:publisher:test && pnpm cox:program:test",
     "cox:methodology:test": "pnpm --filter @cox/methodology test",
-    "cox:methodology:fixtures": "pnpm --filter @cox/methodology fixtures",
     "cox:math": "cargo run --manifest-path packages/cox/Cargo.toml --locked -p cox-cli --",
     "cox:math:check": "cargo fmt --manifest-path packages/cox/Cargo.toml --all --check && cargo clippy --manifest-path packages/cox/Cargo.toml --workspace --all-targets --locked -- -D warnings",
     "cox:math:test": "cargo test --manifest-path packages/cox/Cargo.toml --workspace --locked",
