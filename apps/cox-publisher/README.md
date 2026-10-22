@@ -60,7 +60,7 @@ With the publisher stopped, an authorized reader can restore a specific successf
 relative-publisher restore --config /etc/cox-publisher/native-backup.json --manifest SHA256 --destination /var/lib/cox-publisher-restored
 ```
 
-Restore rejects existing destinations, unsafe paths and checksum mismatches. Verify the restored publication chain and runtime identity, then reconcile chain state before switching directories and starting one publisher. Local simulated-storage backup/restore tests cover integrity and concurrent checkpoint capture; live Cloud Storage permissions, installed backup service and an operational restore remain unverified.
+Restore rejects existing destinations, unsafe paths and checksum mismatches. Verify the restored publication chain and runtime identity, then reconcile chain state before switching directories and starting one publisher. Local simulated-storage tests cover integrity and concurrent checkpoint capture. Pool 2 rollout from committed `027fd7420021742cf86b3174caea69177f3ad771` verified a real cloud archive record and an isolated restore of a 69-file native recovery manifest. The Rust runtime and minute backup timer run on the European dev VM; Basic remains registry-paused and Epoch drafts unsealed. See the [deployment record](../../packages/cox/deploy/adaptive-pool-2-devnet.json) for hashes and verification boundaries. Backups currently walk retained history each run; incremental uploads and explicit retention remain operational follow-up work.
 
 ## Migration boundary
 

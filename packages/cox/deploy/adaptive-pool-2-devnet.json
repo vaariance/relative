@@ -1369,17 +1369,17 @@
   "epochSealed": false,
   "maxLots": 4096,
   "maxEntryPriceAgeSeconds": "5",
-  "basicInitialized": false,
+  "basicInitialized": true,
   "feePolicy": {
     "bps": 2,
     "capBaseUnits": "200000",
     "pendingVersion": "1",
     "activationCutoff": "1792624144",
-    "activeVersion": "0",
-    "activationPending": true
+    "activeVersion": "1",
+    "activationPending": false
   },
   "registryPaused": true,
-  "publisherEnabled": false,
+  "publisherEnabled": true,
   "activationArmed": false,
   "initializationSignatures": {
     "register-methodology": "472c2XcZFV7sEr3NAMMnnezUiVkAzEX3MKDqRkYiea1g541XB6quoqtVxv8MifQTL8bTMEH6dJW4qa7qqw4mZRek",
@@ -1430,5 +1430,93 @@
       "append-universe-16": "63sMxV9e9gxQ8iTSGgoFnUqsThZS48kMpNZVqC7Nk5DzGEvUPtrtt3LKcVdzUfcg3YNmiDMm52jjrLZ7yyMnJ1ze",
       "append-universe-24": "2QAaSpgY4VZHJvVCHR1aQSDTr3ufQ6Ufpf9zW5zDWBXX9NWqQ3CgpFLCvT6AUb2mvnffCbiYuSGqrU3aKFwmvzyL"
     }
+  },
+  "lastRuntimeAuditSlot": 513865679,
+  "nativeRuntime": {
+    "sourceCommit": "027fd7420021742cf86b3174caea69177f3ad771",
+    "linuxSha256": "1f45ed0368499d0e281194c755db2ba6c1c3f76613a00a318afb29c1df132dcd",
+    "service": "cox-publisher.service",
+    "region": "europe-west1",
+    "running": true,
+    "signerRoute": "adaptive-enabled canary; existing default signer traffic unchanged",
+    "apiArchivePrefix": "gs://colosseum-cox-publication-archives-dev/pool-2/history/",
+    "backupTimerEnabled": true,
+    "cloudArchiveVerification": {
+      "object": "gs://colosseum-cox-publication-archives-dev/pool-2/history/0/df61a9aaa17436c11d9c81d40b3ffd7389ca55f6e246e77f599bab5b1bb3bbba.json",
+      "sha256": "df61a9aaa17436c11d9c81d40b3ffd7389ca55f6e246e77f599bab5b1bb3bbba",
+      "sequence": "0",
+      "commitment": "confirmed",
+      "observedSlot": 513864091,
+      "hashAndIdentityVerified": true
+    },
+    "isolatedRecoveryVerification": {
+      "manifestSha256": "d9bee9c4861266da3f1940d98eddd6186231451a7d41ada9cb22591664260e7e",
+      "files": 69,
+      "verified": true
+    },
+    "finalizedChainAudit": {
+      "schema": "relative.native-live-audit/v1",
+      "commitment": "finalized",
+      "slot": 513865679,
+      "registryPaused": true,
+      "basicInitialized": true,
+      "sequence": "1",
+      "feeVersion": "1",
+      "feeBps": 2,
+      "feeCap": "200000",
+      "feePending": false,
+      "activeBatch": null,
+      "userRequests": 0,
+      "custodyBalances": [
+        "0",
+        "0"
+      ],
+      "epochDraftsUnsealed": true,
+      "retiredLegacyPoolStillEmpty": true,
+      "poolTransactions": [
+        {
+          "signature": "2ipU8Wcyb3tXmwZ6qcRNNC7zghWsF3tZpc4qn8bZZYvQxW7ErCfMhjJruDRSLQg1HzjZ1yW6B9evUQw33j2FhvQX",
+          "slot": 513864176,
+          "error": null
+        },
+        {
+          "signature": "5xCCzMgWS8pioAVLu3EYoMxn4eGwRBWaAZ3FjevWU3GLWnmrMLsrXNFt7vy365EKHAfgXeCTzibAPmTjdTbTsd4S",
+          "slot": 513864152,
+          "error": null
+        },
+        {
+          "signature": "54c3Xv9WML3S9WqRUA3ppUXJCZY9o1FdqKDtoRN7WmuxZqfz6qxgKjwv2JrbEgQ8LbrK7xVRscfrvHotk9SQFBSo",
+          "slot": 513864129,
+          "error": null
+        },
+        {
+          "signature": "5id9MrGtUvcAniDZAL5eHyPC5cjKVokWL6wBvGEBsXSpP8QE2NYyZA1DbkF4DESu9aUXtjiwYfZNvQ9MyT4yiPS1",
+          "slot": 513864105,
+          "error": null
+        },
+        {
+          "signature": "zgmVprKtttc7SoiyBoCDQCoRRvjqhp1wQc1sH4s4qzpU9EF8ToRPkU6Y3dS8Cqbzjza1QYdRZ2YvgtSKSasYjQR",
+          "slot": 513864088,
+          "error": null
+        },
+        {
+          "signature": "wDNz26agDukvY9GRj9FzcbWX9NZwMFKe3PNB7ZZ8k2qz3vUb5L71uSEFnPGGK6q2WvqXoxAtCFma1xsGH3YA7YK",
+          "slot": 513864070,
+          "error": null
+        },
+        {
+          "signature": "7t3r3Zz2YcgbvBuTS3WFbxWAkNyXfo6wRjYP6YvxAYkDcvj6VP1fTK6wSAFS1A88aF9sQdntLNHeVbDBDEQehPP",
+          "slot": 513864052,
+          "error": null
+        },
+        {
+          "signature": "3GkvbnLzYbMntZUVxm9WSR1jYQev1njeDCr6DxaTqYcKq4rngtWRMVJPDh768SPhDeVmZ36zprK2Xx9mciasnpXQ",
+          "slot": 513864029,
+          "error": null
+        }
+      ]
+    },
+    "userEntryEndToEndVerified": false,
+    "epochLiveSettlementVerified": false
   }
 }
