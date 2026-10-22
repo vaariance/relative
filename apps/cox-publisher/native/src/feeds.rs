@@ -16,7 +16,8 @@ use std::{
 use tokio::sync::{mpsc, watch};
 use yellowstone_grpc_client::GeyserGrpcClient;
 use yellowstone_grpc_proto::prelude::{
-    subscribe_update::UpdateOneof, CommitmentLevel, SubscribeRequest, SubscribeRequestFilterSlots,
+    subscribe_update::UpdateOneof, CommitmentLevel, SubscribeRequest,
+    SubscribeRequestFilterAccounts, SubscribeRequestFilterSlots,
     SubscribeRequestFilterTransactions, SubscribeRequestPing,
 };
 
@@ -26,6 +27,8 @@ pub struct WakeHint {
     pub latest_slot: u64,
     pub reconcile: bool,
     pub connected: bool,
+    pub signer_generation: u64,
+    pub protocol_generation: u64,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FeedError {
@@ -41,6 +44,7 @@ pub struct GrpcConfig {
     pub endpoint: String,
     pub token: String,
     pub program_ids: Vec<String>,
+    pub account_ids: watch::Receiver<Vec<String>>,
 }
 pub struct PythConfig {
     pub token: String,
@@ -49,24 +53,62 @@ pub struct PythConfig {
 }
 
 pub fn grpc_subscription(program_ids: &[String]) -> Result<SubscribeRequest, FeedError> {
+    grpc_account_subscription(program_ids, &[])
+}
+
+fn grpc_account_subscription(
+    program_ids: &[String],
+    account_ids: &[String],
+) -> Result<SubscribeRequest, FeedError> {
     let ids: BTreeSet<_> = program_ids.iter().cloned().collect();
-    if ids.is_empty() || ids.iter().any(|id| id.is_empty()) {
+    if ids.is_empty()
+        || ids.iter().any(|id| id.is_empty())
+        || account_ids.iter().any(String::is_empty)
+    {
         return Err(FeedError::Configuration);
     }
+    let mut watched: BTreeSet<_> = account_ids.iter().cloned().collect();
+    watched.extend(ids.iter().cloned());
     Ok(SubscribeRequest {
         slots: HashMap::from([(
-            "progress".to_owned(),
+            "confirmation".into(),
             SubscribeRequestFilterSlots {
                 filter_by_commitment: Some(false),
                 ..Default::default()
             },
         )]),
+        accounts: HashMap::from([
+            (
+                "protocol".into(),
+                SubscribeRequestFilterAccounts {
+                    owner: ids.iter().cloned().collect(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "custody".into(),
+                SubscribeRequestFilterAccounts {
+                    account: account_ids.to_vec(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "signers".into(),
+                SubscribeRequestFilterAccounts {
+                    account: vec![crate::pyth::STORAGE_ADDRESS.into()],
+                    ..Default::default()
+                },
+            ),
+        ])
+        .into_iter()
+        .filter(|(name, value)| name != "custody" || !value.account.is_empty())
+        .collect(),
         transactions: HashMap::from([(
             "predictions".to_owned(),
             SubscribeRequestFilterTransactions {
                 vote: Some(false),
                 failed: Some(false),
-                account_include: ids.into_iter().collect(),
+                account_include: watched.into_iter().collect(),
                 ..Default::default()
             },
         )]),
@@ -78,13 +120,26 @@ pub fn grpc_subscription(program_ids: &[String]) -> Result<SubscribeRequest, Fee
 fn hint(sender: &watch::Sender<WakeHint>, slot: Option<u64>, reconcile: bool) {
     sender.send_modify(|state| {
         state.generation = state.generation.saturating_add(1);
+        if !reconcile {
+            state.protocol_generation = state.protocol_generation.saturating_add(1);
+        }
         state.latest_slot = state.latest_slot.max(slot.unwrap_or(0));
-        state.reconcile |= reconcile;
+        state.reconcile = reconcile;
+    });
+}
+
+fn connection(sender: &watch::Sender<WakeHint>, connected: bool) {
+    sender.send_if_modified(|state| {
+        if state.connected == connected {
+            return false;
+        }
+        state.connected = connected;
+        true
     });
 }
 
 pub async fn run_grpc(
-    config: GrpcConfig,
+    mut config: GrpcConfig,
     wakes: watch::Sender<WakeHint>,
     mut stop: watch::Receiver<bool>,
 ) -> Result<(), FeedError> {
@@ -97,47 +152,89 @@ pub async fn run_grpc(
     {
         return Err(FeedError::Configuration);
     }
-    let request = grpc_subscription(&config.program_ids)?;
     let mut delay = Duration::from_millis(250);
     loop {
         if *stop.borrow() {
             return Ok(());
         }
-        wakes.send_modify(|state| state.connected = false);
-        hint(&wakes, None, true);
-        let session = grpc_session(&config, request.clone(), &wakes);
-        tokio::select! { _ = wait_stop(&mut stop) => return Ok(()), _ = session => {} }
-        wakes.send_modify(|state| state.connected = false);
-        hint(&wakes, None, true);
+        let accounts = config.account_ids.borrow_and_update().clone();
+        let request = grpc_account_subscription(&config.program_ids, &accounts)?;
+        let session = grpc_session(
+            &config.endpoint,
+            &config.token,
+            request,
+            &wakes,
+            &mut config.account_ids,
+        );
+        tokio::select! { _ = wait_stop(&mut stop) => return Ok(()), result = session => {
+            if result.is_ok() { continue; }
+        } }
+        connection(&wakes, false);
         tokio::select! { _ = wait_stop(&mut stop) => return Ok(()), _ = tokio::time::sleep(delay) => {} }
         delay = (delay * 2).min(Duration::from_secs(10));
     }
 }
 
+#[derive(Default)]
+struct PendingActivity {
+    slots: BTreeSet<u64>,
+}
+impl PendingActivity {
+    fn observe(&mut self, slot: u64) {
+        self.slots.insert(slot);
+    }
+    fn progress(&mut self, slot: u64, status: i32) -> bool {
+        match status {
+            1 | 2 => {
+                let previous = self.slots.len();
+                self.slots.retain(|pending| *pending > slot);
+                previous != self.slots.len()
+            }
+            6 => self.slots.remove(&slot),
+            _ => false,
+        }
+    }
+}
+
 async fn grpc_session(
-    config: &GrpcConfig,
-    request: SubscribeRequest,
+    endpoint: &str,
+    token: &str,
+    mut request: SubscribeRequest,
     wakes: &watch::Sender<WakeHint>,
+    accounts: &mut watch::Receiver<Vec<String>>,
 ) -> Result<(), FeedError> {
-    let mut client = GeyserGrpcClient::build_from_shared(config.endpoint.clone())
+    let mut client = GeyserGrpcClient::build_from_shared(endpoint.to_owned())
         .map_err(|_| FeedError::Configuration)?
-        .x_token(Some(config.token.clone()))
+        .x_token(Some(token.to_owned()))
         .map_err(|_| FeedError::Configuration)?
         .tls_config(tonic::transport::ClientTlsConfig::new().with_native_roots())
         .map_err(|_| FeedError::Configuration)?
+        .http2_keep_alive_interval(Duration::from_secs(20))
+        .keep_alive_timeout(Duration::from_secs(10))
+        .keep_alive_while_idle(true)
         .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(30))
         .connect()
         .await
         .map_err(|_| FeedError::Connect)?;
     let (mut sink, mut stream) = client
-        .subscribe_with_request(Some(request))
+        .subscribe_with_request(Some(request.clone()))
         .await
         .map_err(|_| FeedError::Subscribe)?;
-    wakes.send_modify(|state| state.connected = true);
+    connection(wakes, true);
     hint(wakes, None, true);
-    while let Some(update) = stream.next().await {
-        let update = update.map_err(|_| FeedError::Disconnected)?;
+    let mut pending_activity = PendingActivity::default();
+    loop {
+        let update = tokio::select! {
+            changed = accounts.changed() => {
+                changed.map_err(|_|FeedError::ConsumerStopped)?;
+                let watched = accounts.borrow_and_update().clone();
+                let programs = request.accounts.get("protocol").ok_or(FeedError::Configuration)?.owner.clone();
+                request = grpc_account_subscription(&programs, &watched)?;
+                sink.send(request.clone()).await.map_err(|_|FeedError::Disconnected)?;
+                continue;
+            },
+            item = stream.next() => item.ok_or(FeedError::Disconnected)?.map_err(|_|FeedError::Disconnected)?,
+        };
         match update.update_oneof {
             Some(UpdateOneof::Ping(_)) => sink
                 .send(SubscribeRequest {
@@ -146,14 +243,31 @@ async fn grpc_session(
                 })
                 .await
                 .map_err(|_| FeedError::Disconnected)?,
-            Some(UpdateOneof::Slot(slot)) if slot.status == 6 => hint(wakes, Some(slot.slot), true),
+            Some(UpdateOneof::Account(account)) => {
+                if update.filters.iter().any(|filter| filter == "signers") {
+                    wakes.send_modify(|state| {
+                        state.signer_generation = state.signer_generation.saturating_add(1)
+                    });
+                }
+                if update
+                    .filters
+                    .iter()
+                    .any(|filter| filter == "protocol" || filter == "custody")
+                {
+                    pending_activity.observe(account.slot);
+                    hint(wakes, Some(account.slot), false);
+                }
+            }
             Some(UpdateOneof::Transaction(transaction)) => {
+                pending_activity.observe(transaction.slot);
                 hint(wakes, Some(transaction.slot), false)
+            }
+            Some(UpdateOneof::Slot(slot)) if pending_activity.progress(slot.slot, slot.status) => {
+                hint(wakes, None, true)
             }
             _ => {}
         }
     }
-    Err(FeedError::Disconnected)
 }
 
 pub fn pyth_subscription(config: &PythConfig) -> Result<PythSubscribe, FeedError> {
@@ -267,7 +381,15 @@ mod tests {
             ["basic", "epoch"]
         );
         assert_eq!(request.transactions["predictions"].failed, Some(false));
-        assert!(request.accounts.is_empty());
+        assert_eq!(request.accounts["protocol"].owner, ["basic", "epoch"]);
+        assert_eq!(
+            request.accounts["signers"].account,
+            [crate::pyth::STORAGE_ADDRESS]
+        );
+        assert_eq!(
+            request.slots["confirmation"].filter_by_commitment,
+            Some(false)
+        );
     }
     #[test]
     fn pyth_requests_signed_one_second_feed_without_trusting_parsed_json() {
@@ -294,9 +416,62 @@ mod tests {
                 generation: 3,
                 latest_slot: 10,
                 reconcile: true,
-                connected: false
+                connected: false,
+                signer_generation: 0,
+                protocol_generation: 2
             }
         );
+    }
+    #[test]
+    fn reconnect_health_without_successful_subscription_does_not_trigger_http() {
+        let (sender, receiver) = watch::channel(WakeHint::default());
+        for _ in 0..20 {
+            connection(&sender, false);
+        }
+        assert_eq!(receiver.borrow().generation, 0);
+        connection(&sender, true);
+        hint(&sender, None, true);
+        assert_eq!(receiver.borrow().generation, 1);
+        assert!(receiver.borrow().reconcile);
+        connection(&sender, false);
+        assert_eq!(receiver.borrow().generation, 1);
+    }
+    #[test]
+    fn custody_and_owner_filters_cover_direct_transfers_without_subscribing_to_all_slots() {
+        let request =
+            grpc_account_subscription(&["basic".into(), "epoch".into()], &["vault".into()])
+                .unwrap();
+        assert_eq!(request.accounts["custody"].account, ["vault"]);
+        assert_eq!(
+            request.transactions["predictions"].account_include,
+            ["basic", "epoch", "vault"]
+        );
+        assert_eq!(
+            request.slots["confirmation"].filter_by_commitment,
+            Some(false)
+        );
+    }
+    #[test]
+    fn unrelated_slots_never_wake_but_delayed_confirmation_and_dead_pending_slots_wake_once() {
+        let mut pending = PendingActivity::default();
+        for slot in 1..100 {
+            for status in 0..7 {
+                assert!(!pending.progress(slot, status));
+            }
+        }
+        pending.observe(100);
+        pending.observe(100);
+        assert!(!pending.progress(99, 1));
+        assert!(!pending.progress(100, 0));
+        assert!(!pending.progress(100, 3));
+        assert!(pending.progress(101, 1));
+        assert!(!pending.progress(102, 1));
+        pending.observe(200);
+        assert!(!pending.progress(199, 6));
+        assert!(pending.progress(200, 6));
+        assert!(!pending.progress(200, 6));
+        pending.observe(300);
+        assert!(pending.progress(301, 2));
     }
     #[test]
     fn invalid_catalogues_fail_before_connecting() {

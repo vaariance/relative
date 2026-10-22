@@ -119,6 +119,8 @@ pub struct Record {
     pub crypto_class: u16,
     pub crypto_reference: String,
     pub basic_projection: Option<Projection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain_change: Option<crate::changes::Notification>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -225,6 +227,7 @@ impl Record {
             crypto_class: anchor.assets.len() as u16,
             crypto_reference: (100 * SCALE).to_string(),
             basic_projection,
+            chain_change: None,
         })
     }
 }
@@ -307,7 +310,21 @@ pub async fn run(config_path: &Path, backup_path: &Path) -> Result<(), Error> {
         &pool,
     );
     let consumer = consume(&transport, &prefix, &spool);
-    tokio::try_join!(producer, consumer)?;
+    let notification_prefix = format!("pool-{}/chain-changes", config.basic_pool_id);
+    let notification_spool = config.state_directory.with_extension("chain-spool");
+    let notifications = async {
+        crate::notifications::run(
+            &transport,
+            &notification_prefix,
+            &config.state_directory,
+            &notification_spool,
+            &config.basic_program,
+            &pool,
+        )
+        .await
+        .map_err(|_| Error::Storage)
+    };
+    tokio::try_join!(producer, consumer, notifications)?;
     Ok(())
 }
 async fn produce(
@@ -364,7 +381,9 @@ async fn produce(
             };
             let path = spool.join(format!("{timestamp}.json"));
             if !path.exists() {
-                let record = Record::derive(anchor, &value, &ledger)?;
+                let mut record = Record::derive(anchor, &value, &ledger)?;
+                record.chain_change = crate::changes::read(&state.join("chain-change.json"))
+                    .map_err(|_| Error::Storage)?;
                 journal::atomic_write(&path, &record).map_err(|_| Error::Storage)?;
             }
             journal::atomic_write(&cursor_path, &Cursor { timestamp })

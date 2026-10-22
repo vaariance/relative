@@ -742,7 +742,7 @@ impl ChainState {
                         .fee_pending_cutoff
                         .checked_mul(1000)
                         .ok_or(Error::Overflow)?;
-                    if now_ms >= cutoff_ms {
+                    {
                         work.push(Work::Entry {
                             id: "basic:fee-activation".into(),
                             pool: WorkPool::Basic,
@@ -1186,7 +1186,23 @@ pub(crate) mod tests {
         assert_eq!(bootstrap.len(), 1);
         assert!(matches!(&bootstrap[0], Work::Entry {id, ..} if id == "basic:bootstrap"));
         s.basic.pool.initialized = true;
-        assert!(s.work(cutoff_ms - 1).unwrap().is_empty());
+        let future = s.work(cutoff_ms - 1).unwrap();
+        assert_eq!(future.len(), 1);
+        assert!(
+            matches!(&future[0], Work::Entry { eligible_after_ms, .. } if *eligible_after_ms == cutoff_ms - 1)
+        );
+        assert_eq!(
+            crate::scheduler::decide(
+                cutoff_ms - 1,
+                &crate::scheduler::Checkpoint::default(),
+                &future,
+                4
+            )
+            .unwrap(),
+            crate::scheduler::Decision::Idle {
+                wake_ms: Some(cutoff_ms)
+            }
+        );
         let due = s.work(cutoff_ms).unwrap();
         assert_eq!(due.len(), 1);
         assert!(

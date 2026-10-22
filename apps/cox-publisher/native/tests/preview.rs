@@ -169,3 +169,24 @@ async fn upload_is_immutable_retryable_and_rejects_conflicting_same_second() {
         Err(Error::Conflict)
     );
 }
+
+#[test]
+fn notification_metadata_is_optional_for_legacy_records_and_does_not_confirm_estimates() {
+    let (anchor, value, ledger) = fixture();
+    let mut record = Record::derive(&anchor, &value, &ledger).unwrap();
+    let legacy = serde_json::to_value(&record).unwrap();
+    assert!(legacy.get("chainChange").is_none());
+    record.chain_change = Some(relative_publisher::changes::Notification {
+        schema: "relative.chain-change/v1".into(),
+        generation: "a".repeat(64),
+        revision: "3".into(),
+        observed_slot: 123,
+        commitment: "confirmed".into(),
+        stream_healthy: true,
+    });
+    let encoded = serde_json::to_value(&record).unwrap();
+    assert_eq!(encoded["status"], "estimate");
+    assert_eq!(encoded["chainChange"]["revision"], "3");
+    assert_eq!(encoded["chainChange"]["commitment"], "confirmed");
+    assert_eq!(serde_json::from_value::<Record>(encoded).unwrap(), record);
+}

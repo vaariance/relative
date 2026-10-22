@@ -2,6 +2,8 @@ use crate::benchmark::{Batch, Error, FeedPrice};
 use ed25519_dalek::{Signature, VerifyingKey};
 use std::collections::BTreeSet;
 
+pub const STORAGE_ADDRESS: &str = "3rdJbqfnagQ4yx9HXJViD4zc4xpiSqmFsKpPuSCQVyQL";
+
 #[derive(Clone, Debug)]
 pub struct TrustedSigner {
     pub public_key: [u8; 32],
@@ -38,6 +40,25 @@ impl<'a> Reader<'a> {
     fn i64(&mut self) -> Result<i64, Error> {
         Ok(i64::from_le_bytes(self.take()?))
     }
+}
+
+pub fn payload_signer(bytes: &[u8]) -> Result<[u8; 32], Error> {
+    let mut envelope = Reader { bytes, offset: 0 };
+    if envelope.u32()? != 2_182_742_457 {
+        return Err(Error::Verification);
+    }
+    let signature = Signature::from_bytes(&envelope.take()?);
+    let public_key = envelope.take()?;
+    let length = usize::from(envelope.u16()?);
+    let payload = bytes
+        .get(envelope.offset..)
+        .filter(|value| value.len() == length)
+        .ok_or(Error::Verification)?;
+    VerifyingKey::from_bytes(&public_key)
+        .map_err(|_| Error::Verification)?
+        .verify_strict(payload, &signature)
+        .map_err(|_| Error::Verification)?;
+    Ok(public_key)
 }
 
 pub fn verify_payload(
@@ -137,7 +158,13 @@ pub fn verify_payload(
 pub async fn read_trusted_signers(rpc: &crate::rpc::Rpc) -> Result<Vec<TrustedSigner>, Error> {
     use base64::Engine;
     use sha2::{Digest, Sha256};
-    let result = rpc.call("getAccountInfo", serde_json::json!(["3rdJbqfnagQ4yx9HXJViD4zc4xpiSqmFsKpPuSCQVyQL", {"commitment":"confirmed", "encoding":"base64"}])).await.map_err(|_| Error::Verification)?;
+    let result = rpc
+        .call(
+            "getAccountInfo",
+            serde_json::json!([STORAGE_ADDRESS, {"commitment":"confirmed", "encoding":"base64"}]),
+        )
+        .await
+        .map_err(|_| Error::Verification)?;
     let account = result.get("value").ok_or(Error::Verification)?;
     if account.get("owner").and_then(serde_json::Value::as_str)
         != Some("pytd2yyk641x7ak7mkaasSJVXh6YYZnC7wTmtgAyxPt")

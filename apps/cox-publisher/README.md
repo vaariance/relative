@@ -4,6 +4,16 @@ The default publisher entry point is now the Rust executable in `native/`. It co
 
 The native service is deployed for Basic pool 2 and Epoch config 2. Real devnet bootstrap, initial fee activation and archive recovery are verified; Basic trading is open after verified deposit/redemption, archive recovery and preview delivery. Epoch remains separate and awaits its live lifecycle verification. Legacy pool 1 is retired and explicitly rejected. Runtime signing uses the bound adaptive canary; existing default signer traffic is unchanged.
 
+## Event-driven chain access
+
+The prepared event-driven release uses gRPC notifications for protocol accounts, custody and Pyth signer storage. Confirmed HTTP reads run at startup, after relevant events or stream recovery, at scheduled protocol deadlines, and once per 20 minutes of idle safety reconciliation. Pending execution and transaction confirmation retain the one-second cadence; an executed Epoch entry awaiting its closing timestamp does not keep chain polling active. Repeated errors back off rather than silently creating a continuous HTTP loop. Pyth observations, gRPC heartbeats and unrelated slot updates do not trigger pool reads.
+
+Preview records may include `chainChange`, schema `relative.chain-change/v1`: `generation` (64 lowercase hexadecimal characters), `revision` (decimal string), `observedSlot`, `commitment: "confirmed"`, and `streamHealthy`. It is cache-invalidation metadata, not confirmation of the accompanying estimate. Revisions advance for changed reconciled state, confirmed relevant activity or successful stream catch-up; price-only records retain the same revision. A generation change or skipped revision requires one coalesced consumer refresh. Consumers mark disconnected or stale feeds explicitly and retain transaction-preparation validation. Joel owns API adoption; source changes alone do not remove API polling.
+
+Independent chain notifications use `pool-2/chain-changes/<20-digit Unix milliseconds>-<sha256>.json`, schema `relative.chain-notification/v1`, with `timestampMs`, network/program/pool identity and the same `chainChange` metadata. The exporter emits changes and a 20-second heartbeat even without Pyth observations. Consumers treat 60 seconds without a notification as unhealthy, use one coalesced catch-up after recovery, and never infer financial finality from notification provenance. A local five-second liveness lease makes stale publisher state unhealthy after 15 seconds. The prefix shares seven-day preview retention; durable publication history remains separate.
+
+Private `rpc-usage.json` counts physical HTTP attempts, including failed primary/fallback attempts, grouped by method, trigger and upstream name. It contains no endpoint URLs or credentials and resets when the publisher process starts. GCS preview/backup calls and Pyth API traffic are outside these Solana counters. Use process lifetime and provider dashboard windows when comparing usage.
+
 ## Build and run
 
 Use Rust 1.90 or later for this standalone native workspace. Keep the Solana program build toolchain separate.
@@ -84,7 +94,7 @@ Restore rejects existing destinations, unsafe paths and checksum mismatches. Ver
 | `packages/cox-methodology` | Rust methodology retained; legacy TypeScript exports and fixture generator removed after the API migrated to the Rust CLI. |
 | `apps/rpc-proxy` | Removed; servers use direct Alchemy and public devnet fallback. |
 
-These are two TypeScript implementation replacements and one proxy retirement. The publisher and methodology package directories remain required for their Rust crates. `price-feeds`, `cox-monitor`, signer/signing, APIs, ingestion, web, contracts and the client SDK remain required.
+These are two TypeScript implementation replacements and one proxy retirement. The publisher and methodology package directories remain required for their Rust crates. Signer/signing, APIs, web, contracts and the client SDK remain required. The obsolete exchange archiver, monitor, `price-feeds` and exchange-only `ingestion` have been retired; native Pyth validation and historical evidence access remain.
 
 Native inclusion lifecycle and exact-rational Epoch simulation are library implementations with parity tests. Dynamic universe activation and expanded Basic class support are separate integration work; the executable currently binds the sealed Basic roster, at most 30 assets, and Pyth Pro IDs. Paged discovery covers larger participant counts but does not expand the asset roster or transaction capacity. Missing historical Pyth closing data has no backfill implementation. Archived payloads are reverified against known trusted signer keys; unavailable historical keys fail closed.
 

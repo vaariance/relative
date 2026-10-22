@@ -148,11 +148,13 @@ async fn probe_feeds() -> Result<(), &'static str> {
     let (stops, stop) = watch::channel(false);
     let (wakes, mut wake) = watch::channel(WakeHint::default());
     let (prices, mut price) = mpsc::channel(4);
+    let (_account_updates, account_ids) = watch::channel(Vec::new());
     let grpc_task = tokio::spawn(run_grpc(
         GrpcConfig {
             endpoint: "https://solana-devnet.streaming.alchemy.com".into(),
             token: key,
             program_ids: vec!["G6iQGoupNSfduw1QJxQ9vcVi9FnCC6cbippXsi4QQzJF".into()],
+            account_ids,
         },
         wakes,
         stop.clone(),

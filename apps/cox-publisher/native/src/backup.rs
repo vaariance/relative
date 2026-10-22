@@ -15,11 +15,13 @@ use tokio::sync::Mutex;
 const MAX_CONFIG_BYTES: u64 = 16_384;
 const MAX_MANIFEST_BYTES: usize = 64 * 1024 * 1024;
 const MAX_DEPTH: usize = 5;
-const MUTABLE: [&str; 6] = [
+const MUTABLE: [&str; 8] = [
     "identity.json",
     "checkpoint.json",
     "discovery.json",
     "preview-ledger.json",
+    "chain-change.json",
+    "rpc-usage.json",
     "prices/latest.json",
     "prices/active-anchor.json",
 ];

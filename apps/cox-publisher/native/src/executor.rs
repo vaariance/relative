@@ -39,6 +39,9 @@ pub struct Executor<S> {
     now_ms: u64,
     publication_archive: Option<crate::publications::Archive>,
     preview_ledger_path: Option<std::path::PathBuf>,
+    chain_changes: Option<std::sync::Arc<crate::changes::ChainChanges>>,
+    wake_accounts: Option<tokio::sync::watch::Sender<Vec<String>>>,
+    chain_activity: Option<tokio::sync::watch::Receiver<crate::feeds::WakeHint>>,
     discovery: crate::chain::Discovery,
     max_price_age_ms: u64,
     max_feed_age_ms: u64,
@@ -162,9 +165,30 @@ impl<S: DraftSigner> Executor<S> {
             discovery,
             publication_archive: None,
             preview_ledger_path: None,
+            chain_changes: None,
+            wake_accounts: None,
+            chain_activity: None,
             max_price_age_ms: 5_000,
             max_feed_age_ms: 60_000,
         })
+    }
+    pub fn with_chain_changes(
+        mut self,
+        changes: std::sync::Arc<crate::changes::ChainChanges>,
+    ) -> Self {
+        self.chain_changes = Some(changes);
+        self
+    }
+    pub fn with_chain_activity(
+        mut self,
+        receiver: tokio::sync::watch::Receiver<crate::feeds::WakeHint>,
+    ) -> Self {
+        self.chain_activity = Some(receiver);
+        self
+    }
+    pub fn with_wake_accounts(mut self, sender: tokio::sync::watch::Sender<Vec<String>>) -> Self {
+        self.wake_accounts = Some(sender);
+        self
     }
     pub fn with_preview_ledger(mut self, path: std::path::PathBuf) -> Self {
         self.preview_ledger_path = Some(path);
@@ -623,6 +647,41 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
         self.now_ms = now_ms;
         let state = self.read_state().await?;
         self.validate_anchor(&state)?;
+        if let Some(changes) = &self.chain_changes {
+            let activity = self
+                .chain_activity
+                .as_ref()
+                .map(|receiver| *receiver.borrow())
+                .unwrap_or_default();
+            changes
+                .confirm_activity(
+                    state.slot,
+                    state.digest,
+                    activity.generation,
+                    activity.latest_slot,
+                )
+                .map_err(|_| worker::Error::Storage)?;
+        }
+        if let Some(sender) = &self.wake_accounts {
+            let mut accounts = vec![state.basic.accounts.vault.to_string()];
+            if let Some(vault) = state.basic.accounts.test_vault {
+                accounts.push(vault.to_string());
+            }
+            for epoch in &state.epochs {
+                accounts.push(epoch.accounts.vault.to_string());
+                accounts.push(epoch.accounts.test_vault.to_string());
+            }
+            accounts.sort();
+            accounts.dedup();
+            sender.send_if_modified(|current| {
+                if *current == accounts {
+                    false
+                } else {
+                    *current = accounts;
+                    true
+                }
+            });
+        }
         if let Some(path) = &self.preview_ledger_path {
             if let Ok(ledger) = crate::preview::Ledger::from_state(&state) {
                 if ledger.persist(path).is_err() {
@@ -1083,7 +1142,10 @@ mod tests {
         );
         state.basic.pool.trading_opens_at = 14_400;
         state.epoch_config.methodology[0] ^= 1;
-        assert_eq!(executor.validate_anchor(&state), Err(worker::Error::Snapshot));
+        assert_eq!(
+            executor.validate_anchor(&state),
+            Err(worker::Error::Snapshot)
+        );
         state.epoch_config.methodology[0] ^= 1;
         let observation = Observation {
             universe_digest: [1; 32],

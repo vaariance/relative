@@ -1,12 +1,27 @@
 {
   "rule": [
     {
-      "action": { "type": "Delete" },
-      "condition": { "age": 7, "matchesPrefix": ["pool-2/preview/"] }
+      "action": {
+        "type": "Delete"
+      },
+      "condition": {
+        "age": 7,
+        "matchesPrefix": [
+          "pool-2/preview/",
+          "pool-2/chain-changes/"
+        ]
+      }
     },
     {
-      "action": { "type": "Delete" },
-      "condition": { "age": 7, "matchesPrefix": ["basic-2/native/manifests/"] }
+      "action": {
+        "type": "Delete"
+      },
+      "condition": {
+        "age": 7,
+        "matchesPrefix": [
+          "basic-2/native/manifests/"
+        ]
+      }
     }
   ]
 }
