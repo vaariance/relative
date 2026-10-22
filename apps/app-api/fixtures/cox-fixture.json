@@ -1,9 +1,9 @@
 {
   "schema": "cox.app-api/fixture/v1",
   "source": {
-    "oracle": "packages/cox-methodology/src/vectors.ts",
-    "oracleSha256": "ea87c0886d255a5851bbf8bbb76e5c0b0ee18e68e2215a0db4aec95e11eccc4e",
-    "note": "Two synthetic assets and CRYPTO computed with Peter's P1 oracle (reference, revalue, batch). Synthetic prices and wallets; not market data."
+    "oracle": "packages/cox/crates/cli",
+    "oracleSha256": "0ec4fbf687314333c08fa0cb5d8e44de483e19c208ce4c8f69537100cafb5ef4",
+    "note": "Two synthetic assets and CRYPTO computed with the Rust cox-cli (reference, revalue, batch; legacy arithmetic benchmark). Synthetic prices and wallets; not market data."
   },
   "methodology": {
     "digest": null,

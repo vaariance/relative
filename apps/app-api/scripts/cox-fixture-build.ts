@@ -1,11 +1,71 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { PublicKey } from "@solana/web3.js";
-import { SCALE } from "../../../packages/cox-methodology/src/index.ts";
-import { batch, reference, revalue, type ClassState, type Request } from "../../../packages/cox-methodology/src/vectors.ts";
 
-const ORACLE = new URL("../../../packages/cox-methodology/src/vectors.ts", import.meta.url);
+const COX = new URL("../../../packages/cox/", import.meta.url);
+const ORACLE_FILES = ["Cargo.lock", "crates/math/src/lib.rs", "crates/cli/src/main.rs"];
+const SCALE = 1_000_000_000_000n;
 const E8 = 100_000_000n;
+
+interface ClassState {
+  backing: bigint;
+  units: bigint;
+}
+
+type Request =
+  | { id: string; kind: "deposit"; to: number; amount: bigint; minimum: bigint; expiry: number }
+  | { id: string; kind: "redeem"; from: number; units: bigint; minimum: bigint; expiry: number }
+  | { id: string; kind: "switch"; from: number; to: number; units: bigint; minimum: bigint; expiry: number };
+
+type Wire = { [key: string]: string | Wire[] };
+
+function cox(command: "reference" | "revalue" | "batch", input: unknown): Wire {
+  const json = JSON.stringify(input, (_key, value: unknown) => (typeof value === "bigint" ? value.toString() : value));
+  const binary = process.env.COX_CLI;
+  const [file, args] = binary
+    ? [binary, [command]]
+    : ["cargo", ["run", "--quiet", "--locked", "--release", "--manifest-path", fileURLToPath(new URL("Cargo.toml", COX)), "-p", "cox-cli", "--", command]];
+  return JSON.parse(execFileSync(file, args, { input: json, encoding: "utf8", stdio: ["pipe", "pipe", "inherit"] })) as Wire;
+}
+
+const big = (value: unknown) => BigInt(value as string);
+const bigs = (value: unknown) => (value as string[]).map(BigInt);
+const classesOf = (value: unknown) => (value as Wire[]).map((c) => ({ backing: big(c.backing), units: big(c.units) }));
+const wireRequest = (r: Request) =>
+  r.kind === "deposit"
+    ? { kind: r.kind, id: r.id, to: r.to, amount: r.amount, minimum: r.minimum, expiry: r.expiry }
+    : r.kind === "redeem"
+      ? { kind: r.kind, id: r.id, from: r.from, units: r.units, minimum: r.minimum, expiry: r.expiry }
+      : { kind: r.kind, id: r.id, from: r.from, to: r.to, units: r.units, minimum: r.minimum, expiry: r.expiry };
+
+function reference(previous: bigint[], current: bigint[], origin: bigint[], previousBenchmark: bigint) {
+  const out = cox("reference", { previous, current, origin, previousBenchmark });
+  return { gross: bigs(out.gross), benchmarkGross: big(out.benchmarkGross), benchmark: big(out.benchmark), relative: bigs(out.relative), h: bigs(out.h) };
+}
+
+function revalue(classes: ClassState[], h: bigint[]) {
+  const out = cox("revalue", { classes, h });
+  return { classes: classesOf(out.classes), residual: big(out.residual) };
+}
+
+function batch(classes: ClassState[], requests: Request[], publicationBatch: number) {
+  const out = cox("batch", { classes, requests: requests.map(wireRequest), publicationBatch });
+  return {
+    classes: classesOf(out.classes),
+    payable: big(out.payable),
+    refunds: big(out.refunds),
+    residual: big(out.residual),
+    receipts: (out.receipts as Wire[]).map((r) => ({ id: r.id as string, outcome: r.outcome as string, minted: big(r.minted), proceeds: big(r.proceeds) })),
+  };
+}
+
+function oracleDigest(): string {
+  const hash = createHash("sha256");
+  for (const path of ORACLE_FILES) hash.update(`${path}\n`).update(readFileSync(new URL(path, COX), "utf8").replace(/\r\n/g, "\n"));
+  return hash.digest("hex");
+}
 const ASSETS = [
   { assetId: "SYNA", name: "Synthetic asset A" },
   { assetId: "SYNB", name: "Synthetic asset B" },
@@ -186,9 +246,9 @@ export function buildCoxFixture() {
   return {
     schema: "cox.app-api/fixture/v1",
     source: {
-      oracle: "packages/cox-methodology/src/vectors.ts",
-      oracleSha256: createHash("sha256").update(readFileSync(ORACLE)).digest("hex"),
-      note: "Two synthetic assets and CRYPTO computed with Peter's P1 oracle (reference, revalue, batch). Synthetic prices and wallets; not market data.",
+      oracle: "packages/cox/crates/cli",
+      oracleSha256: oracleDigest(),
+      note: "Two synthetic assets and CRYPTO computed with the Rust cox-cli (reference, revalue, batch; legacy arithmetic benchmark). Synthetic prices and wallets; not market data.",
     },
     methodology: { digest: null, label: "CRYPTO (fixture, 2 synthetic assets)", status: "draft", assetCount: ASSETS.length },
     assets: ASSETS.map((a, classIndex) => ({ ...a, classIndex })),
