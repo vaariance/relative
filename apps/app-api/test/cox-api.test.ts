@@ -30,7 +30,7 @@ afterAll(() => {
 });
 
 describe("COX fixture provenance", () => {
-  it("is exactly what Peter's P1 oracle produces for the fixture timeline", () => {
+  it("is exactly what the Rust cox-cli produces for the fixture timeline", () => {
     expect(buildCoxFixture()).toEqual(fixture);
   });
 
@@ -47,7 +47,7 @@ describe("cox.app-api/v1 on the fixture", () => {
     const { deployment, data } = await client.deployment();
     expect(data).toEqual(deployment);
     expect(deployment).toMatchObject({ origin: "fixture", testCollateral: true, transferRule: "COX/TRANSFER/MVP-0", program: null, methodology: { status: "draft", label: "CRYPTO (fixture, 2 synthetic assets)" } });
-    expect(deployment.fixtureSource).toContain("packages/cox-methodology/src/vectors.ts");
+    expect(deployment.fixtureSource).toContain("packages/cox/crates/cli");
   });
 
   it("keeps the latest publication on the latest minute and reports fresh status", async () => {
