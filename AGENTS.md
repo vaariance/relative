@@ -1221,3 +1221,14 @@ another agent needs to know.
 - **Rules for agents:** Finalized audit slot 513977460 verifies Basic paused, no active batch, zero active/pending/payable liabilities, custody 399 units matching protocol fees, unsealed Epoch drafts and unchanged empty retired pool 1. Test wallet has no units, payable or refundable amount. This proves the test-collateral functional round trip, not official-USDC interchange, live Epoch settlement or one-second end-to-end latency. Publisher is active with zero restarts since installation. Joel and Godwin were emailed the outcome; previews remain separate and not deployed.
 - **Open:** Per-second preview release, retention/incremental uploads, new activation readiness/timing and sustained-load latency verification. Dynamic inclusion remains deferred.
 - **Refs:** `packages/cox/deploy/adaptive-pool-2-devnet.json`; finalized withdrawal `vS3aKdVNUjSko6brUbdWqfrtNm6uSQrDvCA17gjxrwzD7bwcyzNyrWSRHBobPFNs1YDGrVApZ9Y75jXW1RQqNos`.
+
+### 2026-10-22 · Joel (Claude Code) · Preview routes deployed; pool 2 history records 1 to 3 copied to the bucket
+
+- **Area:** Cloud Run `cox-app-api-live`, dev VM `cox-app-api-live`, `gs://colosseum-cox-publication-archives-dev/pool-2/history/`.
+- **What:** Supersedes the "not deployed" status in Joel's 2026-10-22 "Live preview routes in the app API" entry. At Peter's request, `addedResidual` moved to the root of `basicProjection` (`0280222`).
+  - **Deployed:** Cloud Run `cox-app-api-live-00012-4hz` (image `cox-app-api:0280222`) and the VM at `abbb511`, both with `COX_PREVIEW_GCS=gs://colosseum-cox-publication-archives-dev/pool-2/preview/`. `/v1/preview` answers 404 `NO_PREVIEW` until Peter's exporter uploads records.
+  - **History gap:** the new Cloud Run instance rebuilt from the archive, which had only sequence 0. Publications 1 to 3 had lived only in the old instance's memory, so the public API showed no publications. At Joel's approval, the publisher's local `1.json` to `3.json` were copied unchanged to `history/<sequence>/<sha256>.json` with `--no-clobber`, from the VM's existing write-only bucket access. The name pattern matched `0.json`, whose local hash equals its bucket name. Cloud Run then served 0 to 4 without gaps, with 1 to 3 `finalized: false`, and the vault covered (399).
+- **Rules for agents:** A Cloud Run restart rebuilds unsealed history (under 360 publications) only from the archive bucket. Until Peter's incremental backup keeps the bucket current, check that the bucket holds every sequence up to the chain's before restarting or redeploying Cloud Run. The VM API keeps its history on disk.
+- **Open:**
+  - **Peter:** incremental history uploads, and the first real preview record.
+  - **Godwin:** preview display.
