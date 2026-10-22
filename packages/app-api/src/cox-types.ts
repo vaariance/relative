@@ -304,6 +304,8 @@ export type CoxErrorCode =
   | "RATE_LIMITED"
   | "FEE_CHANGED"
   | "TRADING_CLOSED"
+  | "UNKNOWN_EPOCH"
+  | "NOT_CONFIGURED"
   | "INVALID_REQUEST"
   | "NOT_FOUND"
   | "METHOD_NOT_ALLOWED"
@@ -314,7 +316,7 @@ export interface CoxApiErrorBody {
   error: { code: CoxErrorCode; message: string };
 }
 
-export type TransactionOperation = "deposit" | "switch" | "redeem" | "cancel" | "refund" | "withdraw";
+export type TransactionOperation = "deposit" | "switch" | "redeem" | "cancel" | "refund" | "withdraw" | "epoch-entry" | "epoch-withdraw";
 
 export interface DepositInput {
   owner: string;
@@ -425,6 +427,101 @@ export interface Submission {
   state: SubmissionState;
   slot: number | null;
   error: string | null;
+}
+
+export const EPOCH_SECONDS = 14_400;
+export const EPOCH_BASKET_SIZE = 30;
+
+export type EpochPhase = "draft" | "open" | "scoring" | "allocating" | "settled" | "voided";
+export type EpochLotState = "pending" | "executed" | "scored" | "claimable" | "withdrawn";
+
+export interface EpochConfiguration {
+  program: string;
+  config: string;
+  configId: string;
+  operator: string;
+  collateralMint: string;
+  secondaryCollateralMint: string | null;
+  methodologyDigest: string;
+  originBenchmark: Scaled;
+  maxLots: number;
+  maxEntryPriceAgeSeconds: number;
+  epochSeconds: number;
+  entryFee: { bps: number; cap: BaseUnits };
+}
+
+export interface EpochUniverseMember {
+  id: number;
+  assetId: string;
+  originPrice: Scaled;
+}
+
+export interface EpochLedger {
+  pendingGross: BaseUnits;
+  activeNet: BaseUnits;
+  heldFees: BaseUnits;
+  claimable: BaseUnits;
+  committedFees: BaseUnits;
+  residual: BaseUnits;
+  liabilities: BaseUnits;
+  vault: BaseUnits;
+  covered: boolean;
+}
+
+export interface Epoch {
+  address: string;
+  opensAt: UnixSeconds;
+  closesAt: UnixSeconds;
+  phase: EpochPhase;
+  sealed: boolean;
+  entriesOpen: boolean;
+  universe: EpochUniverseMember[];
+  nextNonce: string | null;
+  lots: { executed: number; scored: number; allocated: number } | null;
+  totalWeight: Scaled | null;
+  settlementPot: BaseUnits | null;
+  allZero: boolean | null;
+  closingReferences: { assetId: string; reference: Scaled }[];
+  ledger: EpochLedger | null;
+}
+
+export interface EpochOverview {
+  configuration: EpochConfiguration;
+  epochs: Epoch[];
+}
+
+export interface EpochLot {
+  address: string;
+  epochOpensAt: UnixSeconds;
+  nonce: string;
+  owner: string;
+  grossStake: BaseUnits;
+  fee: BaseUnits;
+  admittedAt: UnixSeconds;
+  basket: string[];
+  backedAsset: string;
+  execution: { timestamp: UnixSeconds; references: Scaled[] } | null;
+  state: EpochLotState;
+  score: Scaled | null;
+  weight: Scaled | null;
+  claimable: BaseUnits | null;
+}
+
+export interface EpochEntryInput {
+  owner: string;
+  opensAt: UnixSeconds;
+  grossStake: BaseUnits;
+  basket: string[];
+  backedAsset: string;
+  collateralMint?: string;
+}
+
+export interface EpochWithdrawInput {
+  owner: string;
+  opensAt: UnixSeconds;
+  nonce: string;
+  amount?: BaseUnits;
+  collateralMint?: string;
 }
 
 export function batchFor(now: UnixSeconds, origin: UnixSeconds, interval = BATCH_SECONDS, deadline = ACCEPTANCE_DEADLINE_SECONDS): Batch {

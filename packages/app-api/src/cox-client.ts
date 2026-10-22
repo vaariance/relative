@@ -11,6 +11,11 @@ import type {
   CryptoComposition,
   DepositInput,
   DepositQuoteInput,
+  Epoch,
+  EpochEntryInput,
+  EpochLot,
+  EpochOverview,
+  EpochWithdrawInput,
   Portfolio,
   Publication,
   RedeemInput,
@@ -107,6 +112,18 @@ export function createCoxApiClient(options: CoxApiClientOptions) {
       return get<Submission>(`transactions/${signature}`);
     },
     status: () => get<CoxStatus>("status"),
+    epochs: () => get<EpochOverview>("epochs"),
+    epoch: (opensAt: number) => {
+      if (!Number.isSafeInteger(opensAt) || opensAt <= 0) throw new CoxApiError("INVALID_REQUEST", "invalid Epoch opening time", 0);
+      return get<Epoch>(`epochs/${opensAt}`);
+    },
+    epochLots: (opensAt: number, owner: string) => {
+      if (!Number.isSafeInteger(opensAt) || opensAt <= 0) throw new CoxApiError("INVALID_REQUEST", "invalid Epoch opening time", 0);
+      if (!OWNER_PATTERN.test(owner)) throw new CoxApiError("INVALID_REQUEST", "invalid owner", 0);
+      return get<EpochLot[]>(`epochs/${opensAt}/lots?owner=${owner}`);
+    },
+    buildEpochEntry: (input: EpochEntryInput) => post<UnsignedTransaction>("transactions/epoch-entry", input),
+    buildEpochWithdraw: (input: EpochWithdrawInput) => post<UnsignedTransaction>("transactions/epoch-withdraw", input),
     assets: () => get<CoxAsset[]>("assets"),
     crypto: () => get<CryptoComposition>("crypto"),
     latestPublication: () => get<Publication>("publications/latest"),
