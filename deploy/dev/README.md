@@ -3,8 +3,8 @@
 Scripts and systemd templates for a Solana devnet deployment on a Debian Compute
 Engine VM. The shared deployment runs PostgreSQL, the price archiver, evidence
 API, fixture app API and live app API. Publisher and monitor installations are
-separate from the shared deployment. The signing service runs on Cloud Run;
-the RPC proxy runs on Cloudflare Workers.
+separate from the shared deployment. The signing service runs on Cloud Run.
+Server RPC connects directly to Alchemy with public devnet fallback.
 
 The supplied defaults target project `colosseum-eox`, instance `eox-dev`, zone
 `europe-west1-b`. These are deployment defaults, not credentials or a public API
@@ -15,7 +15,6 @@ operator access.
 
 | Hostname | Destination |
 | --- | --- |
-| `rpc.getrelative.trade` | Existing token-protected Solana RPC Worker; append the client's existing token path |
 | `api.getrelative.trade` | Live Cloud Run app API |
 | `fixture-api.getrelative.trade` | Synthetic Cloud Run fixture API |
 | `signer.getrelative.trade` | Authenticated Cloud Run signer |
@@ -65,7 +64,7 @@ The script archives committed `HEAD`; uncommitted files are excluded. Overrides:
 `GCP_PROJECT`, `GCP_ZONE`, `GCP_INSTANCE` and `GCP_BACKUP_BUCKET`. Select the cloud
 account explicitly. This is a deployment action: it replaces the shared release,
 runs migrations and restarts its managed services. It does not deploy the Solana
-program, Cloud Run signer, Cloudflare proxy or independently installed monitor.
+program, Cloud Run signer or independently installed monitor.
 The publisher unit is supplied as a template and requires its own installation.
 
 `setup.sh` installs Docker and Node.js 22 when missing, then pnpm 11.18.0.
@@ -177,7 +176,6 @@ sudo journalctl -u cox-publisher-backup -n 30 --no-pager
 - [Monitor deployment](../../apps/cox-monitor/README.md)
 - [App API configuration](../../apps/app-api/README.md)
 - [Signer deployment and authentication](../../apps/signer/README.md)
-- [RPC proxy deployment](../../apps/rpc-proxy/README.md)
 - [Solana program deployment](../../packages/cox/deploy/README.md)
 
 ## Preparing the native publisher release

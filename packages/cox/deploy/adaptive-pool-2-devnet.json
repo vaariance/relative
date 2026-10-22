@@ -1663,5 +1663,30 @@
     "feeBps": 2,
     "feeCap": "200000",
     "epochActivationChanged": false
+  },
+  "rpcProxyRetirement": {
+    "retiredAtUtc": "2026-10-22T20:30:29.594Z",
+    "account": "f1e022c6d9e3a80eeb1bd8b7e4b28385",
+    "worker": "cox-rpc-proxy",
+    "workerAbsent": true,
+    "removedDomains": [
+      "cox-rpc-proxy.variance.space",
+      "rpc.getrelative.trade"
+    ],
+    "gatewayPreserved": [
+      "api.getrelative.trade",
+      "fixture-api.getrelative.trade",
+      "signer.getrelative.trade"
+    ],
+    "obsoleteSecretVersionsDisabled": {
+      "solana-devnet-rpc-urls": [
+        "1",
+        "2"
+      ],
+      "cox-app-api-live-rpc-urls": [
+        "1"
+      ]
+    },
+    "directAlchemySecretUnchanged": true
   }
 }

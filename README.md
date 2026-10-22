@@ -231,7 +231,6 @@ legal review remain necessary before a real-money release.
 | [Publisher](apps/cox-publisher/README.md) | Snapshot publication and persistent batch execution |
 | [Signer](apps/signer/README.md) | Restricted runtime signing through Cloud KMS |
 | [Signing client](packages/signing/README.md) | Typed signing requests and public-key discovery |
-| [RPC proxy](apps/rpc-proxy/README.md) | Authenticated JSON-RPC forwarding and upstream failover |
 | [Monitor](apps/cox-monitor/README.md) | Independent archive and optional venue checks |
 | [Web app](apps/web/README.md) | Market views and wallet interaction |
 | [Dev infrastructure](deploy/dev/README.md) | VM services, logs, database and backups |

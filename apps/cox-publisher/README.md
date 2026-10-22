@@ -2,7 +2,7 @@
 
 The default publisher entry point is now the Rust executable in `native/`. It connects signed one-second Pyth Pro feeds, the geometric benchmark, processed Yellowstone wake notifications, confirmed Solana reads, remote signing and durable recovery. Direct Alchemy RPC is primary; public devnet RPC is the fallback. No RPC proxy is used.
 
-The native service is deployed for Basic pool 2 and Epoch config 2. Real devnet bootstrap, initial fee activation and archive recovery are verified; public trading remains paused pending readiness. Legacy pool 1 is retired and explicitly rejected. Runtime signing uses the bound adaptive canary; existing default signer traffic is unchanged.
+The native service is deployed for Basic pool 2 and Epoch config 2. Real devnet bootstrap, initial fee activation and archive recovery are verified; Basic trading is open after verified deposit/redemption, archive recovery and preview delivery. Epoch remains separate and awaits its live lifecycle verification. Legacy pool 1 is retired and explicitly rejected. Runtime signing uses the bound adaptive canary; existing default signer traffic is unchanged.
 
 ## Build and run
 
@@ -82,9 +82,9 @@ Restore rejects existing destinations, unsafe paths and checksum mismatches. Ver
 | --- | --- |
 | `apps/cox-publisher` | Rust runtime is live; legacy TypeScript implementation, tests and dependencies removed. |
 | `packages/cox-methodology` | Rust methodology retained; legacy TypeScript exports and fixture generator removed after the API migrated to the Rust CLI. |
-| `apps/rpc-proxy` | Retire the protocol's dependency; shared source/deployment removal requires remaining consumers to migrate. |
+| `apps/rpc-proxy` | Removed; servers use direct Alchemy and public devnet fallback. |
 
-These are two TypeScript implementation replacements and one proxy dependency retirement. The publisher and methodology package directories remain required for their Rust crates. `price-feeds`, `cox-monitor`, signer/signing, APIs, ingestion, web, contracts and the client SDK remain required.
+These are two TypeScript implementation replacements and one proxy retirement. The publisher and methodology package directories remain required for their Rust crates. `price-feeds`, `cox-monitor`, signer/signing, APIs, ingestion, web, contracts and the client SDK remain required.
 
 Native inclusion lifecycle and exact-rational Epoch simulation are library implementations with parity tests. Dynamic universe activation and expanded Basic class support are separate integration work; the executable currently binds the sealed Basic roster, at most 30 assets, and Pyth Pro IDs. Paged discovery covers larger participant counts but does not expand the asset roster or transaction capacity. Missing historical Pyth closing data has no backfill implementation. Archived payloads are reverified against known trusted signer keys; unavailable historical keys fail closed.
 
