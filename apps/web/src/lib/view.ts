@@ -113,7 +113,7 @@ export function findClass(views: readonly ClassView[], id: string): ClassView {
   return view;
 }
 
-const venues: Record<PriceVenue, string> = { kraken: "Kraken", coinbase: "Coinbase", bybit: "Bybit" };
+const venues: Record<PriceVenue, string> = { kraken: "Kraken", coinbase: "Coinbase", bybit: "Bybit", pyth: "Pyth" };
 
 export function venueName(venue: PriceVenue): string {
   return venues[venue];
