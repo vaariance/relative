@@ -196,7 +196,10 @@ impl Archive {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(_) => return Err(Error::Storage),
         };
-        let record: Record = serde_json::from_slice(&bytes).map_err(|_| Error::State)?;
+        self.validate_record(sequence, &bytes).map(Some)
+    }
+    pub fn validate_record(&self, sequence: u64, bytes: &[u8]) -> Result<Record, Error> {
+        let record: Record = serde_json::from_slice(bytes).map_err(|_| Error::State)?;
         let provenance = match record.schema.as_str() {
             "cox.publication-archive/v1" => {
                 record.finalized_slot.is_some()
@@ -230,7 +233,7 @@ impl Archive {
         {
             return Err(Error::State);
         }
-        Ok(Some(record))
+        Ok(record)
     }
     pub fn preserve(
         &self,

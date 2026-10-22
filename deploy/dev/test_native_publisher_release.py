@@ -55,6 +55,23 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             release.check_configuration(config, intent, now)
 
+    def test_prepared_basic_postponement_preserves_epoch_boundaries_and_unarmed_state(self):
+        config, intent, now = self.configuration()
+        lower_bound = intent["targetUnixSeconds"]
+        intent.update(poolAccountsPrepared=True, activationArmed=False, publisherEnabled=False,
+                      basicOnchainAdmissionLowerBound=lower_bound,
+                      targetUnixSeconds=lower_bound + 7200, targetUtc="2026-10-22T14:00:00Z",
+                      firstEpochTargetUnixSeconds=lower_bound + 14400)
+        config["first_epoch_opens_at"] = lower_bound + 14400
+        release.check_configuration(config, intent, now)
+        for key, value in [("activationArmed", True), ("publisherEnabled", True),
+                           ("firstEpochTargetUnixSeconds", lower_bound + 7200),
+                           ("basicOnchainAdmissionLowerBound", lower_bound + 7201)]:
+            changed = copy.deepcopy(intent)
+            changed[key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                release.check_configuration(config, changed, now)
+
     def test_staging_copies_committed_allowlist_and_refuses_dirty_or_secret_inputs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

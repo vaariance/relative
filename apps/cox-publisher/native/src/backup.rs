@@ -27,6 +27,10 @@ pub struct Config {
     pub schema: String,
     pub bucket: String,
     pub prefix: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publication_history_prefix: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publication_identity: Option<crate::publications::Identity>,
     pub state_directory: PathBuf,
     pub markers_directory: PathBuf,
     pub max_file_bytes: u64,
@@ -156,6 +160,22 @@ impl Config {
             || self.max_total_bytes > 64 * 1024 * 1024 * 1024
         {
             return Err(Error::Configuration);
+        }
+        match (&self.publication_history_prefix, &self.publication_identity) {
+            (None, None) => {}
+            (Some(prefix), Some(identity)) => {
+                if !segments(prefix)
+                    || prefix == &self.prefix
+                    || prefix.starts_with(&format!("{}/", self.prefix))
+                    || self.prefix.starts_with(&format!("{prefix}/"))
+                    || identity.genesis_hash != crate::rpc::DEVNET_GENESIS
+                    || identity.program.parse::<solana_address::Address>().is_err()
+                    || identity.pool.parse::<solana_address::Address>().is_err()
+                {
+                    return Err(Error::Configuration);
+                }
+            }
+            _ => return Err(Error::Configuration),
         }
         Ok(())
     }
@@ -453,6 +473,20 @@ async fn ensure<T: Transport>(transport: &T, object: &str, bytes: &[u8]) -> Resu
 }
 pub async fn backup<T: Transport>(config: &Config, transport: &T) -> Result<Report, Error> {
     let (manifest, frozen) = capture_snapshot(config)?;
+    let publication_archive = config
+        .publication_identity
+        .as_ref()
+        .map(|identity| {
+            let program = identity.program.parse().map_err(|_| Error::Configuration)?;
+            let pool = identity.pool.parse().map_err(|_| Error::Configuration)?;
+            let archive = crate::publications::Archive::new(
+                config.state_directory.join("publications"),
+                program,
+                pool,
+            );
+            Ok::<_, Error>(archive)
+        })
+        .transpose()?;
     for entry in &manifest.entries {
         let bytes = match frozen.get(&entry.path) {
             Some(bytes) => bytes.clone(),
@@ -466,6 +500,32 @@ pub async fn backup<T: Transport>(config: &Config, transport: &T) -> Result<Repo
             || crc32c(&bytes) != entry.crc32c
         {
             return Err(Error::Mutated);
+        }
+        if let (Some(prefix), Some(archive), Some(sequence)) = (
+            &config.publication_history_prefix,
+            &publication_archive,
+            entry
+                .path
+                .strip_prefix("publications/")
+                .and_then(|name| name.strip_suffix(".json")),
+        ) {
+            let sequence = sequence.parse::<u64>().map_err(|_| Error::Manifest)?;
+            let record = archive
+                .validate_record(sequence, &bytes)
+                .map_err(|_| Error::Manifest)?;
+            if record
+                .observed_slot
+                .or(record.finalized_slot)
+                .is_some_and(|slot| slot > 9_007_199_254_740_991)
+            {
+                return Err(Error::Manifest);
+            }
+            ensure(
+                transport,
+                &format!("{prefix}/{sequence}/{}.json", entry.sha256),
+                &bytes,
+            )
+            .await?;
         }
         ensure(
             transport,

@@ -266,7 +266,7 @@ impl<S: DraftSigner> Executor<S> {
         if state.basic.pool.origin.checked_mul(1_000_000) != Some(self.anchor.timestamp_us)
             || state.epoch_config.origin_benchmark != self.anchor.benchmark as u128
             || state.epoch_config.methodology != state.basic.methodology.digest
-            || state.basic.pool.trading_opens_at != self.discovery.first_epoch()
+            || state.basic.pool.trading_opens_at > self.discovery.first_epoch()
         {
             return Err(worker::Error::Snapshot);
         }
@@ -1061,6 +1061,14 @@ mod tests {
         bind_policy(&mut state.basic.methodology, &executor.anchor);
         state.epoch_config.methodology = state.basic.methodology.digest;
         executor.validate_anchor(&state).unwrap();
+        state.basic.pool.trading_opens_at = 7_200;
+        executor.validate_anchor(&state).unwrap();
+        state.basic.pool.trading_opens_at = 14_401;
+        assert_eq!(
+            executor.validate_anchor(&state),
+            Err(worker::Error::Snapshot)
+        );
+        state.basic.pool.trading_opens_at = 14_400;
         state.epoch_config.methodology[0] ^= 1;
         assert_eq!(executor.validate_anchor(&state), Err(worker::Error::Snapshot));
         state.epoch_config.methodology[0] ^= 1;

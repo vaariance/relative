@@ -1,7 +1,9 @@
+use anchor_lang::{prelude::Pubkey, AccountSerialize};
 use relative_publisher::backup::{
     self, Config, Created, Entry, Error, RemoteMetadata, RemoteObject, Transport,
 };
 use sha2::{Digest, Sha256};
+use solana_address::Address;
 use std::{collections::BTreeMap, fs, path::PathBuf, sync::Mutex};
 fn digest(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
@@ -50,6 +52,8 @@ impl Fixture {
                 schema: "relative.backup/v1".into(),
                 bucket: "fixture-bucket".into(),
                 prefix: "basic-2/native".into(),
+                publication_history_prefix: None,
+                publication_identity: None,
                 state_directory: state,
                 markers_directory: root.join("markers"),
                 max_file_bytes: 1024,
@@ -359,4 +363,203 @@ async fn restore_rejects_content_hash_changes_even_if_remote_checksums_are_self_
         .await,
         Err(Error::Checksum)
     );
+}
+
+fn publication_fixture(
+    program: Address,
+    pool: Address,
+    sequence: u64,
+    previous: [u8; 32],
+) -> (Vec<u8>, [u8; 32]) {
+    let mut state = (12u32).to_le_bytes().to_vec();
+    state.extend_from_slice(b"COX/STATE/V1");
+    state.extend_from_slice(program.as_ref());
+    state.extend_from_slice(pool.as_ref());
+    state.extend_from_slice(&sequence.to_le_bytes());
+    state.extend_from_slice(&(sequence + 20).to_le_bytes());
+    state.extend_from_slice(&(sequence + 100).to_le_bytes());
+    state.extend_from_slice(&previous);
+    state.extend_from_slice(&[4; 32]);
+    state.extend_from_slice(&[5; 32]);
+    state.extend_from_slice(&100i128.to_le_bytes());
+    state.extend_from_slice(&2u32.to_le_bytes());
+    state.extend_from_slice(&10u64.to_le_bytes());
+    state.extend_from_slice(&20u64.to_le_bytes());
+    state.extend_from_slice(&3u32.to_le_bytes());
+    for _ in 0..3 {
+        state.extend_from_slice(&100i128.to_le_bytes());
+    }
+    state.extend_from_slice(&3u32.to_le_bytes());
+    state.extend_from_slice(&[0; 144]);
+    state.extend_from_slice(&[0; 72]);
+    let digest: [u8; 32] = Sha256::digest(&state).into();
+    let publication = cox::Publication {
+        schema_version: 2,
+        bump: Address::find_program_address(&[b"publication", pool.as_ref()], &program).1,
+        pool: Pubkey::new_from_array(pool.to_bytes()),
+        sequence,
+        batch: sequence + 20,
+        state_digest: digest,
+        snapshot_digest: [5; 32],
+        manifest_digest: [4; 32],
+        state_preimage: state,
+        prices: vec![
+            cox::PriceWire {
+                price_e8: 10,
+                venue: 0,
+                step: 0,
+                candle_start: 100,
+                trade_age_minutes: 0,
+            },
+            cox::PriceWire {
+                price_e8: 20,
+                venue: 0,
+                step: 0,
+                candle_start: 100,
+                trade_age_minutes: 0,
+            },
+        ],
+        committed_at: 100,
+    };
+    let mut bytes = Vec::new();
+    publication.try_serialize(&mut bytes).unwrap();
+    bytes.resize(8192, 0);
+    (bytes, digest)
+}
+
+fn enable_history(f: &mut Fixture) -> Vec<u8> {
+    let program = Address::new_from_array([1; 32]);
+    let pool = Address::new_from_array([2; 32]);
+    f.config.publication_history_prefix = Some("pool-2/history".into());
+    f.config.publication_identity = Some(relative_publisher::publications::Identity {
+        program: program.to_string(),
+        pool: pool.to_string(),
+        genesis_hash: relative_publisher::rpc::DEVNET_GENESIS.into(),
+    });
+    f.config.max_file_bytes = 32_768;
+    fs::remove_file(f.config.state_directory.join("publications/0.json")).unwrap();
+    let archive = relative_publisher::publications::Archive::new(
+        f.config.state_directory.join("publications"),
+        program,
+        pool,
+    );
+    let (account, state_digest) = publication_fixture(program, pool, 0, [0; 32]);
+    archive
+        .preserve(program, archive.address(), &account, 123, 0, state_digest)
+        .unwrap();
+    fs::read(f.config.state_directory.join("publications/0.json")).unwrap()
+}
+#[tokio::test]
+async fn publication_history_exports_exact_verified_bytes_at_api_compatible_object_name() {
+    let mut f = Fixture::new();
+    let bytes = enable_history(&mut f);
+    let transport = Memory::default();
+    let report = backup::backup(&f.config, &transport).await.unwrap();
+    let object = format!("pool-2/history/0/{}.json", digest(&bytes));
+    assert_eq!(
+        transport.values.lock().unwrap().get(&object).unwrap().body,
+        bytes
+    );
+    assert!(transport
+        .values
+        .lock()
+        .unwrap()
+        .contains_key(&format!("basic-2/native/objects/{}", digest(&bytes))));
+    assert_eq!(
+        backup::backup(&f.config, &transport)
+            .await
+            .unwrap()
+            .manifest_sha256,
+        report.manifest_sha256
+    );
+    let record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(record["commitment"], "confirmed");
+    assert_eq!(record["observedSlot"], 123);
+    assert!(record.get("finalizedSlot").is_none());
+    let mut values = transport.values.lock().unwrap();
+    let value = values.get_mut(&object).unwrap();
+    value.body = b"different".to_vec();
+    value.metadata.bytes = value.body.len() as u64;
+    value.metadata.sha256 = digest(&value.body);
+    value.metadata.crc32c = backup::crc32c(&value.body);
+    drop(values);
+    assert_eq!(
+        backup::backup(&f.config, &transport).await,
+        Err(Error::Conflict)
+    );
+}
+#[tokio::test]
+async fn history_rejects_wrong_identity_sequence_provenance_and_account_integrity() {
+    for mutation in 0..8 {
+        let mut f = Fixture::new();
+        let bytes = enable_history(&mut f);
+        let mut record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        match mutation {
+            0 => record["identity"]["pool"] = Address::new_from_array([3; 32]).to_string().into(),
+            1 => record["sequence"] = "1".into(),
+            2 => record["commitment"] = "finalized".into(),
+            3 => record["finalizedSlot"] = 123.into(),
+            4 => {
+                record["identity"]["program"] = Address::new_from_array([3; 32]).to_string().into()
+            }
+            5 => record["identity"]["genesisHash"] = "mainnet".into(),
+            6 => record["observedSlot"] = (9_007_199_254_740_992_u64).into(),
+            _ => record["accountSha256"] = "0".repeat(64).into(),
+        }
+        fs::write(
+            f.config.state_directory.join("publications/0.json"),
+            serde_json::to_vec(&record).unwrap(),
+        )
+        .unwrap();
+        let transport = Memory::default();
+        assert_eq!(
+            backup::backup(&f.config, &transport).await,
+            Err(Error::Manifest)
+        );
+        assert!(!transport
+            .values
+            .lock()
+            .unwrap()
+            .keys()
+            .any(|key| key.starts_with("pool-2/history/") || key.contains("/manifests/")));
+        assert!(!f.config.markers_directory.exists());
+    }
+}
+#[test]
+fn history_configuration_requires_safe_disjoint_prefix_and_explicit_devnet_identity() {
+    let mut f = Fixture::new();
+    enable_history(&mut f);
+    for prefix in [
+        "../escape",
+        "pool-2/history/",
+        "basic-2/native",
+        "basic-2/native/history",
+        "basic-2",
+    ] {
+        let mut config = f.config.clone();
+        config.publication_history_prefix = Some(prefix.into());
+        assert_eq!(config.validate(), Err(Error::Configuration));
+    }
+    let mut config = f.config.clone();
+    config.publication_identity = None;
+    assert_eq!(config.validate(), Err(Error::Configuration));
+    let mut config = f.config.clone();
+    config.publication_history_prefix = None;
+    assert_eq!(config.validate(), Err(Error::Configuration));
+    let mut config = f.config.clone();
+    config.publication_identity.as_mut().unwrap().genesis_hash = "mainnet".into();
+    assert_eq!(config.validate(), Err(Error::Configuration));
+    let mut legacy = serde_json::to_value(&f.config).unwrap();
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("publication_history_prefix");
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("publication_identity");
+    serde_json::from_value::<Config>(legacy)
+        .unwrap()
+        .validate()
+        .unwrap();
 }

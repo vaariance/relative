@@ -166,13 +166,26 @@ def check_configuration(config, intent, now):
     require(intent.get("schema") == "relative.activation-intent/v1" and intent.get("network") == "solana-devnet"
             and intent.get("deployed") is False and intent.get("armed", False) is False
             and intent.get("requiresReadinessBeforeArming") is True, "Activation intent must remain unarmed")
-    require(intent.get("basicAdmission") == "not configured onchain"
-            and intent.get("firstEpochOpening") == "not configured onchain", "Activation must remain unconfigured")
+    prepared = intent.get("poolAccountsPrepared", False)
+    require(type(prepared) is bool, "Prepared-account state must be explicit")
+    if prepared:
+        require(intent.get("activationArmed") is False and intent.get("publisherEnabled") is False,
+                "Prepared activation must remain unarmed with the publisher disabled")
+    else:
+        require(intent.get("basicAdmission") == "not configured onchain"
+                and intent.get("firstEpochOpening") == "not configured onchain", "Activation must remain unconfigured")
     target = intent.get("targetUnixSeconds")
-    require(type(target) is int and target > now and target % 14_400 == 0, "Activation target must be a future four-hour UTC boundary")
+    require(type(target) is int and target > now, "Activation target must be in the future")
     stated = datetime.datetime.fromisoformat(intent["targetUtc"].replace("Z", "+00:00"))
     require(stated.utcoffset() == datetime.timedelta(0) and stated.timestamp() == target, "Activation UTC text and timestamp differ")
-    require(config.get("first_epoch_opens_at") == target, "Native first Epoch opening differs from activation intent")
+    epoch_target = intent.get("firstEpochTargetUnixSeconds", target)
+    require(type(epoch_target) is int and epoch_target >= target and epoch_target % 14_400 == 0,
+            "First Epoch must use a four-hour UTC boundary at or after activation")
+    require(config.get("first_epoch_opens_at") == epoch_target, "Native first Epoch opening differs from activation intent")
+    if prepared:
+        lower_bound = intent.get("basicOnchainAdmissionLowerBound")
+        require(type(lower_bound) is int and 0 < lower_bound <= target,
+                "Prepared Basic admission lower bound must precede actual activation")
     require(config.get("basic_pool_id") != 1 and type(config.get("basic_pool_id")) is int, "Retired pool 1 cannot be reused")
     anchor_us = config.get("anchor", {}).get("timestamp_us")
     require(type(anchor_us) is int and anchor_us > 0 and anchor_us % 1_000_000 == 0

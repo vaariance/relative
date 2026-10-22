@@ -1404,5 +1404,31 @@
     "append-universe-8": "571HHah6a92P58bDQPZ9EozAH4uJEr6cu84dYqSsvxy41fD6zNW62B9Dn1wQpt1fyiiV1nVMriabXGHCSaC42Ry4",
     "append-universe-16": "apiaaFsRzgKuLCFxVufCVy4yZJsXfCrpPGqfxCYH71VYMFsXRP4Y68KAFX2eLVZnFjS4zpX4NG3ZovPHm1kdUJL",
     "append-universe-24": "3KE5fpdiBBMzgWtkZZNC5WimPigA1i9wRMaVZAFaozN7fpT5xt1ofai1S5kGFEvg3x1zh9mAUYKRvxoQ7kDgfJcS"
+  },
+  "activationTargetUtc": "2026-10-22T14:00:00.000Z",
+  "activationTargetUnixSeconds": 1792677600,
+  "firstEligibleEpochTargetUtc": "2026-10-22T16:00:00.000Z",
+  "firstEligibleEpochDraft": "CV3mYahZPMqbzfPLzxf74TLKNBXsgN4yzPS5wApMELwz",
+  "firstEligibleEpochSealed": false,
+  "postponement": {
+    "reason": "Peter requested two additional hours on 2026-10-22",
+    "basicOnchainLowerBoundUnchanged": true,
+    "actualBasicAdmissionRequiresRegistryUnpause": true,
+    "earlierEpochDraftRemainsUnsealed": true,
+    "newDraftTransactions": {
+      "initialize-epoch-draft": "4Ng2u8rsy92fhkuPSfmAgbFHAvs3o7FhgX84BeCvUYu6vbrDH13i6535hEhEiNuACxuVoa8RmPiQRz852JnVeZYN",
+      "grow-epoch-2048": "2gV9NjXRHAMWbq9gGDZKxFnfWCZyLqaubpPdsMKPLjCLeREwXehCBPiezijawqJkF5CqwW1JHGtsBfgy8AHy4Zpe",
+      "grow-epoch-10240": "5Ti5WzwBvaqaqtBAuGrki1YYQYsJ8YHkAyX6TT86RUJZMAtNBtAt38QSNXXLVaXQPJLDQ3zi1G64uALS2sfRxYHq",
+      "grow-epoch-18432": "g8RVkpWebSLp1cU1292ZsDzsAuEhx8K6KyPVWsb94925xNFH2eqTsYAN88wvvWaXtX2ysDDszZgZNCqqQq832VA",
+      "grow-epoch-26624": "4CPYoFvbrYVAksdsAhAU4bUShaAqyK4Ua4L7uyUq6q79iUrMcEs8qU11EXE88HeS4MYEb68ecHri6xgNCu98WBcy",
+      "grow-epoch-34816": "5ZAoA6cxgM95vmvdmX9xiQyxkcs3gMYjyKKPyNUXfSgj6doqdv7MWMrAbFAyX6Xg9588KJTgsgiXabHGQP9uFzjM",
+      "grow-epoch-43008": "5z7oQ9zDNZwCMgjhD712rYDriZK29pJzKtqS1jPyDsgodEned7CEXmMUus77QHGqkYqFuByoGQL3uuxTGdhsUVhx",
+      "grow-epoch-51200": "jHZaR5E5vWaa9z26CEMboRUT1m8MFoioxhXhKXp2ZGceGUTnkPnDAvq7ZcGSB8CHY1Rxchw8B35uqTgkAmXEk9B",
+      "grow-epoch-59392": "4uLKbA55zvtRE3z2YneaKiuA1rjK9n6rUoNcppdw3K2kuLDMss8mgs31BymVvgwyPcBLw1CkpXMTzwwGyY9qbNTg",
+      "append-universe-0": "bZyz6MRA7KGG2TpEQj5xNaJbRbKWEwmLwhLijRcWUo5TE4QgNXCbK8Es5QpRdk8fjCqbBVj1uahP21Zbjj2Nrgp",
+      "append-universe-8": "2fxs8tFv95pFFd8QsAhbyD2vGqVTzK6hGiyTnZjmjTtByv5PKPDmmSynpwXT9Ux34hxHrQ5WooTdfmv7x6kT9c3e",
+      "append-universe-16": "63sMxV9e9gxQ8iTSGgoFnUqsThZS48kMpNZVqC7Nk5DzGEvUPtrtt3LKcVdzUfcg3YNmiDMm52jjrLZ7yyMnJ1ze",
+      "append-universe-24": "2QAaSpgY4VZHJvVCHR1aQSDTr3ufQ6Ufpf9zW5zDWBXX9NWqQ3CgpFLCvT6AUb2mvnffCbiYuSGqrU3aKFwmvzyL"
+    }
   }
 }
