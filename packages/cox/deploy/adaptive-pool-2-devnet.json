@@ -1378,7 +1378,7 @@
     "activeVersion": "1",
     "activationPending": false
   },
-  "registryPaused": true,
+  "registryPaused": false,
   "publisherEnabled": true,
   "activationArmed": false,
   "initializationSignatures": {
@@ -1433,8 +1433,8 @@
   },
   "lastRuntimeAuditSlot": 513977460,
   "nativeRuntime": {
-    "sourceCommit": "3c5e73d3b61b661ababddfe6bc62aa9280f799ff",
-    "linuxSha256": "0c6420d524c8c9e664d32b821eb81818b218464c9759800d499447671f77c952",
+    "sourceCommit": "1ec3d96107bc8a42d177be9bb873badb6e75db3e",
+    "linuxSha256": "c2aa8c7bc0281b6bdd234b912c4cbfa9046a2ff4090285f0684cded7eac74b6b",
     "service": "cox-publisher.service",
     "region": "europe-west1",
     "running": true,
@@ -1450,9 +1450,11 @@
       "hashAndIdentityVerified": true
     },
     "isolatedRecoveryVerification": {
-      "manifestSha256": "d9bee9c4861266da3f1940d98eddd6186231451a7d41ada9cb22591664260e7e",
-      "files": 69,
-      "verified": true
+      "manifestSha256": "84af7fc872115fd36414e8e0549a487ff990a0dec0dff6e8e7bd2700413a750d",
+      "files": 32414,
+      "verified": true,
+      "identityMatchesLive": true,
+      "verifiedAtUtc": "2026-10-22T20:19:14.475Z"
     },
     "finalizedChainAudit": {
       "schema": "relative.native-live-audit/v1",
@@ -1516,7 +1518,7 @@
         }
       ]
     },
-    "userEntryEndToEndVerified": false,
+    "userEntryEndToEndVerified": true,
     "epochLiveSettlementVerified": false,
     "basicRoundTripVerification": {
       "network": "solana-devnet",
@@ -1569,10 +1571,34 @@
         "epochDraftsUnsealed": true,
         "retiredLegacyPoolStillEmpty": true
       }
+    },
+    "archiveRetention": {
+      "incremental": true,
+      "localPriceSeconds": 129600,
+      "localPublications": 128,
+      "cloudPreviewDays": 7,
+      "cloudRecoveryManifestDays": 7,
+      "recoveryObjectsExpire": false,
+      "publicationHistoryExpires": false,
+      "latestCompletedManifestAtReadiness": "1d068b2c7a851acf1992fbd2e0d35ccbe2929e2d5591043b0b0bf01fa28151c5",
+      "latestSnapshotAgeSecondsAtReadiness": 73.81149697303772
+    },
+    "previewVerification": {
+      "service": "cox-publisher-preview.service",
+      "prefix": "gs://colosseum-cox-publication-archives-dev/pool-2/preview/",
+      "schema": "relative.preview/v1",
+      "vmAndCloudRunVerified": true,
+      "publicApiVerified": true,
+      "publicApiAgeSeconds": 2,
+      "stale": false,
+      "sampleCount": 121,
+      "steadyUploadLagMedianSeconds": 0.507,
+      "steadyUploadLagMaxSeconds": 0.516,
+      "measuresSettlementLatency": false
     }
   },
   "epochReadinessVerification": {
-    "status": "prepared-unsealed-not-activated",
+    "status": "opening-missed-unsealed-not-activated",
     "preparedDraft": "6nxNFyTzB8xNtDD1sQpkjTBh4K9xefVBrzmtr6e8ZZHo",
     "opensAtUtc": "2026-10-22T20:00:00Z",
     "closesAtUtc": "2026-10-23T00:00:00Z",
@@ -1620,10 +1646,22 @@
       "assets-24": "3HEFkWSzYsZFfq3DCqK68MChSbx41UZ4sivPuURMmyRSJGKGrzt2SRArwZchX8weJwToDZ88FNsqArGiyob4reUQ"
     },
     "remaining": [
-      "archive recovery readiness",
-      "seal a still-future epoch once ready",
+      "prepare and seal a future UTC four-hour epoch",
       "real entry and execution",
       "real exact-time closing, allocation and withdrawal"
     ]
+  },
+  "basicActivationVerification": {
+    "activated": true,
+    "signature": "55rRjpkd3kwDEBvihrugW4MQ3a624CwSTm8zf9NX2THGtbJkZ1N7Kw3RkqMNTgWZP3qQ3LBubsAPsCSDgTEdAFhy",
+    "commitment": "finalized",
+    "activatedAtUtc": "2026-10-22T20:19:02.452Z",
+    "publicApiCheckedAtUtc": "2026-10-22T20:19:14.475Z",
+    "publicTradingOpen": true,
+    "vaultCovered": true,
+    "feeVersion": "1",
+    "feeBps": 2,
+    "feeCap": "200000",
+    "epochActivationChanged": false
   }
 }
