@@ -1431,10 +1431,10 @@
       "append-universe-24": "2QAaSpgY4VZHJvVCHR1aQSDTr3ufQ6Ufpf9zW5zDWBXX9NWqQ3CgpFLCvT6AUb2mvnffCbiYuSGqrU3aKFwmvzyL"
     }
   },
-  "lastRuntimeAuditSlot": 513865679,
+  "lastRuntimeAuditSlot": 513977460,
   "nativeRuntime": {
-    "sourceCommit": "027fd7420021742cf86b3174caea69177f3ad771",
-    "linuxSha256": "1f45ed0368499d0e281194c755db2ba6c1c3f76613a00a318afb29c1df132dcd",
+    "sourceCommit": "3c5e73d3b61b661ababddfe6bc62aa9280f799ff",
+    "linuxSha256": "0c6420d524c8c9e664d32b821eb81818b218464c9759800d499447671f77c952",
     "service": "cox-publisher.service",
     "region": "europe-west1",
     "running": true,
@@ -1517,6 +1517,58 @@
       ]
     },
     "userEntryEndToEndVerified": false,
-    "epochLiveSettlementVerified": false
+    "epochLiveSettlementVerified": false,
+    "basicRoundTripVerification": {
+      "network": "solana-devnet",
+      "owner": "2aDWjWvQ3nzLq75wn1U6tHwp4Bok7LuWxHSj6KH5wg1h",
+      "tokenAccount": "EGrcC2B1LmAmeJtW64SPpW3f7jp6gjFXXhzarzpPzzuV",
+      "collateralMint": "5rpGrekfBLHdF8PD8eKLzXQPPmhyF7FCKeE1VA5CwV3X",
+      "classId": 0,
+      "deposit": {
+        "nonce": "1",
+        "sequence": "3",
+        "targetBatch": "70032",
+        "gross": "1000000",
+        "fee": "200",
+        "mintedUnits": "999800000000000000"
+      },
+      "redemption": {
+        "nonce": "2",
+        "sequence": "4",
+        "gross": "999800",
+        "fee": "199",
+        "proceeds": "999601"
+      },
+      "returnedCollateral": "999601",
+      "feesAdded": "399",
+      "endSequence": "4",
+      "completed": true,
+      "restoredPause": true,
+      "commitment": "finalized",
+      "slot": 513977460,
+      "signatures": {
+        "unpause-verification": "tdmnq7wYZJmXfSbQGTEEHZQQ4irxUoEDDVoYt8Jr8kUtRHKjHPHShqwfP1FdDcx856KiRmoH472LMQgcQdkRTKV",
+        "deposit": "5PWJ7sxi4q7wB9JJmk2scm3YMCLpbvQHgpp3pQDnn6HLFCsA6aBHhLnRxZWHmv9TLQhJgzLjWVUTv9bRRTkuZxfN",
+        "restore-pause": "QJkRdAUvUD4FEpJtrcKzG6JksdnVSfsQ96bfNSL2xWZmfmBoQt4tGizoq7ThN2c7LU99EDJ9pCKoLBWdrATU8Fc",
+        "unpause-redemption": "5d38NcjXQX8tTKM3xJZcUwTa9mSWLPDD13PpUnrQ2b15KDJrW9LVhvdVP7QfVc9diEZkSwt3H37shPs8Y1XZ9Rms",
+        "redeem": "3krGZ1Mnz9u4or4wv2Tj7SmTM5Lqa9VVZsUyP5bRdikqhny9ZwzymckffbAJAmApeQMsdMdxu1epBFkFRcoMRcxf",
+        "withdraw": "vS3aKdVNUjSko6brUbdWqfrtNm6uSQrDvCA17gjxrwzD7bwcyzNyrWSRHBobPFNs1YDGrVApZ9Y75jXW1RQqNos",
+        "restore-pause-after-redemption": "4CwLTokNfLqDnPtWqohQDXa5xwf2mdYfWBvwV9Htm8rR8JQjvXj6WcmLgcLmM3HHuobEn4kvNNpjYA8KYPUaLm8"
+      },
+      "finalState": {
+        "registryPaused": true,
+        "sequence": "4",
+        "active": "0",
+        "pending": "0",
+        "payable": "0",
+        "fees": "399",
+        "custodyBalances": [
+          "0",
+          "399"
+        ],
+        "epochDraftsUnsealed": true,
+        "retiredLegacyPoolStillEmpty": true
+      }
+    }
   }
 }
