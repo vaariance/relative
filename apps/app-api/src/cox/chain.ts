@@ -8,7 +8,7 @@ const VENUES: readonly PriceVenue[] = ["kraken", "coinbase", "bybit", "pyth"];
 const ASSET_ID = /^[A-Z0-9]{1,12}$/;
 const WEIGHT = /^[1-9][0-9]{0,17}$/;
 const ADAPTIVE_DOMAIN = "COX/METHODOLOGY/ADAPTIVE/V1";
-const PROTOCOL_ASSET_IDS = [
+export const PROTOCOL_ASSET_IDS = [
   "BTC", "ETH", "SOL", "XRP", "BNB", "TRX", "AVAX", "DOT", "NEAR", "SUI", "APT", "UNI", "ARB",
   "OP", "INJ", "AAVE", "ZEC", "STRK", "HYPE", "TAO", "WLD", "ONDO", "ENA", "ZRO", "FET", "JUP",
   "AERO", "RENDER", "TIA", "W",

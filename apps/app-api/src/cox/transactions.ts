@@ -69,21 +69,21 @@ export interface CoxTransactionContext {
   classes: readonly string[];
 }
 
-interface Built {
+export interface Built {
   operation: TransactionOperation;
   owner: PublicKey;
   instructions: TransactionInstruction[];
   details: Partial<Omit<UnsignedTransaction, "operation" | "owner" | "transaction" | "recentBlockhash" | "lastValidBlockHeight">>;
 }
 
-function owner(value: unknown): PublicKey {
+export function owner(value: unknown): PublicKey {
   if (typeof value !== "string" || !OWNER.test(value)) throw new TransactionInputError("owner must be a base58 wallet address");
   const key = new PublicKey(value);
   if (!PublicKey.isOnCurve(key.toBytes())) throw new TransactionInputError("owner must be a wallet that can sign");
   return key;
 }
 
-function integer(value: unknown, name: string, max: bigint, positive: boolean): bigint {
+export function integer(value: unknown, name: string, max: bigint, positive: boolean): bigint {
   if (typeof value !== "string" || !INTEGER.test(value)) throw new TransactionInputError(`${name} must be an integer string`);
   const parsed = BigInt(value);
   if (parsed > max || (positive && parsed === 0n)) throw new TransactionInputError(`${name} is out of range`);
@@ -101,7 +101,7 @@ export function associatedTokenAddress(wallet: PublicKey, mint: PublicKey): Publ
   return PublicKey.findProgramAddressSync([wallet.toBuffer(), TOKEN_PROGRAM.toBuffer(), mint.toBuffer()], ASSOCIATED_TOKEN_PROGRAM)[0];
 }
 
-function createTokenAccountIdempotent(payer: PublicKey, wallet: PublicKey, mint: PublicKey): TransactionInstruction {
+export function createTokenAccountIdempotent(payer: PublicKey, wallet: PublicKey, mint: PublicKey): TransactionInstruction {
   return new TransactionInstruction({
     programId: ASSOCIATED_TOKEN_PROGRAM,
     keys: [
@@ -114,6 +114,38 @@ function createTokenAccountIdempotent(payer: PublicKey, wallet: PublicKey, mint:
     ],
     data: Buffer.from([1]),
   });
+}
+
+export async function unsignedTransaction(connection: Connection, built: Built): Promise<UnsignedTransaction> {
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+  const message = new TransactionMessage({ payerKey: built.owner, recentBlockhash: blockhash, instructions: built.instructions }).compileToV0Message();
+  const transaction = new VersionedTransaction(message);
+  const simulation = await connection.simulateTransaction(transaction, { sigVerify: false, commitment: "confirmed" });
+  if (simulation.value.err) {
+    const logs = simulation.value.logs ?? [];
+    const reason = logs.find((line) => line.includes("Error Message:")) ?? JSON.stringify(simulation.value.err);
+    if (logs.some((line) => line.includes("FeeVersionChanged"))) throw new FeeChangedError();
+    throw new TransactionRejectedError(reason, logs);
+  }
+  return {
+    operation: built.operation,
+    owner: built.owner.toBase58(),
+    transaction: Buffer.from(transaction.serialize()).toString("base64"),
+    recentBlockhash: blockhash,
+    lastValidBlockHeight,
+    requestId: null,
+    nonce: null,
+    targetBatch: null,
+    expiryBatch: null,
+    fromClass: null,
+    toClass: null,
+    amount: null,
+    units: null,
+    minimumUnits: null,
+    minimumProceeds: null,
+    feeTerms: null,
+    ...built.details,
+  };
 }
 
 export class CoxTransactions {
@@ -390,35 +422,7 @@ export class CoxTransactions {
     });
   }
 
-  private async finish(built: Built): Promise<UnsignedTransaction> {
-    const { blockhash, lastValidBlockHeight } = await this.context.connection.getLatestBlockhash("confirmed");
-    const message = new TransactionMessage({ payerKey: built.owner, recentBlockhash: blockhash, instructions: built.instructions }).compileToV0Message();
-    const transaction = new VersionedTransaction(message);
-    const simulation = await this.context.connection.simulateTransaction(transaction, { sigVerify: false, commitment: "confirmed" });
-    if (simulation.value.err) {
-      const logs = simulation.value.logs ?? [];
-      const reason = logs.find((line) => line.includes("Error Message:")) ?? JSON.stringify(simulation.value.err);
-      if (logs.some((line) => line.includes("FeeVersionChanged"))) throw new FeeChangedError();
-      throw new TransactionRejectedError(reason, logs);
-    }
-    return {
-      operation: built.operation,
-      owner: built.owner.toBase58(),
-      transaction: Buffer.from(transaction.serialize()).toString("base64"),
-      recentBlockhash: blockhash,
-      lastValidBlockHeight,
-      requestId: null,
-      nonce: null,
-      targetBatch: null,
-      expiryBatch: null,
-      fromClass: null,
-      toClass: null,
-      amount: null,
-      units: null,
-      minimumUnits: null,
-      minimumProceeds: null,
-      feeTerms: null,
-      ...built.details,
-    };
+  private finish(built: Built): Promise<UnsignedTransaction> {
+    return unsignedTransaction(this.context.connection, built);
   }
 }
