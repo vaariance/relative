@@ -1,3 +1,4 @@
+import { parseChainChange } from "./chain-changes.js";
 import { PREVIEW_SCHEMA, type Portfolio, type Preview, type PreviewPortfolio, type PreviewProjection, type PreviewRecord } from "@eox/app-api";
 
 const STORAGE = "https://storage.googleapis.com/storage/v1";
@@ -88,6 +89,7 @@ export function parsePreview(text: string, timestamp: number, identity: PreviewI
   if (integer(value.cryptoClass, "cryptoClass") !== n) fail(`preview ${timestamp} puts CRYPTO at class ${String(value.cryptoClass)}`);
   if (value.cryptoReference !== (100n * BigInt(SCALES.reference)).toString()) fail(`preview ${timestamp} has CRYPTO reference ${String(value.cryptoReference)}`);
   projection(value.basicProjection, n + 1);
+  if (value.chainChange !== undefined) parseChainChange(value.chainChange);
   return value as unknown as PreviewRecord;
 }
 
