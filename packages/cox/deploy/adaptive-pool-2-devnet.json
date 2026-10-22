@@ -1688,5 +1688,26 @@
       ]
     },
     "directAlchemySecretUnchanged": true
+  },
+  "epochLiveLifecycleVerification": {
+    "status": "sealed-awaiting-opening",
+    "epoch": "FN5K1VRfnvA1EyFMA3aa6mnpmBVchEXCPiBZdrzaktcq",
+    "config": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9",
+    "opensAtUtc": "2026-10-23T00:00:00Z",
+    "closesAtUtc": "2026-10-23T04:00:00Z",
+    "opensAt": 1792713600,
+    "closesAt": 1792728000,
+    "sealed": true,
+    "sealSignature": "4WjvVxHstNumFBKdze4Qp4Wf7n8fqGrmYBPpiaN3ZFuszQuq7hrf5auHrHbjkrLhMz74iBT8Rb6q2xn3TQQuAwMV",
+    "commitment": "finalized",
+    "preparationSlot": 514004801,
+    "universeAssets": 30,
+    "runner": "cox-epoch-lifecycle-1792713600.service",
+    "testEntries": 2,
+    "grossStakePerEntry": "100000",
+    "collateralMint": "5rpGrekfBLHdF8PD8eKLzXQPPmhyF7FCKeE1VA5CwV3X",
+    "completed": false,
+    "operatorKeysUnchanged": true,
+    "basicRemainsOpen": true
   }
 }
