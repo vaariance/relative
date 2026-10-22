@@ -39,6 +39,7 @@ The public demonstration endpoint is <https://fixture-api.getrelative.trade>. It
 | `COX_POLL_MS` | Indexer interval, at least 1,000 ms | `5000` |
 | `COX_PUBLICATION_ARCHIVE` | Directory of the publisher's `<sequence>.json` archive records | Unset |
 | `COX_PUBLICATION_ARCHIVE_GCS` | `gs://bucket/prefix/` of content-addressed `<sequence>/<sha256>.json` records; use instead of the directory | Unset |
+| `COX_PREVIEW_GCS` | `gs://bucket/prefix/` of the publisher's per-second `<unix seconds>.json` preview records; unset disables the preview routes | Unset |
 | `APP_API_POST_LIMIT_PER_MINUTE` | Transaction requests per client per minute; 429 `RATE_LIMITED` with `Retry-After` beyond it | `30` |
 | `APP_API_TRUST_FORWARDED_FOR` | `true` behind Cloud Run: the client is the last `X-Forwarded-For` entry | Unset |
 | `APP_API_HISTORY_GCS` | `gs://bucket/prefix/` for sealed history segments shared by every instance | `<state dir>/history-<pool>/` |
@@ -87,13 +88,14 @@ Errors include `NO_PUBLICATION`, `PUBLICATION_NOT_FOUND`, `UNKNOWN_ASSET`, `UNKN
 
 ## Real-time stream
 
-`GET /v1/stream` keeps one connection open and pushes three event types:
+`GET /v1/stream` keeps one connection open and pushes these event types:
 
 | Event | Sent | Data |
 |---|---|---|
 | `publication` | each new publication, after any missed since the cursor | `{ sequence, publication }`; the event id is the sequence |
 | `status` | on connect, then whenever anything except the clock changes: new publication, missed cutoffs, paused or halted, execution, reconciliation or fee terms | the same object as `status` in every response |
 | `portfolio` | with `?wallet=`, on connect and whenever that wallet's positions, requests or receipts change | `{ owner, portfolio }`; `portfolio` is `null` for a wallet with nothing on chain |
+| `preview` | with `COX_PREVIEW_GCS`, on connect, for each newer per-second record and when the latest becomes stale | `{ record, ageSeconds, stale }`, as `GET /v1/preview` |
 
 Without a cursor the stream starts at the latest publication. Browsers reconnect by themselves, three seconds after a drop, sending the last publication id. The server then resumes publications from there, at most the last 1,440, and repeats the current status and portfolio. Fetch older history with `GET /v1/publications`. Status is checked every 5 seconds and right after each publication. A wallet's portfolio is read after each publication and every 15 seconds, once per wallet however many connections watch it. Each client may hold 8 streams, an instance 500 and 200 distinct wallets. Over those limits the response is HTTP 429 `RATE_LIMITED` with `Retry-After`.
 
@@ -139,6 +141,17 @@ Pools migrated to `COX/FEES/V1` charge `min(floor(gross × bps / 10000), cap)` i
 A pool with a second collateral mint reports it as `deployment.secondaryCollateralMint`. Deposits, refunds and withdrawals take an optional `collateralMint` choosing either mint (default: the primary one); every request includes both vaults, and vault reconciliation adds both balances. Withdrawals and refunds need liquidity in the chosen mint's vault. `status.fees.migrated` is true for adaptive pools, and a fee schedule shows as `scheduled` until a qualifying publication activates it.
 
 The publisher's `cox.publication-archive/v2` records carry `commitment: "confirmed"` and an `observedSlot`. Publications filled from them report `finalization.finalized: false`; v1 records and publications read from chain at finalized commitment report `true`. A record that mixes the two forms is refused.
+
+### Live previews
+
+The publisher evaluates the methodology every second but writes to the chain only when there is work to settle. With `COX_PREVIEW_GCS`, the API follows its per-second `relative.preview/v1` records so the app can show live figures between publications. Each tick it lists the bucket from the next second and reads the newest record, so missing seconds stay gaps and are never filled. A record is relayed unchanged only after its timestamp, network, program, pool, methodology digest, scales, asset order, CRYPTO class and reference, and projection rows are checked. A record that fails is logged and skipped, and the previous one stays current.
+
+| Route | Data |
+|---|---|
+| `GET /v1/preview` | `{ record, ageSeconds, stale }`; `stale` after 10 seconds without a newer record. 404 `NO_PREVIEW` before the first record, 409 `NOT_CONFIGURED` without `COX_PREVIEW_GCS` |
+| `GET /v1/preview/portfolio?owner=` | Each position's `estimatedValue` in collateral base units: its units times the projected class backing divided by the projected class units, rounded down |
+
+Every preview is an estimate. The API computes no reference or redistribution: benchmark, references and `basicProjection` come from the publisher. A wallet estimate is given only when `basicProjection` starts from the pool's latest publication; otherwise `unavailable` is `no-projection` or `basis-mismatch` and every value is `null`. A later publication does not confirm a preview; read the publication itself for committed values.
 
 With `COX_EPOCH_CONFIG`, the API reads the Epoch configuration, its Epoch accounts and lots. An Epoch is a `draft` until the admin seals it, then `open`, `scoring`, `allocating`, `settled` or `voided`. `entriesOpen` is true only for an open Epoch between `opensAt` and `closesAt` with lot capacity left. Its ledger lists pending gross stakes, active net stakes, held fees, claimable amounts, committed fees and residual, compared with both vault balances. Entry fees are 2 bps capped at 200,000 base units and are charged by the program. An entry uses the Epoch's next lot nonce, so simultaneous entries can conflict and must be rebuilt.
 
