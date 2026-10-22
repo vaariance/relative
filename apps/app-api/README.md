@@ -34,6 +34,8 @@ The public demonstration endpoint is <https://fixture-api.getrelative.trade>. It
 | `COX_NETWORK` | Supported network | `solana-devnet` |
 | `COX_POOL_ID` | Pool identifier | `0` |
 | `COX_IDL_PATH` | Program IDL | `packages/cox/idl/cox.json` |
+| `COX_EPOCH_CONFIG` | Epoch configuration account; unset disables the Epoch routes | Unset |
+| `COX_EPOCH_IDL_PATH` | Epoch program IDL | `packages/cox-epoch/idl/epoch.json` |
 | `COX_POLL_MS` | Indexer interval, at least 1,000 ms | `5000` |
 | `COX_PUBLICATION_ARCHIVE` | Directory of the publisher's `<sequence>.json` archive records | Unset |
 | `COX_PUBLICATION_ARCHIVE_GCS` | `gs://bucket/prefix/` of content-addressed `<sequence>/<sha256>.json` records; use instead of the directory | Unset |
@@ -73,10 +75,15 @@ All fixed-point quantities are decimal integer strings. Prices use USD × 10⁸;
 | `POST /v1/transactions/withdraw` | Build with `{ owner, amount }` |
 | `POST /v1/transactions/submit` | Relay `{ transaction }`, containing signed base64 transaction bytes |
 | `GET /v1/transactions/:signature` | Track a transaction submitted through this API |
+| `GET /v1/epochs` | Epoch configuration, the two most recent finished Epochs and up to six current or future ones |
+| `GET /v1/epochs/:opensAt` | One Epoch by its opening time: phase, universe, lot counts, ledger and vault coverage |
+| `GET /v1/epochs/:opensAt/lots?owner=` | A wallet's lots in that Epoch: stake, fee, basket, backed asset, execution, score and claimable amount |
+| `POST /v1/transactions/epoch-entry` | Build with `{ owner, opensAt, grossStake, basket, backedAsset, collateralMint? }`; `basket` lists all 30 universe tickers once |
+| `POST /v1/transactions/epoch-withdraw` | Build with `{ owner, opensAt, nonce, amount?, collateralMint? }`; omit `amount` to withdraw the whole claim |
 
 Omitting the publication cursor starts from sequence 0. An empty page preserves the cursor. SSE events contain the publication and its sequence; the server sends a heartbeat every 15 seconds. Transaction request bodies are limited to 8 KiB.
 
-Errors include `NO_PUBLICATION`, `PUBLICATION_NOT_FOUND`, `UNKNOWN_ASSET`, `UNKNOWN_CLASS`, `UNKNOWN_WALLET`, `INVALID_REQUEST`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `INTERNAL_ERROR`, `NOT_LIVE`, `TRANSACTION_REJECTED`, `TRANSACTION_NOT_FOUND`, `RATE_LIMITED` and `FEE_CHANGED`. Builders and quotes on the fixture return HTTP 409 `NOT_LIVE`; a rejected simulation returns HTTP 422 `TRANSACTION_REJECTED`; a fee version that no longer matches the pool returns HTTP 409 `FEE_CHANGED`.
+Errors include `NO_PUBLICATION`, `PUBLICATION_NOT_FOUND`, `UNKNOWN_ASSET`, `UNKNOWN_CLASS`, `UNKNOWN_WALLET`, `INVALID_REQUEST`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `INTERNAL_ERROR`, `NOT_LIVE`, `TRANSACTION_REJECTED`, `TRANSACTION_NOT_FOUND`, `RATE_LIMITED`, `FEE_CHANGED`, `TRADING_CLOSED`, `UNKNOWN_EPOCH` and `NOT_CONFIGURED`. A trade, quote or Epoch entry while trading is closed returns HTTP 409 `TRADING_CLOSED` with the reason. Builders and quotes on the fixture return HTTP 409 `NOT_LIVE`; a rejected simulation returns HTTP 422 `TRANSACTION_REJECTED`; a fee version that no longer matches the pool returns HTTP 409 `FEE_CHANGED`.
 
 ## Real-time stream
 
@@ -108,7 +115,7 @@ Server-side code can use `createCoxApiClient(...).subscribe({ after, wallet }, o
 
 Builders simulate before returning a version 0 transaction. The program assigns eligibility from its clock when submission lands; the returned target batch is an estimate. The request nonce is pool-global, so simultaneous builds can conflict and a failed nonce must be rebuilt. After an ambiguous submission result, check the original signature and request before creating another deposit.
 
-Submission verifies signatures, restricts instructions to the supported COX request operations plus associated-token and compute-budget programs, and relays the signed bytes unchanged. Redemption creates a payable; withdrawal is a separate wallet action. The devnet collateral is a test token, not real USDC.
+Submission verifies signatures, restricts instructions to the supported COX request operations, the Epoch entry and withdrawal instructions when `COX_EPOCH_CONFIG` is set, plus associated-token and compute-budget programs, and relays the signed bytes unchanged. Redemption creates a payable; withdrawal is a separate wallet action. The devnet collateral is a test token, not real USDC.
 
 ## Trading fees
 
@@ -122,6 +129,18 @@ Pools migrated to `COX/FEES/V1` charge `min(floor(gross × bps / 10000), cap)` i
 - Publications whose state is `COX/STATE/V2` report `ledger.fees` (committed fees), `flows.fees` (fees from that batch) and `fees` (terms after the publication). Earlier publications report `"0"` and `fees: null`.
 
 `fixtures/cox-fee-examples.json` holds example responses for a migrated pool, produced by this code over the compiled fee-upgrade accounts in `packages/cox/fixtures/fee-accounts.json`. A test fails if the code's output drifts from it; regenerate with `pnpm exec vitest run -u`.
+
+## Adaptive pools and Epoch
+
+`deployment.mode` is `minute` for the original pools and `adaptive` for schema-4 pools such as Basic pool 2. Adaptive pools publish Pyth prices (`venue: "pyth"`, `step: 0`, no exchange symbols) on a one-second grid from an origin on any whole second, and stay silent while idle. Their batches are seconds since origin, so `expiryBatch` is counted in seconds; builders accept at most a week ahead. `missedCutoffs` stays 0 for them because silence is normal. `deployment.publicationIntervalSeconds` and `status.currentBatch` give the clock to use.
+
+`status.trading` says whether new requests are accepted: `{ open, gate, opensAt }`, where `gate` is `retired`, `paused` (registry paused), `not-initialized` (no first publication yet), `before-opening` (before `tradingOpensAt`) or `open`. Builders and quotes check the pool before simulating and return `TRADING_CLOSED` with the reason; the program enforces the same rules.
+
+A pool with a second collateral mint reports it as `deployment.secondaryCollateralMint`. Deposits, refunds and withdrawals take an optional `collateralMint` choosing either mint (default: the primary one); every request includes both vaults, and vault reconciliation adds both balances. Withdrawals and refunds need liquidity in the chosen mint's vault. `status.fees.migrated` is true for adaptive pools, and a fee schedule shows as `scheduled` until a qualifying publication activates it.
+
+The publisher's `cox.publication-archive/v2` records carry `commitment: "confirmed"` and an `observedSlot`. Publications filled from them report `finalization.finalized: false`; v1 records and publications read from chain at finalized commitment report `true`. A record that mixes the two forms is refused.
+
+With `COX_EPOCH_CONFIG`, the API reads the Epoch configuration, its Epoch accounts and lots. An Epoch is a `draft` until the admin seals it, then `open`, `scoring`, `allocating`, `settled` or `voided`. `entriesOpen` is true only for an open Epoch between `opensAt` and `closesAt` with lot capacity left. Its ledger lists pending gross stakes, active net stakes, held fees, claimable amounts, committed fees and residual, compared with both vault balances. Entry fees are 2 bps capped at 200,000 base units and are charged by the program. An entry uses the Epoch's next lot nonce, so simultaneous entries can conflict and must be rebuilt.
 
 ## Live state and history
 
