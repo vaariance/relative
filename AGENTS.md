@@ -1115,3 +1115,23 @@ another agent needs to know.
 - **What:** Built signer source from committed `5f1e382` in a 41-file allowlisted context excluding secrets; all 52 container tests and type checks pass. Pushed a config-only image layer with both new targets disabled and deployed `eox-signer-adaptive-5f1e382-disabled` at zero traffic. Existing revision retains 100%. The European VM's authorised publisher identity received HTTP 200 from canary health and key-directory endpoints, matching operator, KMS version and network. No signing endpoint calls or transactions occurred. Installed actual native configuration disabled and original signed observation with restricted permissions; current service/release remain unchanged.
 - **Rules for agents:** Do not infer signing or transaction execution from authenticated key-directory success. New target enablement, traffic promotion, Basic bootstrap and fee finalization remain explicit remaining steps. Preserve existing RPC secret, workload identity and IAM. Local activation intent now records prepared pool accounts, paused Basic and unsealed Epoch; no activation is armed.
 - **Refs:** `apps/signer/README.md`; private `.cox/signer-disabled-revision-verification.json` and `.cox/adaptive-readiness-checkpoint.json`.
+
+### 2026-10-22 · Joel (Claude Code) · Fixture on the Rust CLI; app API reads Basic pool 2 and Epoch (not deployed)
+
+- **Area:** `apps/app-api`, `packages/app-api`, one line in `apps/web/src/lib/view.ts`; branch `working`.
+- **What:**
+  - **Fixture:** Peter's request done. `scripts/cox-fixture-build.ts` gets every `reference`, `revalue` and `batch` result from the Rust `cox` CLI (`COX_CLI`, or `cargo run`) and no longer imports `packages/cox-methodology`. Provenance hashes `Cargo.lock` and every `.rs` file under `crates/math/src` and `crates/cli/src`, with line endings normalised. Fixture economics are unchanged; `reference` is still the legacy arithmetic benchmark. Joel confirmed that Peter wants only publisher-touching code in Rust; the API stays TypeScript.
+  - **Basic pool 2:** adaptive pools (schema 4) read correctly: Borsh methodology `COX/METHODOLOGY/ADAPTIVE/V1`, Pyth prices (`venue: "pyth"`, step 0), one-second batches from a non-minute origin, and both vaults in reads, reconciliation and every builder. Deposits, refunds and withdrawals take an optional `collateralMint`. Fees count as migrated for schema 4. `deployment` gains `mode`, `publicationIntervalSeconds`, `tradingOpensAt` and `secondaryCollateralMint`; `status.trading` gives `{ open, gate, opensAt }`. Trades and quotes return 409 `TRADING_CLOSED` while the pool is retired, paused, uninitialised or before `tradingOpensAt`.
+  - **Archive v2:** `cox.publication-archive/v2` records (`commitment: "confirmed"`, `observedSlot`) are read and served with `finalization.finalized: false`. A record mixing v1 and v2 provenance is refused.
+  - **Epoch:** with `COX_EPOCH_CONFIG`, the API serves `GET /v1/epochs`, `/v1/epochs/:opensAt` and `/v1/epochs/:opensAt/lots?owner=`, plus builders `POST /v1/transactions/epoch-entry` and `epoch-withdraw`. Submission relays the user-signed Epoch instructions `queue`, `withdraw` and `withdraw_partial`.
+  - **Verified:** 72 app API tests pass and the web app type-checks. A read-only local run against devnet (public RPC) reported pool 2 correctly: adaptive, paused, opening 12:00 UTC, active fees version 0 with version 1 scheduled, 30 assets and both mints. It returned `TRADING_CLOSED` for builds and quotes, and showed the 12:00 Epoch draft `J8c7…VQs` with 30 members.
+- **Rules for agents:**
+  - Count adaptive `expiryBatch` in seconds; a minute-pool "plus 3 batches" means 3 seconds on pool 2.
+  - Never present a v2 archive publication as finalized.
+  - Epoch asset ids are the same 0–29 roster indexes as Basic.
+- **Open:**
+  - **Deployment:** nothing here is deployed. Cloud Run and the VM still point at retired pool 1. Switching them to pool 2, `COX_EPOCH_CONFIG` and the direct Alchemy secret `cox-direct-alchemy-devnet-rpc-urls` needs Joel's approval.
+  - **Archive path:** pool 2's archive location is not configured yet (Peter's native archive path or bucket).
+  - **Previews:** live benchmark and portfolio previews from the Pyth stream need the Pyth key and are not built.
+  - **Godwin:** web changes for one-second expiry, `status.trading`, the second mint and the Epoch routes.
+- **Refs:** `apps/app-api/README.md` (Adaptive pools and Epoch), commits `0f42194`..`11c49ed`.
