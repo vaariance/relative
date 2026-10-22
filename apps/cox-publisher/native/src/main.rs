@@ -14,6 +14,7 @@ async fn main() {
             },
             _=>Err("Usage: relative-publisher run --config PATH"),
         },
+        Some("capture-origin") => capture_origin().await,
         Some("prepare-methodology") => prepare_methodology(),
         Some("prepare-inclusion") => prepare_inclusion(),
         Some("backup") => backup().await,
@@ -250,5 +251,16 @@ fn prepare_methodology() -> Result<(), &'static str> {
     let artifact = relative_publisher::methodology::prepare_file(std::path::Path::new(&arguments[1]), std::path::Path::new(&arguments[3]))
         .map_err(|_| "Methodology preparation failed; no signing, submission or runtime changes performed")?;
     println!("{}", serde_json::json!({"prepared":true,"activated":false,"digest":artifact.digest,"methodology":artifact.methodology_address,"pool":artifact.pool_admission.pool_address,"tradingOpensAt":artifact.pool_admission.trading_opens_at}));
+    Ok(())
+}
+
+async fn capture_origin() -> Result<(), &'static str> {
+    let arguments = std::env::args().skip(2).collect::<Vec<_>>();
+    if arguments.len() != 4 || arguments[0] != "--request" || arguments[2] != "--output" {
+        return Err("Usage: relative-publisher capture-origin --request ABSOLUTE_PATH --output NEW_ABSOLUTE_PATH");
+    }
+    let artifact = relative_publisher::origin::capture_file(std::path::Path::new(&arguments[1]), std::path::Path::new(&arguments[3])).await
+        .map_err(|_| "Origin capture failed; request, credentials, devnet, signed feed or output validation failed")?;
+    println!("{}", serde_json::json!({"captured":true,"signatureVerified":true,"feedCount":artifact.assets.len(),"timestampUs":artifact.timestamp_us,"digest":artifact.digest,"submittedTransactions":0}));
     Ok(())
 }

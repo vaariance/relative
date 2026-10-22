@@ -735,6 +735,21 @@ impl ChainState {
                         .saturating_sub(1),
                 });
             } else {
+                if self.basic.pool.fee_pending {
+                    let cutoff_ms = self
+                        .basic
+                        .pool
+                        .fee_pending_cutoff
+                        .checked_mul(1000)
+                        .ok_or(Error::Overflow)?;
+                    if now_ms >= cutoff_ms {
+                        work.push(Work::Entry {
+                            id: "basic:fee-activation".into(),
+                            pool: WorkPool::Basic,
+                            eligible_after_ms: cutoff_ms.checked_sub(1).ok_or(Error::Overflow)?,
+                        });
+                    }
+                }
                 if self
                     .basic
                     .requests
@@ -1159,6 +1174,50 @@ pub(crate) mod tests {
         ));
         s.basic.registry.paused = true;
         assert!(s.work(0).unwrap().is_empty());
+    }
+    #[test]
+    fn pending_fee_activation_wakes_after_bootstrap_and_stops_after_commit() {
+        let mut s = state();
+        s.basic.pool.initialized = false;
+        s.basic.pool.fee_pending = true;
+        s.basic.pool.fee_pending_cutoff = s.basic.pool.origin + 60;
+        let cutoff_ms = s.basic.pool.fee_pending_cutoff * 1000;
+        let bootstrap = s.work(cutoff_ms).unwrap();
+        assert_eq!(bootstrap.len(), 1);
+        assert!(matches!(&bootstrap[0], Work::Entry {id, ..} if id == "basic:bootstrap"));
+        s.basic.pool.initialized = true;
+        assert!(s.work(cutoff_ms - 1).unwrap().is_empty());
+        let due = s.work(cutoff_ms).unwrap();
+        assert_eq!(due.len(), 1);
+        assert!(
+            matches!(&due[0], Work::Entry {id, pool: WorkPool::Basic, eligible_after_ms} if id == "basic:fee-activation" && *eligible_after_ms == cutoff_ms - 1)
+        );
+        s.basic.pool.fee_pending = false;
+        s.basic.pool.fee_version = 1;
+        s.basic.pool.fee_bps = 2;
+        s.basic.pool.fee_cap = 200_000;
+        assert!(s.work(cutoff_ms + 1_000).unwrap().is_empty());
+    }
+    #[test]
+    fn pending_fee_activation_respects_pause_accepted_stage_and_checked_cutoff() {
+        let mut s = state();
+        s.basic.pool.fee_pending = true;
+        s.basic.pool.fee_pending_cutoff = s.basic.pool.origin + 60;
+        let cutoff_ms = s.basic.pool.fee_pending_cutoff * 1000;
+        s.basic.registry.paused = true;
+        assert!(s.work(cutoff_ms).unwrap().is_empty());
+        s.basic.registry.paused = false;
+        s.basic.batch = Some(zero());
+        let stage = s.work(cutoff_ms).unwrap();
+        assert_eq!(stage.len(), 1);
+        assert!(
+            matches!(&stage[0], Work::Maintenance {id, pool: WorkPool::Basic} if id == "basic:accepted-stage")
+        );
+        s.basic.batch = None;
+        s.basic.pool.fee_pending_cutoff = u64::MAX;
+        assert!(matches!(s.work(cutoff_ms), Err(Error::Overflow)));
+        s.basic.pool.fee_pending_cutoff = 0;
+        assert!(matches!(s.work(0), Err(Error::Overflow)));
     }
     #[test]
     fn accepted_basic_snapshot_only_drains_original_phase_and_cursor() {
