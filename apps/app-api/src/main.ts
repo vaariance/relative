@@ -7,6 +7,7 @@ import { loadProgram } from "./cox/chain.js";
 import { EpochSource } from "./cox/epoch-source.js";
 import { CoxFixtureSource } from "./cox/fixture-source.js";
 import { LiveCoxSource } from "./cox/live-source.js";
+import { ChainChangeFeed, gcsChainChangeStore } from "./cox/chain-changes.js";
 import { gcsPreviewStore, PreviewFeed } from "./cox/preview.js";
 import { directorySource, gcsSource, PublicationArchive, type ArchiveSource } from "./cox/publication-archive.js";
 import { directorySegments, gcsSegments } from "./cox/publication-history.js";
@@ -77,12 +78,25 @@ async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transaction
   const epochs = epochConfig
     ? await EpochSource.open({ connection, program: loadProgram(connection, process.env.COX_EPOCH_IDL_PATH ?? join(here, "..", "..", "..", "packages", "cox-epoch", "idl", "epoch.json")), config: new PublicKey(epochConfig) })
     : null;
-  const archive = source ? new PublicationArchive(source, program, addresses(program.programId).pool(poolId), genesis) : null;
-  const options = { connection, program, poolId, network, history: { path: join(stateDir, `publications-${poolId}.jsonl`), store: segments }, pollMs, archive, onError: (error: unknown) => console.error("cox indexer tick failed", error) };
+  const poolAddress = addresses(program.programId).pool(poolId);
+  const archive = source ? new PublicationArchive(source, program, poolAddress, genesis) : null;
+  const changesGcs = process.env.COX_CHAIN_CHANGES_GCS;
+  const changes = changesGcs
+    ? new ChainChangeFeed({
+        store: gcsChainChangeStore(changesGcs, token),
+        identity: { networks: [network, genesis], program: program.programId.toBase58(), pools: [poolAddress.toBase58(), poolId.toString()] },
+        nowMs: () => Date.now(),
+        onError: (error: unknown) => console.error("cox chain change tick failed", error),
+      })
+    : null;
+  if (changes) epochs?.cacheUntilInvalidated();
+  const options = { connection, program, poolId, network, history: { path: join(stateDir, `publications-${poolId}.jsonl`), store: segments }, pollMs, archive, changes, onError: (error: unknown) => console.error("cox indexer tick failed", error) };
   for (;;) {
     try {
       const source = await LiveCoxSource.open(options);
+      source.onChainRefresh?.(() => epochs?.invalidate());
       source.start();
+      changes?.start();
       const transactions = new CoxTransactions({
         connection, program, poolId, pool: source.poolAddress, vault: source.vaultAddress, mint: source.collateralMint, testVault: source.testVaultAddress, testMint: source.secondaryMint,
         origin: source.manifest.origin, interval: source.interval, acceptanceDeadline: source.acceptanceDeadline, classes: source.classes,

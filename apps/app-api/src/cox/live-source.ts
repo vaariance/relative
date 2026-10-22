@@ -22,6 +22,8 @@ import {
   type TradingStatus,
   type VaultReconciliation,
 } from "@eox/app-api";
+import { setTimeout as sleep } from "node:timers/promises";
+import type { ChainChangeFeed } from "./chain-changes.js";
 import { batchOf, classIds, feeConfiguration, parseManifest, toPublication, type ChainPublication, type Manifest } from "./chain.js";
 import { PublicationArchiveMissing, type PublicationArchive } from "./publication-archive.js";
 
@@ -39,6 +41,10 @@ const TOKEN_AMOUNT_OFFSET = 64;
 const MINT_DECIMALS_OFFSET = 44;
 const BACKFILL_CONCURRENCY = 16;
 const DEFAULT_PAGE = 1000;
+const SAFETY_MS = 20 * 60_000;
+const FINALITY_WAIT_MS = 4_000;
+const FINALITY_DOUBLINGS = 3;
+const PORTFOLIO_CACHE_LIMIT = 1_000;
 
 export interface LiveCoxSourceOptions {
   connection: Connection;
@@ -48,6 +54,10 @@ export interface LiveCoxSourceOptions {
   history: { path: string; store: SegmentStore; segmentSize?: number; cacheSegments?: number };
   pollMs?: number;
   archive?: PublicationArchive | null;
+  changes?: ChainChangeFeed | null;
+  safetyMs?: number;
+  finalityWaitMs?: number;
+  now?: () => number;
   onError?: (error: unknown) => void;
 }
 
@@ -58,6 +68,7 @@ interface ChainView {
   publication: ChainPublication | null;
   batch: Batch | null;
   slot: number;
+  readAt: number;
   reconciliation: VaultReconciliation | null;
 }
 
@@ -90,6 +101,13 @@ export class LiveCoxSource implements CoxSource {
   private view: ChainView | null = null;
   private timer: NodeJS.Timeout | null = null;
   private stopped = false;
+  private readonly refreshListeners = new Set<() => void>();
+  private readonly portfolios = new Map<string, Promise<Portfolio | null>>();
+  private refreshing: Promise<void> | null = null;
+  private pending = false;
+  private pendingSlot: number | null = null;
+  private unsubscribeChanges: (() => void) | null = null;
+  readonly onChainRefresh?: (listener: () => void) => () => void;
 
   private constructor(
     private readonly options: LiveCoxSourceOptions,
@@ -104,6 +122,12 @@ export class LiveCoxSource implements CoxSource {
     this.poolKey = this.reader.pdas.pool(options.poolId);
     this.vaultKey = this.reader.pdas.vault(this.poolKey);
     this.testVaultKey = secondaryMint ? this.reader.pdas.testVault(this.poolKey) : null;
+    if (options.changes) {
+      this.onChainRefresh = (listener) => {
+        this.refreshListeners.add(listener);
+        return () => this.refreshListeners.delete(listener);
+      };
+    }
   }
 
   static async open(options: LiveCoxSourceOptions): Promise<LiveCoxSource> {
@@ -147,6 +171,14 @@ export class LiveCoxSource implements CoxSource {
   }
 
   start(): void {
+    const changes = this.options.changes;
+    if (changes) {
+      this.unsubscribeChanges = changes.onChange((slot) => void this.refresh(slot));
+      this.timer = setInterval(() => void this.refresh(null), this.options.safetyMs ?? SAFETY_MS);
+      this.timer.unref();
+      void this.refresh(null);
+      return;
+    }
     const loop = async () => {
       try {
         await this.tick();
@@ -161,11 +193,40 @@ export class LiveCoxSource implements CoxSource {
   stop(): void {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
+    this.unsubscribeChanges?.();
+  }
+
+  refresh(observedSlot: number | null): Promise<void> {
+    this.pending = true;
+    if (observedSlot !== null) this.pendingSlot = Math.max(this.pendingSlot ?? 0, observedSlot);
+    if (this.refreshing) return this.refreshing;
+    this.refreshing = (async () => {
+      while (this.pending && !this.stopped) {
+        this.pending = false;
+        const target = this.pendingSlot;
+        this.pendingSlot = null;
+        try {
+          await this.tick();
+          const first = this.options.finalityWaitMs ?? FINALITY_WAIT_MS;
+          for (let wait = first; target !== null && (this.view?.slot ?? 0) < target && wait <= first * 2 ** FINALITY_DOUBLINGS && !this.stopped; wait *= 2) {
+            await sleep(wait, undefined, { ref: false });
+            await this.tick();
+          }
+        } catch (error) {
+          this.options.onError?.(error);
+        }
+        this.portfolios.clear();
+        for (const listener of this.refreshListeners) listener();
+      }
+      this.refreshing = null;
+    })();
+    return this.refreshing;
   }
 
   async tick(): Promise<void> {
     const view = await this.readView();
     this.view = view;
+    this.portfolios.clear();
     const latest = view.publication;
     if (!view.pool.initialized || !latest) return;
     const last = Number(latest.sequence.toString());
@@ -205,7 +266,7 @@ export class LiveCoxSource implements CoxSource {
     const publication = publicationInfo ? checkedPublication(program.programId, this.poolKey, decodeAccount(program, "publication", publicationInfo)) : null;
     const batch = batchInfo ? decodeAccount(program, "batch", batchInfo) : null;
     if (batch && !batch.pool.equals(this.poolKey)) throw new Error("BatchIdentityMismatch");
-    return { registry, pool, vault, publication, batch, slot: context.slot, reconciliation: null };
+    return { registry, pool, vault, publication, batch, slot: context.slot, readAt: Math.floor((this.options.now?.() ?? Date.now()) / 1000), reconciliation: null };
   }
 
   private reconcile(view: ChainView, sequence: number): VaultReconciliation {
@@ -280,6 +341,11 @@ export class LiveCoxSource implements CoxSource {
       fees: view ? this.fees(view.pool) : null,
       currentBatch: current,
       trading: view ? tradingStatus(view.pool, view.registry, now) : { open: false, gate: "not-initialized", opensAt: this.tradingOpensAt },
+      chain: {
+        readAt: view?.readAt ?? null,
+        slot: view?.slot ?? null,
+        feed: this.options.changes ? (this.options.changes.state().healthy ? "healthy" : "unhealthy") : "polling",
+      },
     };
   }
 
@@ -342,6 +408,19 @@ export class LiveCoxSource implements CoxSource {
   }
 
   async portfolio(owner: string): Promise<Portfolio | null> {
+    if (!this.options.changes) return this.freshPortfolio(owner);
+    const cached = this.portfolios.get(owner);
+    if (cached) return cached;
+    if (this.portfolios.size >= PORTFOLIO_CACHE_LIMIT) this.portfolios.clear();
+    const read = this.freshPortfolio(owner);
+    this.portfolios.set(owner, read);
+    read.catch(() => {
+      if (this.portfolios.get(owner) === read) this.portfolios.delete(owner);
+    });
+    return read;
+  }
+
+  private async freshPortfolio(owner: string): Promise<Portfolio | null> {
     const key = new PublicKey(owner);
     for (let attempt = 1; ; attempt += 1) {
       try {

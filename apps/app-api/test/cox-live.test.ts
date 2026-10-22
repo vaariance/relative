@@ -8,7 +8,8 @@ import { CoxInstructions, decodeState, discriminator } from "@cox/client";
 import type { AddressInfo } from "node:net";
 import { Keypair, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction, type AccountInfo, type Connection } from "@solana/web3.js";
 import { createCoxApiClient, type Publication, type UnsignedTransaction } from "@eox/app-api";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ChainChangeFeed } from "../src/cox/chain-changes.js";
 import { loadProgram } from "../src/cox/chain.js";
 import { LiveCoxSource } from "../src/cox/live-source.js";
 import { directorySource, gcsSource, PublicationArchive, PublicationArchiveMissing } from "../src/cox/publication-archive.js";
@@ -43,6 +44,9 @@ class FixtureConnection {
   simulationError: string | null = null;
   returnData: { programId: string; data: [string, "base64"] } | null = null;
   status: { slot: number; confirmationStatus: string; err: unknown } | null = null;
+  slots: number[] = [];
+  viewReads = 0;
+  programReads = 0;
 
   async getLatestBlockhash() {
     return { blockhash: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin", lastValidBlockHeight: 4242 };
@@ -75,10 +79,12 @@ class FixtureConnection {
   }
 
   async getMultipleAccountsInfoAndContext(keys: PublicKey[]) {
-    return { context: { slot: 1 }, value: keys.map((k) => this.accounts.get(k.toBase58()) ?? null) };
+    this.viewReads += 1;
+    return { context: { slot: this.slots.shift() ?? 1 }, value: keys.map((k) => this.accounts.get(k.toBase58()) ?? null) };
   }
 
   async getProgramAccounts(programId: PublicKey, config: { filters: { memcmp: { offset: number; bytes: string } }[] }) {
+    this.programReads += 1;
     return [...this.accounts.entries()]
       .filter(([, info]) => info.owner.equals(programId))
       .filter(([, info]) => config.filters.every(({ memcmp }) => {
@@ -229,6 +235,50 @@ describe("live COX source on the compiled-program account fixtures", () => {
       receipt: { requestId: REQUEST, sequence: 1, batch: 1, status: "filled", minted: "1000000000000000000", proceeds: "0", gross: null, fee: "0" },
     }]);
     expect(await source.portfolio("11111111111111111111111111111111")).toBeNull();
+  });
+});
+
+describe("change-driven chain reads", () => {
+  it("reads only when the change feed signals, waits for finality and caches wallets until the next change", async () => {
+    let signal: (slot: number | null) => void = () => undefined;
+    let healthy = true;
+    const changes = {
+      onChange: (listener: (slot: number | null) => void) => {
+        signal = listener;
+        return () => undefined;
+      },
+      state: () => ({ healthy, revision: "1", observedAt: 1 }),
+    } as unknown as ChainChangeFeed;
+    await seed(originEntry());
+    const program = loadProgram(connection as unknown as Connection, idlPath);
+    const source = await LiveCoxSource.open({
+      connection: connection as unknown as Connection, program, poolId: 0n, network: "solana-devnet",
+      history: { path: join(dir, "publications.jsonl"), store: directorySegments(join(dir, "segments")) }, changes, finalityWaitMs: 5, safetyMs: 3_600_000, now: () => 1_792_700_000_000,
+    });
+    let refreshed = 0;
+    source.onChainRefresh!(() => (refreshed += 1));
+    connection.viewReads = 0;
+    source.start();
+    await vi.waitFor(() => expect(refreshed).toBe(1));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(connection.viewReads).toBe(1);
+    expect((await source.status(1_792_700_000)).chain).toEqual({ readAt: 1_792_700_000, slot: 1, feed: "healthy" });
+
+    connection.programReads = 0;
+    await Promise.all([source.portfolio(OWNER), source.portfolio(OWNER)]);
+    await source.portfolio(OWNER);
+    expect(connection.programReads).toBe(1);
+
+    connection.slots = [5, 5, 12];
+    signal(10);
+    await vi.waitFor(() => expect(refreshed).toBe(2));
+    expect(connection.viewReads).toBe(4);
+    await source.portfolio(OWNER);
+    expect(connection.programReads).toBe(2);
+
+    healthy = false;
+    expect((await source.status(1_792_700_000)).chain?.feed).toBe("unhealthy");
+    source.stop();
   });
 });
 

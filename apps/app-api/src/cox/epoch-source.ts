@@ -26,6 +26,7 @@ const EPOCH_OPENS_AT_OFFSET = 40;
 const PAST_EPOCHS = 2;
 const FUTURE_EPOCHS = 6;
 const LOT_OWNER_OFFSET = 98;
+const CACHE_LIMIT = 1_000;
 const PHASES: Record<string, EpochPhase> = { open: "open", scoring: "scoring", allocating: "allocating", settled: "settled", voided: "voided" };
 const LOT_STATES: Record<string, EpochLotState> = { pending: "pending", executed: "executed", scored: "scored", claimable: "claimable", withdrawn: "withdrawn" };
 
@@ -128,6 +129,8 @@ export class EpochSource {
   private readonly pdas;
   private readonly instructions: EpochInstructions;
   private readonly now: () => number;
+  private readonly cache = new Map<string, Promise<unknown>>();
+  private caching = false;
 
   private constructor(
     private readonly options: EpochSourceOptions,
@@ -189,12 +192,37 @@ export class EpochSource {
     return value;
   }
 
+  cacheUntilInvalidated(): void {
+    this.caching = true;
+  }
+
+  invalidate(): void {
+    this.cache.clear();
+  }
+
+  private cached<T>(key: string, load: () => Promise<T>): Promise<T> {
+    if (!this.caching) return load();
+    const hit = this.cache.get(key) as Promise<T> | undefined;
+    if (hit) return hit;
+    if (this.cache.size >= CACHE_LIMIT) this.cache.clear();
+    const value = load();
+    this.cache.set(key, value);
+    value.catch(() => {
+      if (this.cache.get(key) === value) this.cache.delete(key);
+    });
+    return value;
+  }
+
+  private accounts(keys: PublicKey[]): Promise<(AccountInfo<Buffer> | null)[]> {
+    return this.cached(`accounts:${keys.map((key) => key.toBase58()).join(",")}`, () => this.options.connection.getMultipleAccountsInfo(keys, "finalized"));
+  }
+
   private async read(opensAts: number[]): Promise<Epoch[]> {
     const addresses = opensAts.map((opensAt) => this.pdas.epoch(this.selection(opensAt)));
-    const infos = await this.options.connection.getMultipleAccountsInfo(addresses, "finalized");
+    const infos = await this.accounts(addresses);
     const found = opensAts.flatMap((opensAt, i) => (infos[i] ? [{ opensAt, address: addresses[i]!, account: this.decodeEpoch(infos[i]!, addresses[i]!, opensAt) }] : []));
     const vaultKeys = found.flatMap(({ account }) => (account.state ? [account.vault, account.testVault] : []));
-    const vaults = vaultKeys.length ? await this.options.connection.getMultipleAccountsInfo(vaultKeys, "finalized") : [];
+    const vaults = vaultKeys.length ? await this.accounts(vaultKeys) : [];
     let cursor = 0;
     return found.map(({ opensAt, address, account }) => {
       if (!account.state) return this.view(address, opensAt, account, null);
@@ -241,14 +269,16 @@ export class EpochSource {
   }
 
   async overview(): Promise<EpochOverview> {
-    const listed = await this.options.connection.getProgramAccounts(this.options.program.programId, {
-      commitment: "finalized",
-      dataSlice: { offset: EPOCH_OPENS_AT_OFFSET, length: 8 },
-      filters: [
-        { memcmp: { offset: 0, bytes: anchor.utils.bytes.bs58.encode(discriminator("account", "EpochAccount")) } },
-        { memcmp: { offset: EPOCH_CONFIG_OFFSET, bytes: this.options.config.toBase58() } },
-      ],
-    });
+    const listed = await this.cached("epochs", () =>
+      this.options.connection.getProgramAccounts(this.options.program.programId, {
+        commitment: "finalized",
+        dataSlice: { offset: EPOCH_OPENS_AT_OFFSET, length: 8 },
+        filters: [
+          { memcmp: { offset: 0, bytes: anchor.utils.bytes.bs58.encode(discriminator("account", "EpochAccount")) } },
+          { memcmp: { offset: EPOCH_CONFIG_OFFSET, bytes: this.options.config.toBase58() } },
+        ],
+      }),
+    );
     const now = this.now();
     const times = listed.map(({ account }) => Number(account.data.readBigUInt64LE(0))).filter((value) => Number.isSafeInteger(value) && value % EPOCH_SECONDS === 0).sort((a, b) => a - b);
     const past = times.filter((value) => value + EPOCH_SECONDS <= now).slice(-PAST_EPOCHS);
@@ -264,14 +294,16 @@ export class EpochSource {
     const holder = owner(wallet);
     const address = this.pdas.epoch(this.selection(opensAt));
     const program = this.options.program;
-    const accounts = await this.options.connection.getProgramAccounts(program.programId, {
-      commitment: "finalized",
-      filters: [
-        { memcmp: { offset: 0, bytes: anchor.utils.bytes.bs58.encode(discriminator("account", "LotAccount")) } },
-        { memcmp: { offset: LOT_EPOCH_OFFSET, bytes: address.toBase58() } },
-        { memcmp: { offset: LOT_OWNER_OFFSET, bytes: holder.toBase58() } },
-      ],
-    });
+    const accounts = await this.cached(`lots:${address.toBase58()}:${holder.toBase58()}`, () =>
+      this.options.connection.getProgramAccounts(program.programId, {
+        commitment: "finalized",
+        filters: [
+          { memcmp: { offset: 0, bytes: anchor.utils.bytes.bs58.encode(discriminator("account", "LotAccount")) } },
+          { memcmp: { offset: LOT_EPOCH_OFFSET, bytes: address.toBase58() } },
+          { memcmp: { offset: LOT_OWNER_OFFSET, bytes: holder.toBase58() } },
+        ],
+      }),
+    );
     return accounts
       .map(({ pubkey, account }) => this.lot(pubkey, account, address, opensAt, holder))
       .sort((a, b) => (BigInt(a.nonce) < BigInt(b.nonce) ? -1 : 1));

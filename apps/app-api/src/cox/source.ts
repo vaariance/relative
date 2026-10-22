@@ -10,4 +10,5 @@ export interface CoxSource {
   publications(now: number, after: number | null, limit: number): Promise<readonly Publication[]>;
   portfolio(owner: string): Promise<Portfolio | null>;
   onPublication(listener: (publication: Publication) => void): () => void;
+  onChainRefresh?(listener: () => void): () => void;
 }

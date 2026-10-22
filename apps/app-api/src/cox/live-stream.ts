@@ -50,6 +50,7 @@ export class CoxLiveStream {
   private timers: NodeJS.Timeout[] = [];
   private unsubscribe: (() => void) | null = null;
   private unsubscribePreview: (() => void) | null = null;
+  private unsubscribeRefresh: (() => void) | null = null;
 
   constructor(private readonly options: CoxLiveStreamOptions) {}
 
@@ -103,6 +104,8 @@ export class CoxLiveStream {
     this.unsubscribe = null;
     this.unsubscribePreview?.();
     this.unsubscribePreview = null;
+    this.unsubscribeRefresh?.();
+    this.unsubscribeRefresh = null;
   }
 
   get size(): number {
@@ -141,19 +144,28 @@ export class CoxLiveStream {
     this.unsubscribe = this.options.source.onPublication((publication) => {
       for (const connection of this.connections) this.publication(connection, publication);
       void this.checkStatus();
-      for (const wallet of this.wallets.keys()) void this.refresh(wallet);
+      if (!this.options.source.onChainRefresh) for (const wallet of this.wallets.keys()) void this.refresh(wallet);
     });
     this.unsubscribePreview =
       this.options.preview?.onPreview((preview) => {
         for (const connection of this.connections) if (!connection.pending) connection.send("preview", preview);
       }) ?? null;
     const statusTimer = setInterval(() => void this.checkStatus(), this.options.statusMs ?? 5_000);
+    statusTimer.unref();
+    this.timers = [statusTimer];
+    const onRefresh = this.options.source.onChainRefresh?.bind(this.options.source);
+    if (onRefresh) {
+      this.unsubscribeRefresh = onRefresh(() => {
+        void this.checkStatus();
+        for (const wallet of this.wallets.keys()) void this.refresh(wallet);
+      });
+      return;
+    }
     const portfolioTimer = setInterval(() => {
       for (const wallet of this.wallets.keys()) void this.refresh(wallet);
     }, this.options.portfolioMs ?? 15_000);
-    statusTimer.unref();
     portfolioTimer.unref();
-    this.timers = [statusTimer, portfolioTimer];
+    this.timers.push(portfolioTimer);
   }
 
   private publication(connection: Connection, publication: Publication): void {
