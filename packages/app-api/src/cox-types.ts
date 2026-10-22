@@ -274,10 +274,74 @@ export interface WalletPortfolioEvent {
   portfolio: Portfolio | null;
 }
 
+export const PREVIEW_SCHEMA = "relative.preview/v1";
+
+export interface PreviewAsset {
+  classId: number;
+  assetId: string;
+  priceE8: string;
+  reference: string;
+}
+
+export interface PreviewProjectionClass {
+  classId: number;
+  backing: BaseUnits;
+  units: UnitQuanta;
+  addedResidual: BaseUnits;
+}
+
+export interface PreviewProjection {
+  sequence: number;
+  stateDigest: string;
+  publicationTimestamp: UnixSeconds;
+  classes: PreviewProjectionClass[];
+}
+
+export interface PreviewRecord {
+  schema: typeof PREVIEW_SCHEMA;
+  status: "estimate";
+  timestamp: UnixSeconds;
+  network: string;
+  program: string;
+  pool: string;
+  methodologyDigest: string;
+  universeDigest: string;
+  benchmark: string;
+  assets: PreviewAsset[];
+  cryptoClass: number;
+  cryptoReference: string;
+  scales: { price: number | string; reference: number | string; collateral: number | string };
+  basicProjection: PreviewProjection | null;
+}
+
+export interface Preview {
+  record: PreviewRecord;
+  ageSeconds: number;
+  stale: boolean;
+}
+
+export interface PreviewPosition {
+  classId: ClassId;
+  units: UnitQuanta;
+  locked: UnitQuanta;
+  estimatedValue: BaseUnits | null;
+}
+
+export interface PreviewPortfolio {
+  owner: string;
+  timestamp: UnixSeconds;
+  stale: boolean;
+  basisSequence: number | null;
+  unavailable: "no-projection" | "basis-mismatch" | null;
+  positions: PreviewPosition[];
+  estimatedValue: BaseUnits | null;
+}
+
 export type CoxStreamEvent =
   | { type: "publication"; data: CoxPublicationEvent }
   | { type: "status"; data: CoxStatus }
-  | { type: "portfolio"; data: WalletPortfolioEvent };
+  | { type: "portfolio"; data: WalletPortfolioEvent }
+  | { type: "preview"; data: Preview };
 
 export interface CoxPublicationPage {
   events: CoxPublicationEvent[];
@@ -293,6 +357,7 @@ export interface CoxApiResponse<T> {
 
 export type CoxErrorCode =
   | "NO_PUBLICATION"
+  | "NO_PREVIEW"
   | "PUBLICATION_NOT_FOUND"
   | "UNKNOWN_ASSET"
   | "UNKNOWN_CLASS"

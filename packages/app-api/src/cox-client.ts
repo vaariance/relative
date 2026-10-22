@@ -10,6 +10,8 @@ import type {
   CoxStreamEvent,
   CryptoComposition,
   DepositInput,
+  Preview,
+  PreviewPortfolio,
   DepositQuoteInput,
   Epoch,
   EpochEntryInput,
@@ -124,6 +126,11 @@ export function createCoxApiClient(options: CoxApiClientOptions) {
     },
     buildEpochEntry: (input: EpochEntryInput) => post<UnsignedTransaction>("transactions/epoch-entry", input),
     buildEpochWithdraw: (input: EpochWithdrawInput) => post<UnsignedTransaction>("transactions/epoch-withdraw", input),
+    preview: () => get<Preview>("preview"),
+    previewPortfolio: (owner: string) => {
+      if (!OWNER_PATTERN.test(owner)) throw new CoxApiError("INVALID_REQUEST", "invalid owner", 0);
+      return get<PreviewPortfolio>(`preview/portfolio?owner=${owner}`);
+    },
     assets: () => get<CoxAsset[]>("assets"),
     crypto: () => get<CryptoComposition>("crypto"),
     latestPublication: () => get<Publication>("publications/latest"),
@@ -191,6 +198,8 @@ export function createCoxApiClient(options: CoxApiClientOptions) {
             onEvent({ type, data: JSON.parse(data) as CoxStatus });
           } else if (type === "portfolio") {
             onEvent({ type, data: JSON.parse(data) as Extract<CoxStreamEvent, { type: "portfolio" }>["data"] });
+          } else if (type === "preview") {
+            onEvent({ type, data: JSON.parse(data) as Preview });
           }
         });
       })().catch((error: unknown) => {
