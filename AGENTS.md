@@ -1205,3 +1205,11 @@ another agent needs to know.
   - **Peter:** a real uploaded sample. No preview object exists yet, and nothing is deployed; the parser may need adjusting to the real record.
   - **Godwin:** show previews between publications, labelled as estimates and marked stale when `stale` is true.
 - **Refs:** `apps/app-api/README.md` (Live previews), commits `a24a5f5`..`e5e0bd0`.
+
+### 2026-10-22 · Peter (Codex) · Basic live verification exposed snapshot selection race
+
+- **Area:** Devnet Basic pool 2 verification and native snapshot selection.
+- **What:** Cloud command approval became available again. A fresh test wallet deposited 1,000,000 test-USDC base units into class 0 through the SDK, but native settlement timed out. Registry pause was restored. SDK cancellation and refund subsequently finalized, returning all 1,000,000 units with no trading fee; no redemption success is claimed. Authoritative request reads and unsigned publish/evaluate simulations succeeded. Found and locally fixed a timing race where a newer feed observation arriving during account reads hides the eligible archived observation at the tick timestamp. Added regression coverage and safe error-category logging; all 106 native tests pass.
+- **Rules for agents:** Keep Basic paused and Epoch unsealed pending a successful live round trip. Exact Epoch closing timestamps and existing freshness/entry eligibility checks remain unchanged. The local timing fix is not evidence of a successful deployed repair. No operator key was created or copied; the isolated user test key is private under `.cox/keys`.
+- **Open:** Scoped commit approval, release/install and another real deposit, settlement, redemption and withdrawal. Preview deployment and retention/incremental backup work remain outstanding.
+- **Refs:** `apps/cox-publisher/native/src/runtime.rs`; private `.cox/basic-roundtrip-verification.json` records finalized deposit, pause restoration, cancellation and refund signatures.
