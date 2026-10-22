@@ -42,7 +42,7 @@ change application configuration to use the new hostnames.
 | --- | --- |
 | `eox-evidence-api` | Evidence API, `127.0.0.1:8787` |
 | `cox-app-api` | Synthetic fixture API, `127.0.0.1:8790` |
-| `cox-app-api-live` | Devnet-backed app API for pool 1, `127.0.0.1:8791`; history from `gs://colosseum-cox-publication-archives-dev/pool-1/history/` (read-only grant to `eox-dev-vm`) |
+| `cox-app-api-live` | Devnet-backed app API for Basic pool 2 and Epoch config 2, `127.0.0.1:8791`; RPC URLs (direct Alchemy, then public devnet) in the root-only `/opt/eox/cox-app-api-live.env`; no publication archive configured yet |
 | `cox-archiver` | One-minute venue snapshot archive |
 | `cox-publisher` | Snapshot publication and batch execution; installed separately |
 | `cox-monitor` | Archive verdicts, `127.0.0.1:8792`; installed separately |
