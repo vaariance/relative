@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { CoxPublicationEvent, CoxStatus, Portfolio, Publication, WalletPortfolioEvent } from "@eox/app-api";
+import type { PreviewFeed } from "./preview.js";
 import { replay } from "./replay.js";
 import type { CoxSource } from "./source.js";
 
@@ -8,6 +9,7 @@ const RETRY_MS = 3_000;
 
 export interface CoxLiveStreamOptions {
   source: CoxSource;
+  preview?: PreviewFeed | null;
   now: () => number;
   statusMs?: number;
   portfolioMs?: number;
@@ -47,6 +49,7 @@ export class CoxLiveStream {
   private signature: string | null = null;
   private timers: NodeJS.Timeout[] = [];
   private unsubscribe: (() => void) | null = null;
+  private unsubscribePreview: (() => void) | null = null;
 
   constructor(private readonly options: CoxLiveStreamOptions) {}
 
@@ -84,6 +87,8 @@ export class CoxLiveStream {
     const live = connection.pending ?? [];
     connection.pending = null;
     for (const publication of [...history, ...live]) this.publication(connection, publication);
+    const preview = this.options.preview?.latest(this.options.now());
+    if (preview) connection.send("preview", preview);
     if (wallet !== null) {
       const watch = this.wallets.get(wallet)!;
       if (watch.current !== undefined) connection.send("portfolio", JSON.parse(watch.current) as WalletPortfolioEvent);
@@ -96,6 +101,8 @@ export class CoxLiveStream {
     this.timers = [];
     this.unsubscribe?.();
     this.unsubscribe = null;
+    this.unsubscribePreview?.();
+    this.unsubscribePreview = null;
   }
 
   get size(): number {
@@ -136,6 +143,10 @@ export class CoxLiveStream {
       void this.checkStatus();
       for (const wallet of this.wallets.keys()) void this.refresh(wallet);
     });
+    this.unsubscribePreview =
+      this.options.preview?.onPreview((preview) => {
+        for (const connection of this.connections) if (!connection.pending) connection.send("preview", preview);
+      }) ?? null;
     const statusTimer = setInterval(() => void this.checkStatus(), this.options.statusMs ?? 5_000);
     const portfolioTimer = setInterval(() => {
       for (const wallet of this.wallets.keys()) void this.refresh(wallet);

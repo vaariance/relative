@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { COX_APP_API_SCHEMA_VERSION, type CoxErrorCode, type CoxPublicationEvent, type CoxPublicationPage, type Publication } from "@eox/app-api";
 import { CoxLiveStream, StreamLimitError } from "./live-stream.js";
+import { previewPortfolio, type PreviewFeed } from "./preview.js";
 import { replay } from "./replay.js";
 import type { CoxSource } from "./source.js";
 import type { EpochSource } from "./epoch-source.js";
@@ -37,6 +38,8 @@ export interface CoxApiServerOptions {
   transactions?: CoxTransactions | null;
   submissions?: CoxSubmissions | null;
   epochs?: EpochSource | null;
+  preview?: PreviewFeed | null;
+  classes?: readonly string[];
   postLimit?: { perMinute: number; trustForwardedFor: boolean } | null;
   trustForwardedFor?: boolean;
   stream?: { statusMs?: number; portfolioMs?: number; maxConnections?: number; maxPerClient?: number; maxWallets?: number };
@@ -88,6 +91,14 @@ export function createCoxApiServer(options: CoxApiServerOptions): Server {
   const transactions = options.transactions ?? null;
   const submissions = options.submissions ?? null;
   const epochs = options.epochs ?? null;
+  const previews = options.preview ?? null;
+
+  function latestPreview() {
+    if (!previews) throw new ApiError(409, "NOT_CONFIGURED", "this deployment serves no live preview");
+    const preview = previews.latest(now());
+    if (!preview) throw new ApiError(404, "NO_PREVIEW", "no preview has been received yet");
+    return preview;
+  }
 
   function epochSource(): EpochSource {
     if (!epochs) throw new ApiError(409, "NOT_CONFIGURED", "this deployment serves no Epoch configuration");
@@ -101,7 +112,7 @@ export function createCoxApiServer(options: CoxApiServerOptions): Server {
   const postLimit = options.postLimit ?? null;
   const buckets = new Map<string, { tokens: number; at: number }>();
   const trustForwardedFor = options.trustForwardedFor ?? postLimit?.trustForwardedFor ?? false;
-  const live = new CoxLiveStream({ source, now, onError: options.onError, ...options.stream });
+  const live = new CoxLiveStream({ source, preview: previews, now, onError: options.onError, ...options.stream });
 
   function admit(req: IncomingMessage, res: ServerResponse): void {
     if (!postLimit) return;
@@ -252,6 +263,15 @@ export function createCoxApiServer(options: CoxApiServerOptions): Server {
       return live.open(req, res, clientAddress(req, trustForwardedFor), wallet, from);
     }
     if (path.length === 2 && a === "publications") return page(url, res);
+    if (path.length === 2 && a === "preview") return send(res, latestPreview());
+    if (path.length === 3 && a === "preview" && b === "portfolio") {
+      const wallet = url.searchParams.get("owner");
+      if (wallet === null || !OWNER_PATTERN.test(wallet)) throw new ApiError(400, "INVALID_REQUEST", "owner is required");
+      const preview = latestPreview();
+      const [portfolio, status] = await Promise.all([source.portfolio(wallet), source.status(now())]);
+      if (!portfolio) throw new ApiError(404, "UNKNOWN_WALLET", "wallet has no positions or requests");
+      return send(res, previewPortfolio(preview, portfolio, status.latestSequence, options.classes ?? []));
+    }
     if (path.length === 3 && a === "publications" && b === "stream") return stream(req, url, res);
     if (path.length === 3 && a === "publications") return publication(res, b!);
     if (path.length === 2 && a === "epochs") return send(res, await epochSource().overview());

@@ -7,6 +7,7 @@ import { loadProgram } from "./cox/chain.js";
 import { EpochSource } from "./cox/epoch-source.js";
 import { CoxFixtureSource } from "./cox/fixture-source.js";
 import { LiveCoxSource } from "./cox/live-source.js";
+import { gcsPreviewStore, PreviewFeed } from "./cox/preview.js";
 import { directorySource, gcsSource, PublicationArchive, type ArchiveSource } from "./cox/publication-archive.js";
 import { directorySegments, gcsSegments } from "./cox/publication-history.js";
 import { FileSubmissionStore, FirestoreSubmissionStore } from "./cox/submission-store.js";
@@ -39,7 +40,7 @@ function required(name: string): string {
   return value;
 }
 
-async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transactions" | "submissions" | "epochs">> {
+async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transactions" | "submissions" | "epochs" | "preview" | "classes">> {
   const network = process.env.COX_NETWORK ?? "solana-devnet";
   const genesis = GENESIS[network];
   if (!genesis) throw new Error(`unsupported COX_NETWORK: ${network}`);
@@ -87,7 +88,23 @@ async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transaction
         origin: source.manifest.origin, interval: source.interval, acceptanceDeadline: source.acceptanceDeadline, classes: source.classes,
       });
       const submissions = new CoxSubmissions({ connection, programId: program.programId, epochProgramId: epochs?.programId ?? null, store, feeVersion: () => transactions.feeVersion() });
-      return { source, transactions, submissions, epochs };
+      const previewGcs = process.env.COX_PREVIEW_GCS;
+      const preview = previewGcs
+        ? new PreviewFeed({
+            store: gcsPreviewStore(previewGcs, token),
+            identity: {
+              networks: [network, genesis],
+              program: program.programId.toBase58(),
+              pools: [source.poolAddress.toBase58(), poolId.toString()],
+              methodologyDigest: source.manifest.digest,
+              assets: source.manifest.assets.map((asset) => asset.assetId),
+            },
+            now: () => Math.floor(Date.now() / 1000),
+            onError: (error: unknown) => console.error("cox preview tick failed", error),
+          })
+        : null;
+      preview?.start();
+      return { source, transactions, submissions, epochs, preview, classes: source.classes };
     } catch (error) {
       if (!(error instanceof Error) || !["CoxAccountNotFound", "PoolMethodologyNotSealed"].includes(error.message)) throw error;
       console.log(`cox pool ${poolId} is not active on ${network} yet (${error.message}); checking again in ${POOL_WAIT_MS / 1000} s`);
