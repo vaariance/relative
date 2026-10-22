@@ -76,7 +76,8 @@ async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transaction
       const source = await LiveCoxSource.open(options);
       source.start();
       const transactions = new CoxTransactions({
-        connection, program, poolId, pool: source.poolAddress, vault: source.vaultAddress, mint: source.collateralMint, origin: source.manifest.origin, classes: source.classes,
+        connection, program, poolId, pool: source.poolAddress, vault: source.vaultAddress, mint: source.collateralMint, testVault: source.testVaultAddress, testMint: source.secondaryMint,
+        origin: source.manifest.origin, interval: source.interval, acceptanceDeadline: source.acceptanceDeadline, classes: source.classes,
       });
       const submissions = new CoxSubmissions({ connection, programId: program.programId, store, feeVersion: () => transactions.feeVersion() });
       return { source, transactions, submissions };

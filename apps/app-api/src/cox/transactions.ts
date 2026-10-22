@@ -31,11 +31,13 @@ const U64_MAX = (1n << 64n) - 1n;
 const U128_MAX = (1n << 128n) - 1n;
 const INTEGER = /^(0|[1-9][0-9]{0,38})$/;
 const OWNER = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-const MAX_EXPIRY_BATCHES = 10_080;
+const MAX_EXPIRY_SECONDS = 604_800;
 const NO_CLASS = 255;
 const FEE_VERSION_CHANGED = /FeeVersionChanged|"Custom":6038\b/;
 
 export class TransactionInputError extends Error {}
+
+export class TradingClosedError extends Error {}
 
 export class FeeChangedError extends Error {
   constructor() {
@@ -59,7 +61,11 @@ export interface CoxTransactionContext {
   pool: PublicKey;
   vault: PublicKey;
   mint: PublicKey;
+  testVault?: PublicKey | null;
+  testMint?: PublicKey | null;
   origin: number;
+  interval?: number;
+  acceptanceDeadline?: number;
   classes: readonly string[];
 }
 
@@ -89,7 +95,7 @@ export const feeTerms = (pool: Pool): FeeTerms => ({ version: pool.feeVersion.to
 export const scheduledFees = (pool: Pool): ScheduledFeeTerms | null =>
   pool.feePending ? { version: pool.feePendingVersion.toString(), bps: pool.feePendingBps, cap: pool.feePendingCap.toString(), activationCutoff: Number(pool.feePendingCutoff.toString()) } : null;
 
-const migrated = (pool: Pool): boolean => pool.schemaVersion === 2;
+const migrated = (pool: Pool): boolean => pool.schemaVersion === 2 || pool.schemaVersion === 4;
 
 export function associatedTokenAddress(wallet: PublicKey, mint: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync([wallet.toBuffer(), TOKEN_PROGRAM.toBuffer(), mint.toBuffer()], ASSOCIATED_TOKEN_PROGRAM)[0];
@@ -126,12 +132,38 @@ export class CoxTransactions {
     return index;
   }
 
+  private get interval(): number {
+    return this.context.interval ?? 60;
+  }
+
   private expiry(value: unknown): { target: ReturnType<typeof batchFor>; expiry: bigint } {
-    const target = batchFor(this.now(), this.context.origin);
-    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < target.batch || value > target.batch + MAX_EXPIRY_BATCHES) {
-      throw new TransactionInputError(`expiryBatch must be a batch from ${target.batch} to ${target.batch + MAX_EXPIRY_BATCHES}`);
+    const target = this.context.acceptanceDeadline === undefined
+      ? batchFor(this.now(), this.context.origin, this.interval)
+      : batchFor(this.now(), this.context.origin, this.interval, this.context.acceptanceDeadline);
+    const span = Math.floor(MAX_EXPIRY_SECONDS / this.interval);
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < target.batch || value > target.batch + span) {
+      throw new TransactionInputError(`expiryBatch must be a batch from ${target.batch} to ${target.batch + span}`);
     }
     return { target, expiry: BigInt(value) };
+  }
+
+  private collateral(value: unknown): PublicKey {
+    if (value === undefined || value === this.context.mint.toBase58()) return this.context.mint;
+    if (this.context.testMint && value === this.context.testMint.toBase58()) return this.context.testMint;
+    throw new TransactionInputError("collateralMint must be one of this pool's collateral mints");
+  }
+
+  private poolKeys(): { pool: PublicKey; vault: PublicKey; testVault?: PublicKey } {
+    return { pool: this.context.pool, vault: this.context.vault, ...(this.context.testVault ? { testVault: this.context.testVault } : {}) };
+  }
+
+  private open(pool: Pool): void {
+    if (pool.schemaVersion === 3) throw new TradingClosedError("this pool is retired and accepts no new requests");
+    if (!pool.initialized) throw new TradingClosedError("this pool has not published its first prices yet");
+    if (pool.schemaVersion === 4) {
+      const opensAt = Number(pool.tradingOpensAt.toString());
+      if (this.now() < opensAt) throw new TradingClosedError(`trading opens at ${new Date(opensAt * 1000).toISOString()}`);
+    }
   }
 
   private async pool(commitment: "confirmed" | "finalized" = "confirmed"): Promise<Pool> {
@@ -155,18 +187,18 @@ export class CoxTransactions {
     return migrated(pool) ? expected : null;
   }
 
-  private submission(pool: Pool, wallet: PublicKey): { keys: OwnerKeys; nonce: bigint } {
+  private submission(pool: Pool, wallet: PublicKey, mint: PublicKey = this.context.mint): { keys: OwnerKeys; nonce: bigint } {
+    this.open(pool);
     const nonce = BigInt(pool.nextRequestNonce.toString());
     const pdas = this.instructions.pdas;
     return {
       nonce,
       keys: {
+        ...this.poolKeys(),
         owner: wallet,
-        pool: this.context.pool,
-        vault: this.context.vault,
         position: pdas.position(this.context.pool, wallet),
         request: pdas.request(this.context.pool, nonce),
-        userToken: associatedTokenAddress(wallet, this.context.mint),
+        userToken: associatedTokenAddress(wallet, mint),
       },
     };
   }
@@ -177,9 +209,10 @@ export class CoxTransactions {
     const amount = integer(input.amount, "amount", U64_MAX, true);
     const minimumUnits = integer(input.minimumUnits, "minimumUnits", U128_MAX, false);
     const { target, expiry } = this.expiry(input.expiryBatch);
+    const mint = this.collateral(input.collateralMint);
     const pool = await this.pool();
     const fee = this.expectedFee(pool, input.expectedFeeVersion);
-    const { keys, nonce } = this.submission(pool, wallet);
+    const { keys, nonce } = this.submission(pool, wallet, mint);
     return this.finish({
       operation: "deposit",
       owner: wallet,
@@ -255,6 +288,7 @@ export class CoxTransactions {
 
   private async quote(wallet: PublicKey, operation: TradeQuote["operation"], from: number, to: number, amount: bigint, units: bigint): Promise<TradeQuote> {
     const pool = await this.pool("finalized");
+    this.open(pool);
     const code = operation === "deposit" ? 0 : operation === "switch" ? 1 : 2;
     const simulations = new CoxSimulations(this.context.program, wallet);
     let read: { sequence: { toString(): string }; minted: { toString(): string }; proceeds: { toString(): string } };
@@ -315,25 +349,25 @@ export class CoxTransactions {
     return this.finish({
       operation: "cancel",
       owner: wallet,
-      instructions: [this.instructions.cancel({ owner: wallet, pool: this.context.pool, vault: this.context.vault, position, request })],
+      instructions: [this.instructions.cancel({ ...this.poolKeys(), owner: wallet, position, request })],
       details: { requestId: request.toBase58(), nonce },
     });
   }
 
   async refund(input: RequestActionInput): Promise<UnsignedTransaction> {
     const { wallet, request, nonce } = await this.existingRequest(input);
+    const mint = this.collateral(input.collateralMint);
     const keys: OwnerKeys = {
+      ...this.poolKeys(),
       owner: wallet,
-      pool: this.context.pool,
-      vault: this.context.vault,
       position: this.instructions.pdas.position(this.context.pool, wallet),
       request,
-      userToken: associatedTokenAddress(wallet, this.context.mint),
+      userToken: associatedTokenAddress(wallet, mint),
     };
     return this.finish({
       operation: "refund",
       owner: wallet,
-      instructions: [createTokenAccountIdempotent(wallet, wallet, this.context.mint), this.instructions.refund(keys)],
+      instructions: [createTokenAccountIdempotent(wallet, wallet, mint), this.instructions.refund(keys)],
       details: { requestId: request.toBase58(), nonce },
     });
   }
@@ -341,17 +375,17 @@ export class CoxTransactions {
   async withdraw(input: WithdrawInput): Promise<UnsignedTransaction> {
     const wallet = owner(input.owner);
     const amount = integer(input.amount, "amount", U64_MAX, true);
+    const mint = this.collateral(input.collateralMint);
     const keys = {
+      ...this.poolKeys(),
       owner: wallet,
-      pool: this.context.pool,
-      vault: this.context.vault,
       position: this.instructions.pdas.position(this.context.pool, wallet),
-      userToken: associatedTokenAddress(wallet, this.context.mint),
+      userToken: associatedTokenAddress(wallet, mint),
     };
     return this.finish({
       operation: "withdraw",
       owner: wallet,
-      instructions: [createTokenAccountIdempotent(wallet, wallet, this.context.mint), this.instructions.withdraw(keys, amount)],
+      instructions: [createTokenAccountIdempotent(wallet, wallet, mint), this.instructions.withdraw(keys, amount)],
       details: { amount: amount.toString() },
     });
   }

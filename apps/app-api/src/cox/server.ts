@@ -4,7 +4,7 @@ import { CoxLiveStream, StreamLimitError } from "./live-stream.js";
 import { replay } from "./replay.js";
 import type { CoxSource } from "./source.js";
 import type { CoxSubmissions } from "./submissions.js";
-import { FeeChangedError, TransactionInputError, TransactionRejectedError, type CoxTransactions } from "./transactions.js";
+import { FeeChangedError, TradingClosedError, TransactionInputError, TransactionRejectedError, type CoxTransactions } from "./transactions.js";
 
 const DEFAULT_PAGE = 100;
 const MAX_PAGE = 500;
@@ -267,6 +267,7 @@ export function createCoxApiServer(options: CoxApiServerOptions): Server {
         return write(res, 429, errorBody("RATE_LIMITED", error.message));
       }
       if (error instanceof FeeChangedError) return write(res, 409, errorBody("FEE_CHANGED", error.message));
+      if (error instanceof TradingClosedError) return write(res, 409, errorBody("TRADING_CLOSED", error.message));
       if (error instanceof TransactionRejectedError) return write(res, 422, errorBody("TRANSACTION_REJECTED", error.message));
       if (error instanceof URIError) return write(res, 400, errorBody("INVALID_REQUEST", "invalid path encoding"));
       options.onError?.(error);

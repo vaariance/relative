@@ -295,6 +295,21 @@ describe("reusable publication account and the publisher archive", () => {
     await expect(store.read(9n)).rejects.toThrow(PublicationArchiveMissing);
   });
 
+  it("keeps confirmed v2 records apart from finalized v1 records and refuses mixed provenance", async () => {
+    const confirmed = { schema: "cox.publication-archive/v2", finalizedSlot: undefined, observedSlot: 88, commitment: "confirmed" };
+    const store = archive({
+      1: archiveRecord(confirmed),
+      2: archiveRecord({ ...confirmed, sequence: "2", commitment: "finalized" }),
+      3: archiveRecord({ ...confirmed, sequence: "3", finalizedSlot: 90 }),
+      4: archiveRecord({ sequence: "4", observedSlot: 91 }),
+      5: archiveRecord({ sequence: "5", schema: "cox.publication-archive/v3" }),
+    });
+    expect(await store.read(1n)).toMatchObject({ slot: 88, finalized: false });
+    for (const sequence of [2n, 3n, 4n, 5n]) await expect(store.read(sequence)).rejects.toThrow("inconsistent commitment provenance");
+    const finalized = archive({ 1: archiveRecord() });
+    expect(await finalized.read(1n)).toMatchObject({ slot: 77, finalized: true });
+  });
+
   it("reads one content-addressed record per sequence from Cloud Storage", async () => {
     const text = JSON.stringify(archiveRecord());
     const digest = createHash("sha256").update(text).digest("hex");
@@ -365,7 +380,7 @@ describe("unsigned transactions and submission", () => {
     const position = PublicKey.findProgramAddressSync([Buffer.from("position"), new PublicKey(POOL).toBuffer(), wallet.publicKey.toBuffer()], program.programId)[0];
     expect(instructions[0]!.accounts).toEqual([
       wallet.publicKey.toBase58(), "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC", POOL, position.toBase58(), request.toBase58(), VAULT,
-      associatedTokenAddress(wallet.publicKey, new PublicKey(MINT)).toBase58(), TOKEN_PROGRAM.toBase58(), SystemProgram.programId.toBase58(),
+      associatedTokenAddress(wallet.publicKey, new PublicKey(MINT)).toBase58(), TOKEN_PROGRAM.toBase58(), SystemProgram.programId.toBase58(), fixture.programAddress,
     ]);
     expect(instructions[0]!.data.subarray(0, 8)).toEqual(discriminator("global", "deposit"));
   });
