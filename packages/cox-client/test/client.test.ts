@@ -307,3 +307,16 @@ test("adaptive methodology seal encodes exact feed and origin bindings with sche
   bytes.writeUInt16LE(2, 8);
   assert.equal(decodeAccount(program, "methodology", { ...original.info, data: bytes }).schemaVersion, 2);
 });
+
+test("dual-collateral pool keys do not add custody accounts to fee configuration", () => {
+  const { account: state, key: pool } = fixture("pool");
+  const owner = fixture("position").account.owner;
+  const primary = { pool, vault: state.vault };
+  const dual = { ...primary, testVault: addresses(program.programId).testVault(pool) };
+  for (const [left, right] of [
+    [builder.scheduleFees(owner, primary, 2, 200000n, 1800086400n), builder.scheduleFees(owner, dual, 2, 200000n, 1800086400n)],
+    [builder.cancelFees(owner, primary), builder.cancelFees(owner, dual)],
+  ]) {
+    assert.deepEqual(left, right);
+  }
+});

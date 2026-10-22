@@ -143,9 +143,9 @@ export class CoxInstructions {
     return this.build("retireRequest", {}, { ...keys, registry: this.pdas.registry() });
   }
   scheduleFees(admin: PublicKey, keys: PoolKeys, bps: number, cap: bigint, activationCutoff: bigint) {
-    return this.build("scheduleFees", { bps, cap: bn(cap), activationCutoff: bn(activationCutoff) }, { admin, registry: this.pdas.registry(), ...keys });
+    return this.build("scheduleFees", { bps, cap: bn(cap), activationCutoff: bn(activationCutoff) }, { admin, registry: this.pdas.registry(), pool: keys.pool, vault: keys.vault });
   }
-  cancelFees(admin: PublicKey, keys: PoolKeys) { return this.build("cancelFees", {}, { admin, registry: this.pdas.registry(), ...keys }); }
+  cancelFees(admin: PublicKey, keys: PoolKeys) { return this.build("cancelFees", {}, { admin, registry: this.pdas.registry(), pool: keys.pool, vault: keys.vault }); }
   withdrawFees(admin: PublicKey, keys: PoolKeys, treasuryToken: PublicKey, amount: bigint) {
     return this.build("withdrawFees", { amount: bn(amount) }, { admin, registry: this.pdas.registry(), ...keys, treasuryToken, tokenProgram: TOKEN_PROGRAM });
   }
