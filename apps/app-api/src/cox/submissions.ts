@@ -15,12 +15,18 @@ const FEE_INSTRUCTIONS: readonly { operation: TransactionOperation; name: string
   { operation: "switch", name: "switch_with_fee", length: 58 },
   { operation: "redeem", name: "redeem_with_fee", length: 49 },
 ];
+const EPOCH_INSTRUCTIONS: readonly { operation: TransactionOperation; name: string }[] = [
+  { operation: "epoch-entry", name: "queue" },
+  { operation: "epoch-withdraw", name: "withdraw" },
+  { operation: "epoch-withdraw", name: "withdraw_partial" },
+];
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 const SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
 
 export interface CoxSubmissionsOptions {
   connection: Connection;
   programId: PublicKey;
+  epochProgramId?: PublicKey | null;
   store: SubmissionStore;
   feeVersion: () => Promise<bigint>;
   now?: () => number;
@@ -39,6 +45,7 @@ function ed25519Key(bytes: Uint8Array) {
 export class CoxSubmissions {
   private readonly now: () => number;
   private readonly kinds: Kind[];
+  private readonly epochKinds: Kind[];
 
   constructor(private readonly options: CoxSubmissionsOptions) {
     this.now = options.now ?? (() => Math.floor(Date.now() / 1000));
@@ -46,6 +53,7 @@ export class CoxSubmissions {
       ...OPERATIONS.map((operation) => ({ operation, prefix: discriminator("global", operation), feeLength: null })),
       ...FEE_INSTRUCTIONS.map(({ operation, name, length }) => ({ operation, prefix: discriminator("global", name), feeLength: length })),
     ];
+    this.epochKinds = EPOCH_INSTRUCTIONS.map(({ operation, name }) => ({ operation, prefix: discriminator("global", name), feeLength: null }));
   }
 
   private inspect(bytes: Buffer): { signature: string; owner: PublicKey; operation: TransactionOperation; recentBlockhash: string; expectedFeeVersion: bigint | null } {
@@ -78,6 +86,11 @@ export class CoxSubmissions {
           if (data.length !== kind.feeLength) throw new TransactionInputError("fee-aware request instruction has an invalid length");
           expectedFeeVersion = data.readBigUInt64LE(data.length - 8);
         }
+        operations.add(kind.operation);
+      } else if (this.options.epochProgramId && program.equals(this.options.epochProgramId)) {
+        const data = Buffer.from(instruction.data);
+        const kind = this.epochKinds.find((k) => data.subarray(0, 8).equals(k.prefix));
+        if (!kind) throw new TransactionInputError("only wallet Epoch entry and withdrawal instructions are accepted");
         operations.add(kind.operation);
       } else if (!program.equals(ASSOCIATED_TOKEN_PROGRAM) && !program.equals(ComputeBudgetProgram.programId)) {
         throw new TransactionInputError("transaction calls a program outside COX");

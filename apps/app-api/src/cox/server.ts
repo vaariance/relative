@@ -3,6 +3,7 @@ import { COX_APP_API_SCHEMA_VERSION, type CoxErrorCode, type CoxPublicationEvent
 import { CoxLiveStream, StreamLimitError } from "./live-stream.js";
 import { replay } from "./replay.js";
 import type { CoxSource } from "./source.js";
+import type { EpochSource } from "./epoch-source.js";
 import type { CoxSubmissions } from "./submissions.js";
 import { FeeChangedError, TradingClosedError, TransactionInputError, TransactionRejectedError, type CoxTransactions } from "./transactions.js";
 
@@ -14,6 +15,8 @@ const ASSET_PATTERN = /^[A-Z0-9]{2,12}$/;
 const OWNER_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const MAX_BODY_BYTES = 8192;
 const BUILDERS = ["deposit", "switch", "redeem", "cancel", "refund", "withdraw"] as const;
+const EPOCH_BUILDERS = { "epoch-entry": "entry", "epoch-withdraw": "withdraw" } as const;
+const OPENS_AT_PATTERN = /^[1-9][0-9]{0,12}$/;
 const QUOTES = { deposit: "quoteDeposit", switch: "quoteSwitch", redeem: "quoteRedeem" } as const;
 
 class ApiError extends Error {
@@ -33,6 +36,7 @@ export interface CoxApiServerOptions {
   corsOrigin?: string | null;
   transactions?: CoxTransactions | null;
   submissions?: CoxSubmissions | null;
+  epochs?: EpochSource | null;
   postLimit?: { perMinute: number; trustForwardedFor: boolean } | null;
   trustForwardedFor?: boolean;
   stream?: { statusMs?: number; portfolioMs?: number; maxConnections?: number; maxPerClient?: number; maxWallets?: number };
@@ -83,6 +87,17 @@ export function createCoxApiServer(options: CoxApiServerOptions): Server {
   const corsOrigin = options.corsOrigin ?? null;
   const transactions = options.transactions ?? null;
   const submissions = options.submissions ?? null;
+  const epochs = options.epochs ?? null;
+
+  function epochSource(): EpochSource {
+    if (!epochs) throw new ApiError(409, "NOT_CONFIGURED", "this deployment serves no Epoch configuration");
+    return epochs;
+  }
+
+  function opensAt(value: string | undefined): number {
+    if (!value || !OPENS_AT_PATTERN.test(value)) throw new ApiError(400, "INVALID_REQUEST", "invalid Epoch opening time");
+    return Number(value);
+  }
   const postLimit = options.postLimit ?? null;
   const buckets = new Map<string, { tokens: number; at: number }>();
   const trustForwardedFor = options.trustForwardedFor ?? postLimit?.trustForwardedFor ?? false;
@@ -136,6 +151,11 @@ export function createCoxApiServer(options: CoxApiServerOptions): Server {
       return send(res, await (transactions[QUOTES[b as keyof typeof QUOTES]] as (value: unknown) => ReturnType<CoxTransactions["quoteDeposit"]>).call(transactions, input));
     }
     if (b === "submit") return send(res, await submissions.submit(input.transaction));
+    if (a === "transactions" && Object.hasOwn(EPOCH_BUILDERS, b!)) {
+      const source = epochSource();
+      const method = EPOCH_BUILDERS[b as keyof typeof EPOCH_BUILDERS];
+      return send(res, await (source[method] as (value: unknown) => ReturnType<EpochSource["entry"]>).call(source, input));
+    }
     const builder = BUILDERS.find((name) => name === b);
     if (!builder) throw new ApiError(404, "NOT_FOUND", "not found");
     const built = await (transactions[builder] as (value: unknown) => ReturnType<CoxTransactions["deposit"]>).call(transactions, input);
@@ -234,12 +254,23 @@ export function createCoxApiServer(options: CoxApiServerOptions): Server {
     if (path.length === 2 && a === "publications") return page(url, res);
     if (path.length === 3 && a === "publications" && b === "stream") return stream(req, url, res);
     if (path.length === 3 && a === "publications") return publication(res, b!);
+    if (path.length === 2 && a === "epochs") return send(res, await epochSource().overview());
+    if (path.length === 3 && a === "epochs") {
+      const found = await epochSource().epoch(opensAt(b));
+      if (!found) throw new ApiError(404, "UNKNOWN_EPOCH", `no Epoch opens at ${b}`);
+      return send(res, found);
+    }
+    if (path.length === 4 && a === "epochs" && c === "lots") {
+      const wallet = url.searchParams.get("owner");
+      if (wallet === null || !OWNER_PATTERN.test(wallet)) throw new ApiError(400, "INVALID_REQUEST", "owner is required");
+      return send(res, await epochSource().lots(opensAt(b), wallet));
+    }
     if (path.length === 3 && a === "quotes" && Object.hasOwn(QUOTES, b!)) {
       res.setHeader("allow", "POST");
       throw new ApiError(405, "METHOD_NOT_ALLOWED", "method not allowed");
     }
     if (path.length === 3 && a === "transactions") {
-      if (b === "submit" || BUILDERS.some((name) => name === b)) {
+      if (b === "submit" || BUILDERS.some((name) => name === b) || Object.hasOwn(EPOCH_BUILDERS, b!)) {
         res.setHeader("allow", "POST");
         throw new ApiError(405, "METHOD_NOT_ALLOWED", "method not allowed");
       }

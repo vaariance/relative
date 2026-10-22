@@ -1,8 +1,10 @@
 import { dirname, join, resolve } from "node:path";
 import { addresses } from "@cox/client";
+import { PublicKey } from "@solana/web3.js";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { loadProgram } from "./cox/chain.js";
+import { EpochSource } from "./cox/epoch-source.js";
 import { CoxFixtureSource } from "./cox/fixture-source.js";
 import { LiveCoxSource } from "./cox/live-source.js";
 import { directorySource, gcsSource, PublicationArchive, type ArchiveSource } from "./cox/publication-archive.js";
@@ -37,7 +39,7 @@ function required(name: string): string {
   return value;
 }
 
-async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transactions" | "submissions">> {
+async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transactions" | "submissions" | "epochs">> {
   const network = process.env.COX_NETWORK ?? "solana-devnet";
   const genesis = GENESIS[network];
   if (!genesis) throw new Error(`unsupported COX_NETWORK: ${network}`);
@@ -69,6 +71,11 @@ async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transaction
   const store = firestoreProject
     ? new FirestoreSubmissionStore(firestoreProject, `coxSubmissionsPool${poolId}`, token, fetch, process.env.APP_API_SUBMISSIONS_FIRESTORE_DATABASE ?? "(default)")
     : new FileSubmissionStore(join(stateDir, `submissions-${poolId}.json`));
+  const epochConfig = process.env.COX_EPOCH_CONFIG;
+  if (epochConfig !== undefined && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(epochConfig)) throw new Error(`invalid COX_EPOCH_CONFIG: ${epochConfig}`);
+  const epochs = epochConfig
+    ? await EpochSource.open({ connection, program: loadProgram(connection, process.env.COX_EPOCH_IDL_PATH ?? join(here, "..", "..", "..", "packages", "cox-epoch", "idl", "epoch.json")), config: new PublicKey(epochConfig) })
+    : null;
   const archive = source ? new PublicationArchive(source, program, addresses(program.programId).pool(poolId), genesis) : null;
   const options = { connection, program, poolId, network, history: { path: join(stateDir, `publications-${poolId}.jsonl`), store: segments }, pollMs, archive, onError: (error: unknown) => console.error("cox indexer tick failed", error) };
   for (;;) {
@@ -79,8 +86,8 @@ async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transaction
         connection, program, poolId, pool: source.poolAddress, vault: source.vaultAddress, mint: source.collateralMint, testVault: source.testVaultAddress, testMint: source.secondaryMint,
         origin: source.manifest.origin, interval: source.interval, acceptanceDeadline: source.acceptanceDeadline, classes: source.classes,
       });
-      const submissions = new CoxSubmissions({ connection, programId: program.programId, store, feeVersion: () => transactions.feeVersion() });
-      return { source, transactions, submissions };
+      const submissions = new CoxSubmissions({ connection, programId: program.programId, epochProgramId: epochs?.programId ?? null, store, feeVersion: () => transactions.feeVersion() });
+      return { source, transactions, submissions, epochs };
     } catch (error) {
       if (!(error instanceof Error) || !["CoxAccountNotFound", "PoolMethodologyNotSealed"].includes(error.message)) throw error;
       console.log(`cox pool ${poolId} is not active on ${network} yet (${error.message}); checking again in ${POOL_WAIT_MS / 1000} s`);
