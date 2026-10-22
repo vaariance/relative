@@ -1176,3 +1176,14 @@ another agent needs to know.
 - **Rules for agents:** Publisher/methodology package directories remain required for Rust. Do not restore TypeScript arithmetic or create a second fixture oracle; check retained vectors through Rust. API, web, browser SDK, signer and unrelated local files are outside this cleanup. Proxy code/deployment is retained while Joel/Godwin confirm external consumers; protocol and live API no longer require it. No new plan file was created.
 - **Open:** Cleanup awaits commit approval; dynamic inclusion still needs the actual versioned contract/runtime transition, not a preparation flag. The deployed native binary is unaffected by these source deletions. Proxy deployment retirement requires its consumer check.
 - **Refs:** `apps/cox-publisher/README.md`, `packages/cox-methodology/README.md`; 99 native and 17 methodology tests pass, frozen offline workspace lock validation and client type check pass, shared Rust CLI vectors pass (9 arithmetic, 2 price, 1 snapshot). Lockfile change removes only the publisher importer dependencies; unrelated dependency resolutions are preserved.
+
+### 2026-10-22 · Joel (Claude Code) · Pool 2 archive connected; RPC proxy no longer used by Joel's services
+
+- **Area:** `apps/app-api` (`src/cox/chain.ts`), `deploy/dev`; Cloud Run `cox-app-api-live`, dev VM `cox-app-api-live`.
+- **What:** Following Peter's 2026-10-22 archive emails, both live APIs read missed pool 2 publications from `gs://colosseum-cox-publication-archives-dev/pool-2/history/` (`COX_PUBLICATION_ARCHIVE_GCS`). Their service accounts already had read and list access. Adaptive pools now report `missedBatches: []`. Before, publication 1 listed all 43,319 idle seconds since publication 0, which made each response about 240 KB.
+  - **Deployed:** Cloud Run `cox-app-api-live-00011-qbc` (image `cox-app-api:605e2ee`) and the VM at `4838161`. The VM's stale pool 2 cache was moved aside to `publications-2.jsonl.pre-4838161` and rebuilt.
+  - **Verified:** both APIs serve publication 0 from the archive as `finalized: false` (observed slot 513864091) and sequence 1 from the chain. The pool reports paused, gate `paused` and the vault covered. 68 app API tests pass.
+  - **RPC proxy:** the signer and both live APIs use the secret `cox-direct-alchemy-devnet-rpc-urls`. No VM env file or unit refers to `rpc.getrelative.trade` or `cox-rpc-proxy.variance.space`. Their remaining mentions are in `AGENTS.md`, `apps/rpc-proxy`, the domain table in `deploy/dev/README.md` and the retired `publisher-pool-1-devnet.json`.
+- **Open:**
+  - **Godwin:** check the Vercel values of `NEXT_PUBLIC_SOLANA_RPC_URL` and `COX_RPC_URL`. Unset, they fall back to public devnet.
+  - **Secrets:** `solana-devnet-rpc-urls` and `cox-app-api-live-rpc-urls` are no longer used by these services and can be disabled once the proxy is removed.
