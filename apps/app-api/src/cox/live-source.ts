@@ -2,6 +2,10 @@ import anchor, { type Program } from "@coral-xyz/anchor";
 import { checkedPublication, CoxReader, committedRequest, decodeAccount, discriminator, type Batch, type Pool, type Registry, type Request } from "@cox/client";
 import { PublicKey, type AccountInfo, type Connection } from "@solana/web3.js";
 import {
+  ACCEPTANCE_DEADLINE_SECONDS,
+  ADAPTIVE_ACCEPTANCE_DEADLINE_SECONDS,
+  ADAPTIVE_INTERVAL_SECONDS,
+  BATCH_SECONDS,
   batchFor,
   COX_TRANSFER_RULE,
   systemState,
@@ -15,10 +19,14 @@ import {
   type Publication,
   type ReceiptStatus,
   type RequestState,
+  type TradingStatus,
   type VaultReconciliation,
 } from "@eox/app-api";
 import { batchOf, classIds, feeConfiguration, parseManifest, toPublication, type ChainPublication, type Manifest } from "./chain.js";
 import { PublicationArchiveMissing, type PublicationArchive } from "./publication-archive.js";
+
+const RETIRED_POOL_SCHEMA = 3;
+const ADAPTIVE_POOL_SCHEMA = 4;
 import { PublicationHistory, type SegmentStore } from "./publication-history.js";
 import type { CoxSource } from "./source.js";
 
@@ -55,9 +63,22 @@ interface ChainView {
 
 const big = (value: { toString(): string }): bigint => BigInt(value.toString());
 
-function tokenAmount(info: AccountInfo<Buffer> | null): bigint {
+function tokenAmount(info: AccountInfo<Buffer> | null, mint: PublicKey): bigint {
   if (!info || info.data.length < TOKEN_AMOUNT_OFFSET + 8) throw new Error("VaultAccountMissing");
+  if (!info.data.subarray(0, 32).equals(mint.toBuffer())) throw new Error("VaultIdentityMismatch");
   return info.data.readBigUInt64LE(TOKEN_AMOUNT_OFFSET);
+}
+
+export const feesMigrated = (pool: Pool): boolean => pool.schemaVersion === 2 || pool.schemaVersion === ADAPTIVE_POOL_SCHEMA;
+
+export function tradingStatus(pool: Pool, registry: Registry, now: number): TradingStatus {
+  const opensAt = pool.schemaVersion === ADAPTIVE_POOL_SCHEMA ? Number(pool.tradingOpensAt.toString()) : null;
+  const gate = pool.schemaVersion === RETIRED_POOL_SCHEMA ? "retired"
+    : registry.paused ? "paused"
+    : !pool.initialized ? "not-initialized"
+    : opensAt !== null && now < opensAt ? "before-opening"
+    : "open";
+  return { open: gate === "open", gate, opensAt };
 }
 
 export class LiveCoxSource implements CoxSource {
@@ -65,6 +86,7 @@ export class LiveCoxSource implements CoxSource {
   private readonly listeners = new Set<(publication: Publication) => void>();
   private readonly poolKey: PublicKey;
   private readonly vaultKey: PublicKey;
+  private readonly testVaultKey: PublicKey | null;
   private view: ChainView | null = null;
   private timer: NodeJS.Timeout | null = null;
   private stopped = false;
@@ -74,11 +96,14 @@ export class LiveCoxSource implements CoxSource {
     readonly manifest: Manifest,
     readonly collateralMint: PublicKey,
     readonly collateralDecimals: number,
+    readonly secondaryMint: PublicKey | null,
+    readonly tradingOpensAt: number | null,
     private readonly log: PublicationHistory,
   ) {
     this.reader = new CoxReader(options.program);
     this.poolKey = this.reader.pdas.pool(options.poolId);
     this.vaultKey = this.reader.pdas.vault(this.poolKey);
+    this.testVaultKey = secondaryMint ? this.reader.pdas.testVault(this.poolKey) : null;
   }
 
   static async open(options: LiveCoxSourceOptions): Promise<LiveCoxSource> {
@@ -91,7 +116,10 @@ export class LiveCoxSource implements CoxSource {
     const mint = await options.connection.getAccountInfo(pool.collateralMint, "finalized");
     if (!mint || mint.data.length <= MINT_DECIMALS_OFFSET) throw new Error("CollateralMintMissing");
     const log = await PublicationHistory.open({ ...options.history, identity: { program: options.program.programId.toBase58(), pool: reader.pdas.pool(options.poolId).toBase58() } });
-    return new LiveCoxSource(options, manifest, pool.collateralMint, mint.data[MINT_DECIMALS_OFFSET]!, log);
+    const adaptive = pool.schemaVersion === ADAPTIVE_POOL_SCHEMA;
+    if (adaptive !== (manifest.mode === "adaptive")) throw new Error("PoolManifestMismatch");
+    const opensAt = adaptive ? Number(pool.tradingOpensAt.toString()) : null;
+    return new LiveCoxSource(options, manifest, pool.collateralMint, mint.data[MINT_DECIMALS_OFFSET]!, adaptive ? pool.testCollateralMint : null, opensAt, log);
   }
 
   get poolAddress(): PublicKey {
@@ -100,6 +128,18 @@ export class LiveCoxSource implements CoxSource {
 
   get vaultAddress(): PublicKey {
     return this.vaultKey;
+  }
+
+  get testVaultAddress(): PublicKey | null {
+    return this.testVaultKey;
+  }
+
+  get interval(): number {
+    return this.manifest.mode === "adaptive" ? ADAPTIVE_INTERVAL_SECONDS : BATCH_SECONDS;
+  }
+
+  get acceptanceDeadline(): number {
+    return this.manifest.mode === "adaptive" ? ADAPTIVE_ACCEPTANCE_DEADLINE_SECONDS : ACCEPTANCE_DEADLINE_SECONDS;
   }
 
   get classes(): string[] {
@@ -136,9 +176,9 @@ export class LiveCoxSource implements CoxSource {
       const from = this.log.nextSequence;
       const count = Math.min(BACKFILL_CONCURRENCY, last - from);
       const archived = await Promise.all(Array.from({ length: count }, (_, i) => archive.read(BigInt(from + i))));
-      for (const record of archived) await this.append(record.publication, null, record.slot);
+      for (const record of archived) await this.append(record.publication, null, record.slot, record.finalized);
     }
-    if (this.log.nextSequence === last) await this.append(latest, batchOf(latest, view.batch), view.slot);
+    if (this.log.nextSequence === last) await this.append(latest, batchOf(latest, view.batch), view.slot, true);
     this.view = { ...view, reconciliation: this.log.latest()?.identity.sequence === last ? this.reconcile(view, last) : null };
   }
 
@@ -151,19 +191,21 @@ export class LiveCoxSource implements CoxSource {
     const registryKey = this.reader.pdas.registry();
     const publicationKey = this.reader.pdas.publication(this.poolKey);
     const batchKey = this.reader.pdas.batch(this.poolKey);
-    const { context, value } = await this.options.connection.getMultipleAccountsInfoAndContext([registryKey, this.poolKey, this.vaultKey, publicationKey, batchKey], "finalized");
-    const [registryInfo, poolInfo, vaultInfo, publicationInfo, batchInfo] = value;
+    const keys = [registryKey, this.poolKey, this.vaultKey, publicationKey, batchKey, ...(this.testVaultKey ? [this.testVaultKey] : [])];
+    const { context, value } = await this.options.connection.getMultipleAccountsInfoAndContext(keys, "finalized");
+    const [registryInfo, poolInfo, vaultInfo, publicationInfo, batchInfo, testVaultInfo] = value;
     if (!registryInfo || !poolInfo) throw new Error("CoxAccountNotFound");
     const registry = decodeAccount(program, "registry", registryInfo);
     const pool = decodeAccount(program, "pool", poolInfo);
     if (pool.poolId.toString() !== this.options.poolId.toString() || !pool.registry.equals(registryKey) || !pool.vault.equals(this.vaultKey) || !pool.collateralMint.equals(this.collateralMint)) {
       throw new Error("PoolIdentityMismatch");
     }
-    if (!vaultInfo || !vaultInfo.data.subarray(0, 32).equals(this.collateralMint.toBuffer())) throw new Error("VaultIdentityMismatch");
+    if (pool.schemaVersion === ADAPTIVE_POOL_SCHEMA && (pool.testCollateralMint?.toBase58() ?? null) !== (this.secondaryMint?.toBase58() ?? null)) throw new Error("PoolCollateralMismatch");
+    const vault = tokenAmount(vaultInfo ?? null, this.collateralMint) + (this.secondaryMint ? tokenAmount(testVaultInfo ?? null, this.secondaryMint) : 0n);
     const publication = publicationInfo ? checkedPublication(program.programId, this.poolKey, decodeAccount(program, "publication", publicationInfo)) : null;
     const batch = batchInfo ? decodeAccount(program, "batch", batchInfo) : null;
     if (batch && !batch.pool.equals(this.poolKey)) throw new Error("BatchIdentityMismatch");
-    return { registry, pool, vault: tokenAmount(vaultInfo), publication, batch, slot: context.slot, reconciliation: null };
+    return { registry, pool, vault, publication, batch, slot: context.slot, reconciliation: null };
   }
 
   private reconcile(view: ChainView, sequence: number): VaultReconciliation {
@@ -173,10 +215,11 @@ export class LiveCoxSource implements CoxSource {
   }
 
   private fees(pool: Pool): FeeStatus {
-    return { ...feeConfiguration(pool, pool.schemaVersion === 2), migrated: pool.schemaVersion === 2, committed: pool.fees.toString() };
+    const migrated = feesMigrated(pool);
+    return { ...feeConfiguration(pool, migrated), migrated, committed: pool.fees.toString() };
   }
 
-  private async append(publication: ChainPublication, batch: Batch | null, slot: number): Promise<void> {
+  private async append(publication: ChainPublication, batch: Batch | null, slot: number, finalized: boolean): Promise<void> {
     const previous = this.log.latest();
     const previousDigest = previous ? Buffer.from(previous.identity.stateDigest!, "hex") : Buffer.alloc(32);
     if (!Buffer.from(publication.state.previousState).equals(previousDigest)) throw new Error("PublicationPredecessorMismatch");
@@ -186,7 +229,7 @@ export class LiveCoxSource implements CoxSource {
       poolId: this.options.poolId.toString(),
       manifest: this.manifest,
       predecessorBatch: previous?.identity.batch ?? null,
-      finalization: { transaction: null, slot },
+      finalization: { transaction: null, slot, finalized },
     });
     await this.log.append(value);
     for (const listener of this.listeners) listener(value);
@@ -202,9 +245,13 @@ export class LiveCoxSource implements CoxSource {
       poolAddress: this.poolKey.toBase58(),
       collateralMint: this.collateralMint.toBase58(),
       collateralDecimals: this.collateralDecimals,
+      secondaryCollateralMint: this.secondaryMint?.toBase58() ?? null,
       testCollateral: true,
       transferRule: COX_TRANSFER_RULE,
       methodology: { digest: this.manifest.digest, label: this.label(), status: sealed ? "sealed" : "draft", assetCount: this.manifest.assets.length },
+      mode: this.manifest.mode,
+      publicationIntervalSeconds: this.interval,
+      tradingOpensAt: this.tradingOpensAt,
       fixtureSource: null,
     };
   }
@@ -215,8 +262,8 @@ export class LiveCoxSource implements CoxSource {
 
   async status(now: number): Promise<CoxStatus> {
     const latest = this.log.latest();
-    const current = batchFor(now, this.manifest.origin);
-    const missedCutoffs = Math.max(0, current.batch - (latest?.identity.batch ?? -1) - 1);
+    const current = batchFor(now, this.manifest.origin, this.interval, this.acceptanceDeadline);
+    const missedCutoffs = this.manifest.mode === "adaptive" ? 0 : Math.max(0, current.batch - (latest?.identity.batch ?? -1) - 1);
     const view = this.view;
     const reconciliation = view?.reconciliation ?? null;
     return {
@@ -232,6 +279,7 @@ export class LiveCoxSource implements CoxSource {
       reconciliation,
       fees: view ? this.fees(view.pool) : null,
       currentBatch: current,
+      trading: view ? tradingStatus(view.pool, view.registry, now) : { open: false, gate: "not-initialized", opensAt: this.tradingOpensAt },
     };
   }
 

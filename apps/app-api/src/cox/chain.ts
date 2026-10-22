@@ -2,11 +2,18 @@ import { readFileSync } from "node:fs";
 import anchor, { type Idl, type Program } from "@coral-xyz/anchor";
 import type { Batch as BatchAccount, checkedPublication, Methodology as MethodologyAccount } from "@cox/client";
 import type { Connection } from "@solana/web3.js";
-import { COX_FEE_POLICY, CRYPTO_CLASS, type ClassState, type FallbackStep, type FeeConfiguration, type PriceVenue, type Publication, type VenueSymbols } from "@eox/app-api";
+import { COX_FEE_POLICY, CRYPTO_CLASS, type ClassState, type FallbackStep, type FeeConfiguration, type PoolMode, type PriceVenue, type Publication, type VenueSymbols } from "@eox/app-api";
 
-const VENUES: readonly PriceVenue[] = ["kraken", "coinbase", "bybit"];
+const VENUES: readonly PriceVenue[] = ["kraken", "coinbase", "bybit", "pyth"];
 const ASSET_ID = /^[A-Z0-9]{1,12}$/;
 const WEIGHT = /^[1-9][0-9]{0,17}$/;
+const ADAPTIVE_DOMAIN = "COX/METHODOLOGY/ADAPTIVE/V1";
+const PROTOCOL_ASSET_IDS = [
+  "BTC", "ETH", "SOL", "XRP", "BNB", "TRX", "AVAX", "DOT", "NEAR", "SUI", "APT", "UNI", "ARB",
+  "OP", "INJ", "AAVE", "ZEC", "STRK", "HYPE", "TAO", "WLD", "ONDO", "ENA", "ZRO", "FET", "JUP",
+  "AERO", "RENDER", "TIA", "W",
+] as const;
+const NO_VENUES: VenueSymbols = { krakenWs: null, krakenRest: null, coinbase: null, bybit: null };
 
 type Integer = { toString(): string };
 
@@ -15,6 +22,7 @@ export interface ManifestAsset {
   venues: VenueSymbols;
   weightNumerator: string;
   weightDenominator: string;
+  pythFeedId: number | null;
 }
 
 export interface Manifest {
@@ -23,6 +31,7 @@ export interface Manifest {
   sealed: boolean;
   assets: ManifestAsset[];
   origin: number;
+  mode: PoolMode;
 }
 
 export type ChainPublication = ReturnType<typeof checkedPublication>;
@@ -41,7 +50,81 @@ function symbol(value: unknown): string | null {
   return value;
 }
 
+class BorshReader {
+  private offset = 0;
+
+  constructor(private readonly bytes: Buffer) {}
+
+  private take(length: number): Buffer {
+    if (length < 0 || this.offset + length > this.bytes.length) throw new Error("ManifestTruncated");
+    const value = this.bytes.subarray(this.offset, this.offset + length);
+    this.offset += length;
+    return value;
+  }
+
+  u32(): number {
+    return this.take(4).readUInt32LE(0);
+  }
+
+  u64(): bigint {
+    return this.take(8).readBigUInt64LE(0);
+  }
+
+  bytes32(): Buffer {
+    return this.take(32);
+  }
+
+  string(): string {
+    return this.take(this.u32()).toString("utf8");
+  }
+
+  vec<T>(item: () => T): T[] {
+    const length = this.u32();
+    if (length > 256) throw new Error("ManifestVectorTooLong");
+    return Array.from({ length }, item);
+  }
+
+  u8(): number {
+    return this.take(1)[0]!;
+  }
+
+  end(): void {
+    if (this.offset !== this.bytes.length) throw new Error("ManifestTrailingBytes");
+  }
+}
+
+function parseAdaptiveManifest(account: MethodologyAccount): Manifest {
+  const reader = new BorshReader(Buffer.from(account.canonical));
+  if (reader.string() !== ADAPTIVE_DOMAIN) throw new Error("ManifestDomainInvalid");
+  const version = reader.string();
+  const roster = reader.vec(() => reader.u8());
+  const feeds = reader.vec(() => reader.u32());
+  const origin = reader.u64();
+  const originPrices = reader.vec(() => reader.u64());
+  reader.bytes32();
+  reader.bytes32();
+  reader.u64();
+  reader.u64();
+  reader.bytes32();
+  reader.string();
+  reader.end();
+  if (roster.length < 2 || roster.length > PROTOCOL_ASSET_IDS.length || feeds.length !== roster.length || originPrices.length !== roster.length) throw new Error("ManifestRosterInvalid");
+  if (roster.some((id, i) => id >= PROTOCOL_ASSET_IDS.length || (i > 0 && roster[i - 1]! >= id))) throw new Error("ManifestRosterInvalid");
+  if (Buffer.compare(Buffer.from(roster), Buffer.from(account.roster)) !== 0 || origin.toString() !== account.origin.toString()) throw new Error("ManifestAccountMismatch");
+  const originSeconds = Number(origin);
+  if (!Number.isSafeInteger(originSeconds) || originSeconds <= 0) throw new Error("ManifestOriginInvalid");
+  const assets = roster.map((id, i): ManifestAsset => ({
+    assetId: PROTOCOL_ASSET_IDS[id]!,
+    venues: NO_VENUES,
+    weightNumerator: "1",
+    weightDenominator: String(roster.length),
+    pythFeedId: feeds[i]!,
+  }));
+  return { digest: hex(account.digest), version, sealed: account.sealed, assets, origin: originSeconds, mode: "adaptive" };
+}
+
 export function parseManifest(account: MethodologyAccount): Manifest {
+  if (account.schemaVersion === 2) return parseAdaptiveManifest(account);
   const canonical = JSON.parse(Buffer.from(account.canonical).toString("utf8")) as unknown;
   if (!Array.isArray(canonical) || canonical[0] !== "COX/METHODOLOGY/V1" || typeof canonical[1] !== "string") throw new Error("ManifestDomainInvalid");
   const tuples = canonical[4];
@@ -51,12 +134,12 @@ export function parseManifest(account: MethodologyAccount): Manifest {
     const [assetId, krakenWs, krakenRest, coinbase, bybit, numerator, denominator] = tuple as unknown[];
     if (typeof assetId !== "string" || !ASSET_ID.test(assetId) || assetId === CRYPTO_CLASS) throw new Error("ManifestAssetInvalid");
     if (typeof numerator !== "string" || typeof denominator !== "string" || !WEIGHT.test(numerator) || !WEIGHT.test(denominator)) throw new Error("ManifestWeightInvalid");
-    return { assetId, venues: { krakenWs: symbol(krakenWs), krakenRest: symbol(krakenRest), coinbase: symbol(coinbase), bybit: symbol(bybit) }, weightNumerator: numerator, weightDenominator: denominator };
+    return { assetId, venues: { krakenWs: symbol(krakenWs), krakenRest: symbol(krakenRest), coinbase: symbol(coinbase), bybit: symbol(bybit) }, weightNumerator: numerator, weightDenominator: denominator, pythFeedId: null };
   });
   if (new Set(assets.map((a) => a.assetId)).size !== assets.length) throw new Error("ManifestAssetDuplicate");
   const origin = Number(account.origin.toString());
   if (!Number.isSafeInteger(origin) || origin % 60 !== 0) throw new Error("ManifestOriginInvalid");
-  return { digest: hex(account.digest), version: canonical[1], sealed: account.sealed, assets, origin };
+  return { digest: hex(account.digest), version: canonical[1], sealed: account.sealed, assets, origin, mode: "minute" };
 }
 
 export function classIds(manifest: Manifest): string[] {
@@ -70,7 +153,7 @@ function venue(code: number): PriceVenue {
 }
 
 function step(value: number): FallbackStep {
-  if (value !== 1 && value !== 2 && value !== 3 && value !== 4) throw new Error("PublicationStepInvalid");
+  if (value !== 0 && value !== 1 && value !== 2 && value !== 3 && value !== 4) throw new Error("PublicationStepInvalid");
   return value;
 }
 
@@ -81,7 +164,7 @@ export interface PublicationContext {
   poolId: string;
   manifest: Manifest;
   predecessorBatch: number | null;
-  finalization: { transaction: string | null; slot: number | null };
+  finalization: { transaction: string | null; slot: number | null; finalized: boolean };
 }
 
 type FeeFields = {
@@ -151,7 +234,7 @@ export function toPublication(publication: ChainPublication, batch: BatchAccount
       snapshotDigest: hex(state.snapshot),
       stateDigest: hex(publication.stateDigest),
       committedAt: Number(publication.committedAt.toString()),
-      finalization: { ...context.finalization, finalized: true },
+      finalization: context.finalization,
     },
     prices: publication.prices.map((p, i) => ({
       assetId: context.manifest.assets[i]!.assetId,
