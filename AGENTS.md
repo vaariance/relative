@@ -1187,3 +1187,21 @@ another agent needs to know.
 - **Open:**
   - **Godwin:** check the Vercel values of `NEXT_PUBLIC_SOLANA_RPC_URL` and `COX_RPC_URL`. Unset, they fall back to public devnet.
   - **Secrets:** `solana-devnet-rpc-urls` and `cox-app-api-live-rpc-urls` are no longer used by these services and can be disabled once the proxy is removed.
+
+### 2026-10-22 · Joel (Claude Code) · Live preview routes in the app API (not deployed)
+
+- **Area:** `apps/app-api` (`src/cox/preview.ts`, server, stream), `packages/app-api`.
+- **What:** Peter's publisher evaluates the methodology every second but publishes on chain only when there is work to settle. Peter confirmed on 2026-10-22 that it will export one `relative.preview/v1` record per second to `gs://colosseum-cox-publication-archives-dev/pool-2/preview/<unix seconds>.json`. With `COX_PREVIEW_GCS`, the API follows that prefix:
+  - **`GET /v1/preview`:** `{ record, ageSeconds, stale }`, stale after 10 seconds without a newer record.
+  - **`GET /v1/preview/portfolio?owner=`:** each position's `estimatedValue` from the publisher's `basicProjection`.
+  - **Stream:** `preview` events on `/v1/stream`.
+  - **Client:** `preview()`, `previewPortfolio(owner)` and the `preview` stream event in `@eox/app-api`.
+  - **Checks:** each record's network, program, pool, methodology, scales, asset order and CRYPTO row must match before it is relayed unchanged. Missing seconds stay gaps.
+  - **Verified:** 76 app API tests pass, with constructed records only.
+- **Rules for agents:**
+  - Previews are estimates. Never present one as confirmed, and never confirm one because a later publication arrived; committed values come from publications.
+  - The API computes no reference or redistribution. A wallet estimate exists only when `basicProjection` starts from the pool's latest publication; otherwise `unavailable` says why and every value is `null`.
+- **Open:**
+  - **Peter:** a real uploaded sample. No preview object exists yet, and nothing is deployed; the parser may need adjusting to the real record.
+  - **Godwin:** show previews between publications, labelled as estimates and marked stale when `stale` is true.
+- **Refs:** `apps/app-api/README.md` (Live previews), commits `a24a5f5`..`e5e0bd0`.
