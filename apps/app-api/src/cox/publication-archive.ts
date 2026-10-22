@@ -6,7 +6,8 @@ import { addresses, checkedPublication, decodeAccount } from "@cox/client";
 import type { PublicKey } from "@solana/web3.js";
 import type { ChainPublication } from "./chain.js";
 
-const SCHEMA = "cox.publication-archive/v1";
+const FINALIZED_SCHEMA = "cox.publication-archive/v1";
+const CONFIRMED_SCHEMA = "cox.publication-archive/v2";
 const ACCOUNT_BYTES = 8192;
 const STORAGE = "https://storage.googleapis.com/storage/v1";
 const GCS_URL = /^gs:\/\/([a-z0-9][a-z0-9._-]{1,61}[a-z0-9])\/((?:[A-Za-z0-9._-]+\/)*)$/;
@@ -20,7 +21,27 @@ interface ArchiveRecord {
   stateDigest: string;
   accountSha256: string;
   accountBase64: string;
-  finalizedSlot: number;
+  finalizedSlot?: number;
+  observedSlot?: number;
+  commitment?: string;
+}
+
+export interface ArchivedPublication {
+  publication: ChainPublication;
+  slot: number;
+  finalized: boolean;
+}
+
+const slotValue = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+function provenance(record: ArchiveRecord): { slot: number; finalized: boolean } | null {
+  if (record.schema === FINALIZED_SCHEMA && slotValue(record.finalizedSlot) && record.observedSlot === undefined && record.commitment === undefined) {
+    return { slot: record.finalizedSlot, finalized: true };
+  }
+  if (record.schema === CONFIRMED_SCHEMA && slotValue(record.observedSlot) && record.commitment === "confirmed" && record.finalizedSlot === undefined) {
+    return { slot: record.observedSlot, finalized: false };
+  }
+  return null;
 }
 
 export class PublicationArchiveMissing extends Error {}
@@ -83,15 +104,17 @@ export class PublicationArchive {
     this.address = addresses(program.programId).publication(pool).toBase58();
   }
 
-  async read(sequence: bigint): Promise<{ publication: ChainPublication; slot: number }> {
+  async read(sequence: bigint): Promise<ArchivedPublication> {
     const text = await this.source.fetch(sequence);
     if (text === null) throw new PublicationArchiveMissing(`publication ${sequence} is not in the archive`);
     const record = JSON.parse(text) as ArchiveRecord;
-    if (record.schema !== SCHEMA || record.identity?.program !== this.program.programId.toBase58() || record.identity.pool !== this.pool.toBase58() || record.identity.genesisHash !== this.genesisHash) {
+    const origin = provenance(record);
+    if (!origin) throw new Error(`archived publication ${sequence} has an unknown schema or inconsistent commitment provenance`);
+    if (record.identity?.program !== this.program.programId.toBase58() || record.identity.pool !== this.pool.toBase58() || record.identity.genesisHash !== this.genesisHash) {
       throw new Error(`archived publication ${sequence} belongs to another program, pool or network`);
     }
-    if (record.address !== this.address || record.sequence !== sequence.toString() || !Number.isSafeInteger(record.finalizedSlot) || record.finalizedSlot < 0) {
-      throw new Error(`archived publication ${sequence} has the wrong address, sequence or slot`);
+    if (record.address !== this.address || record.sequence !== sequence.toString()) {
+      throw new Error(`archived publication ${sequence} has the wrong address or sequence`);
     }
     const bytes = Buffer.from(record.accountBase64, "base64");
     if (bytes.length !== ACCOUNT_BYTES || bytes.toString("base64") !== record.accountBase64 || sha256(bytes) !== record.accountSha256) {
@@ -102,6 +125,6 @@ export class PublicationArchive {
     if (publication.sequence.toString() !== record.sequence || publication.batch.toString() !== record.batch || Buffer.from(publication.stateDigest).toString("hex") !== record.stateDigest) {
       throw new Error(`archived publication ${sequence} does not match its record`);
     }
-    return { publication, slot: record.finalizedSlot };
+    return { publication, ...origin };
   }
 }
