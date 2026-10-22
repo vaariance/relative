@@ -1570,5 +1570,60 @@
         "retiredLegacyPoolStillEmpty": true
       }
     }
+  },
+  "epochReadinessVerification": {
+    "status": "prepared-unsealed-not-activated",
+    "preparedDraft": "6nxNFyTzB8xNtDD1sQpkjTBh4K9xefVBrzmtr6e8ZZHo",
+    "opensAtUtc": "2026-10-22T20:00:00Z",
+    "closesAtUtc": "2026-10-23T00:00:00Z",
+    "opensAt": 1792699200,
+    "closesAt": 1792713600,
+    "commitment": "finalized",
+    "slot": 513985219,
+    "universeAssets": 30,
+    "sealed": false,
+    "custodyBalances": [
+      "0",
+      "0"
+    ],
+    "engineTests": 17,
+    "compiledDevnetArtifactTests": 13,
+    "compiledProductionGuardTest": "not rerun with the deployed devnet artifact",
+    "deployedBinarySha256": "b6dd486b206f4038daab1bc3a6696cffc3f40ad389e8b9b15eec797a5a20f6d7",
+    "publicationProbe": {
+      "simulatedOnly": true,
+      "signed": false,
+      "broadcast": false,
+      "transactionVersion": 1,
+      "bytes": 1853,
+      "assetCount": 30,
+      "computeUnits": 45416,
+      "slot": 513985894,
+      "instructions": [
+        "publish_snapshot",
+        "close_snapshot"
+      ]
+    },
+    "preparationSignatures": {
+      "initialize": "3xqdNvCdAAX8a25u3hDoJTiLPNvTVhUfY2SkPankRstbisHgxLJHd8QVyEgCPg58Aco9JbzsG5XAVnukvTj41fhm",
+      "grow-2048": "3u2ipVQjwqMKG68oRiVsEt6TwR9gnmExzWurPEDprgZjsDjvjuw6fLzK8Ps57hqy9aJXaetgnTBt86Vi4hgksMuA",
+      "grow-10240": "2z1uE9eEj3qgknbr3Jgr2HishfsEBwW72NXqkgHar7STDrsUFvnC1q7nykErB2X79KCVBNxBsqLBRpJbB6zPM88G",
+      "grow-18432": "4WZN42WTMc1kYMBFwK8D4bisnM6f1YqBwUnD3kBfwisa4X8cL1TSrJ96wKJ3Qg7Rkvmi83T3K94Q8wXRJmgssDVq",
+      "grow-26624": "DPPAHBDESGbKL1J2Qz7GLkPtK88sQKSW2S2ny4NBf7zDiSHBwKF9oo4jDmUBU5fmgSZBjANcZzPcH8EwBPhZdvw",
+      "grow-34816": "5b5EGSWVJyfVTviSXUEdYRHh8hFQCoLQ7NKrgejsyopDic4MSMMYdkWvCRTZiFrW76BEgVHQqopLNb7gr4do5xJy",
+      "grow-43008": "DXvuN93WqNJ4WwebEjnn1Kv8HEWkLKoQGffAGHbGhr7eNRBsjzdbrgzQG4j4q9SQXBBmqSDX5eag4pk7mayetui",
+      "grow-51200": "5BJF33cTMBThRn6C5bbgjNVaUvohyoZ4Ya7Nm9HYXQLVyhzZ7kYvez2Nob2BmkAHxPLJEnQTv6BNCumBX8NF2iBX",
+      "grow-59392": "3TEPS81orpkUJ76byUTRpmRvPFwrw6pRjvSvNMqvXYDnVbRh3kF7hBTVfqLvGypg9gzFT3WcRvQbMrweufq73kpa",
+      "assets-0": "2HqcoyjotZRKggWpbcgsCz6vVpUCPAongEdFgESJdJNnXAoyzCqXVdEmpoxBva5WU7WmWsobcj1VMo5VVPc64gwp",
+      "assets-8": "rDSrF2xEAEfvT9LE22wYwcZATG2GrX3wUfjQiU4yMRzjWUy2z6GFYUtcwAvKguyS889iLi67ZKTFz7pwmJQUPMc",
+      "assets-16": "3UaNPotRYigVYa2h2KS5P7ts5Js2poyowNPBc6YyD88wyfoDx8XDyVbPmLcToHjdsa9mNxnpp33DeqSPnTfyXx2e",
+      "assets-24": "3HEFkWSzYsZFfq3DCqK68MChSbx41UZ4sivPuURMmyRSJGKGrzt2SRArwZchX8weJwToDZ88FNsqArGiyob4reUQ"
+    },
+    "remaining": [
+      "archive recovery readiness",
+      "seal a still-future epoch once ready",
+      "real entry and execution",
+      "real exact-time closing, allocation and withdrawal"
+    ]
   }
 }
