@@ -193,3 +193,12 @@ export function preferEstimates(estimates: readonly SeriesPoint[], settled: read
   if (estimates.length < 2) return false;
   return spanOf(estimates) >= spanOf(settled) || estimates.length > settled.length;
 }
+
+export function withLiveMinute(points: readonly SeriesPoint[], everySecond = true): SeriesPoint[] {
+  if (points.length === 0) return [];
+  const open = Math.floor(points[points.length - 1].cutoff / 60);
+  let first = points.length - 1;
+  while (first > 0 && Math.floor(points[first - 1].cutoff / 60) >= open) first -= 1;
+  const forming = everySecond ? points.slice(first) : [points[points.length - 1]];
+  return [...perMinute(points), ...forming];
+}

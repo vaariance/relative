@@ -2,7 +2,7 @@
 
 import type { PreviewHistory, PreviewPortfolio } from "@eox/app-api";
 import { type ReactNode, createContext, useContext, useEffect, useMemo, useState } from "react";
-import { type Estimate, type Freshness, type SeriesKind, type WalletEstimate, HISTORY_LIMIT_SECONDS, HISTORY_SECONDS, ageText, appendHistory, estimateOf, freshnessOf, historyEstimates, historyStep, joinHistory, perMinute, sampled, seriesOf, trimHistory, walletEstimateOf } from "@/lib/estimate";
+import { type Estimate, type Freshness, type SeriesKind, type WalletEstimate, HISTORY_LIMIT_SECONDS, HISTORY_SECONDS, ageText, appendHistory, estimateOf, freshnessOf, historyEstimates, historyStep, joinHistory, sampled, seriesOf, trimHistory, walletEstimateOf, withLiveMinute } from "@/lib/estimate";
 import { direction, formatAmount, formatPrice } from "@/lib/format";
 import { CRYPTO_CLASS, type Point } from "@/lib/view";
 import { useAccount } from "./account";
@@ -220,7 +220,7 @@ const SPARK_POINTS = 120;
 
 export function LiveSparkline({ kind, id, fallback, card = false }: { kind: SeriesKind; id?: string; fallback: Point[]; card?: boolean }) {
   const { history } = useLive();
-  const live = perMinute(seriesOf(history, kind, id));
+  const live = withLiveMinute(seriesOf(history, kind, id), false);
   const points = live.length > 1 ? sampled(live, SPARK_POINTS) : fallback;
   if (points.length < 2) return null;
   const last = points[points.length - 1].value;

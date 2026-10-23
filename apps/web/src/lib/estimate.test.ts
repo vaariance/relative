@@ -1,6 +1,6 @@
 import type { Preview, PreviewHistory, PreviewPortfolio } from "@eox/app-api";
 import { describe, expect, it } from "vitest";
-import { ageText, appendHistory, estimateOf, freshnessOf, historyEstimates, historyStep, joinHistory, preferEstimates, perMinute, sampled, seriesOf, spanOf, trimHistory, walletEstimateOf } from "./estimate";
+import { ageText, withLiveMinute, appendHistory, estimateOf, freshnessOf, historyEstimates, historyStep, joinHistory, preferEstimates, perMinute, sampled, seriesOf, spanOf, trimHistory, walletEstimateOf } from "./estimate";
 
 const preview: Preview = {
   ageSeconds: 1,
@@ -195,5 +195,22 @@ describe("preview history", () => {
     expect(preferEstimates(points(0, 100), points(10, 20, 30))).toBe(true);
     expect(preferEstimates(points(50, 60), points(0, 30, 100))).toBe(false);
     expect(preferEstimates(points(50), points())).toBe(false);
+  });
+});
+
+describe("live minute", () => {
+  const points = (...cutoffs: number[]) => cutoffs.map((cutoff) => ({ cutoff, value: cutoff }));
+
+  it("keeps finished minutes at one point and every second of the minute in progress", () => {
+    expect(withLiveMinute(points(59, 60, 90, 119, 120, 150, 185, 186, 190)).map((point) => point.cutoff)).toEqual([59, 119, 150, 185, 186, 190]);
+  });
+
+  it("can keep only the latest point of the minute in progress", () => {
+    expect(withLiveMinute(points(59, 60, 90, 185, 190), false).map((point) => point.cutoff)).toEqual([59, 90, 190]);
+  });
+
+  it("ends on the latest value", () => {
+    expect(withLiveMinute(points(10, 20, 30)).map((point) => point.cutoff)).toEqual([10, 20, 30]);
+    expect(withLiveMinute([])).toEqual([]);
   });
 });

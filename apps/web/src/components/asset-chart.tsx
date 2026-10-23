@@ -4,7 +4,7 @@ import { CandlestickChart, LineChart as LineIcon } from "lucide-react";
 import { useState } from "react";
 import type { Point } from "@/lib/view";
 import { barsOf } from "@/lib/bars";
-import { type SeriesKind, joinHistory, perMinute, preferEstimates, seriesOf } from "@/lib/estimate";
+import { type SeriesKind, joinHistory, preferEstimates, seriesOf, withLiveMinute } from "@/lib/estimate";
 import { useAccount } from "./account";
 import { useLive, useRangeHistory } from "./live";
 import { type ChartLine, type ChartMark, TradeChart } from "./trade-chart";
@@ -85,7 +85,7 @@ export function AssetChart({ series, note, height }: { series: Series[]; note?: 
   const older = useRangeHistory(range * 60, current.live !== undefined && !realtime);
   const raw = current.live ? seriesOf(joinHistory(older, history), current.live.kind, current.live.id, sequence) : [];
   const scaled = current.live?.scale === undefined ? raw : raw.map((point) => ({ cutoff: point.cutoff, value: point.value * (current.live?.scale ?? 1) }));
-  const estimated = realtime ? scaled : perMinute(scaled);
+  const estimated = realtime ? scaled : withLiveMinute(scaled);
   const end = Math.max(current.points[current.points.length - 1]?.cutoff ?? 0, estimated[estimated.length - 1]?.cutoff ?? 0);
   const settled = current.points.filter((point) => point.cutoff > end - range * 60);
   const recent = estimated.filter((point) => point.cutoff > end - range * 60);
@@ -139,13 +139,13 @@ export function AssetChart({ series, note, height }: { series: Series[]; note?: 
           <TradeChart bars={bars} candles={candles} digits={current.digits} label={current.label} lines={lines} marks={[...(current.marks ?? []), ...settledMarks]} compare={current.compare} height={height} />
         ) : (
           <p className="flex items-center justify-center px-6 text-center text-sm text-muted" style={{ height: height ?? 420 }}>
-            {shown.length > 1 ? "There is not enough history yet for bars this wide. Choose a shorter interval." : current.live ? realtime ? "The live line starts in a few seconds." : "The live line starts within two minutes." : "No settled values in this period yet. Choose a longer range."}
+            {shown.length > 1 ? "There is not enough history yet for bars this wide. Choose a shorter interval." : current.live ? "The live line starts in a few seconds." : "No settled values in this period yet. Choose a longer range."}
           </p>
         )}
       </div>
       {(note || short || live) && (
         <p className="border-t border-line px-4 py-2 text-xs text-muted">
-          {live && `Estimates from ${since(recent[0].cutoff, end)}, ${realtime ? "updated every second" : "updated once a minute"}. ${settledMarks.length > 0 ? "Dots are on-chain settlements. " : ""}`}
+          {live && `Estimates from ${since(recent[0].cutoff, end)}, ${realtime ? "updated every second" : "the current minute moves every second and finished minutes stay fixed"}. ${settledMarks.length > 0 ? "Dots are on-chain settlements. " : ""}`}
           {short && (live ? `Estimates cover ${span(held)} of this range. ` : held >= 23 * 3600 ? "Showing the last 24 hours, the most this page loads. " : `Showing ${span(held)} of history so far. `)}
           {note}
         </p>
