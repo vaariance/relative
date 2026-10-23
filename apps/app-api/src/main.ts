@@ -72,7 +72,9 @@ async function openFaucet(connection: Connection, genesis: string, network: stri
   };
   const signer = createSigningClient({ baseUrl: url, identityToken });
   const signingNetwork = `solana:${genesis.slice(0, 32)}`;
-  const key = (await signer.keyDirectory()).entries.filter((entry) => entry.role === "devnet-faucet" && entry.state === "active" && entry.network === signingNetwork);
+  const directory = await signer.keyDirectory();
+  if (!Array.isArray(directory.entries)) throw new Error(`the faucet signer refused the key directory request: ${JSON.stringify(directory).slice(0, 200)}`);
+  const key = directory.entries.filter((entry) => entry.role === "devnet-faucet" && entry.state === "active" && entry.network === signingNetwork);
   if (key.length !== 1) throw new Error(`expected one active devnet-faucet key, found ${key.length}`);
   if (key[0]!.address !== address.toBase58()) throw new Error(`faucet signer key ${key[0]!.address} is not COX_FAUCET_ADDRESS`);
   const faucet = new CoxFaucet({
