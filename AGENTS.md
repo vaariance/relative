@@ -1571,3 +1571,11 @@ another agent needs to know.
 - **Rules for agents:** This supersedes `tUSDC` display wording in the earlier faucet entry. Reuse the same mint, custody and six decimals. Circle's official devnet USDC keeps its identity. API/UI implementation remains with its owners; Peter's closeout covers protocol, publisher, SDK and signer. At Peter's request, blockers go directly to Joel without copying Godwin. Public faucet API delivery and UI completion do not block the tested SDK/signer handoff.
 - **Open:** Prepared source/records require scoped commit approval; isolated faucet signer deployment and real grant verification follow the committed release. Dynamic activation remains gated on Joel's deployed consumers and operator approval.
 - **Refs:** `packages/cox-client/README.md`, `apps/signer/README.md`, `packages/cox/deploy/adaptive-pool-2-devnet.json`.
+
+### 2026-10-23 · Peter (Codex) · Fresh dynamic migration rehearsal passed
+
+- **Area:** Read-only current devnet Basic state and local compiled migration verification.
+- **What:** Captured finalized slot 514318053, sequence 8 and 21 accounts. Rebuilt the genesis universe receipt against that predecessor and rehearsed the prepared dynamic program `c9b4892051951e53f992100eeae36638dd64de32895a4c31cd5042df7dc0d276`. Preserved two positions, seven requests, all financial pool fields and both custody accounts. Ten simulated transactions fit the packet limit (maximum 901 bytes); sealing used 338,264 CU and migration 56,500 CU.
+- **Rules for agents:** This replaces the stale sequence-4 rehearsal as the latest captured-state evidence, not as a permanent approval for any later predecessor. No live transaction was submitted, local signature verification was disabled and no live KMS or deployment proof is claimed. Recheck the predecessor immediately before live migration.
+- **Open:** Joel's dynamic API deployment, coordinated protocol/signer/runtime rollout and explicitly approved LIT activation timestamp. Existing balances must remain intact.
+- **Refs:** `packages/cox/deploy/adaptive-pool-2-devnet.json`; private `.cox/dynamic-fresh-rehearsal-evidence-20261023.json` and `.cox/dynamic-captured-upgrade-rehearsal-fresh-20261023.json`.
