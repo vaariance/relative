@@ -1433,8 +1433,8 @@
   },
   "lastRuntimeAuditSlot": 513977460,
   "nativeRuntime": {
-    "sourceCommit": "1ec3d96107bc8a42d177be9bb873badb6e75db3e",
-    "linuxSha256": "c2aa8c7bc0281b6bdd234b912c4cbfa9046a2ff4090285f0684cded7eac74b6b",
+    "sourceCommit": "90d4deff3e344a7a88d1069e306bc93c067b7f2a",
+    "linuxSha256": "fd8d427f125bcd8e14d04ea361dabcee00806211359dca3b07b29d603fc8d773",
     "service": "cox-publisher.service",
     "region": "europe-west1",
     "running": true,
@@ -1595,6 +1595,101 @@
       "steadyUploadLagMedianSeconds": 0.507,
       "steadyUploadLagMaxSeconds": 0.516,
       "measuresSettlementLatency": false
+    },
+    "eventDrivenBillingRelease": {
+      "installedAtUtc": "2026-10-22T22:48:08Z",
+      "idleSafetySeconds": 1200,
+      "perMinuteSignerPollingRemoved": true,
+      "chainNotificationPrefix": "gs://colosseum-cox-publication-archives-dev/pool-2/chain-changes/",
+      "independentNotificationHeartbeatSeconds": 20,
+      "initialPhysicalHttpRequests": 13,
+      "initialRequestsByTrigger": {
+        "startup": 8,
+        "stream-recovery": 5
+      },
+      "quietWindowVerified": false,
+      "joelApiPollingRemovalPending": true,
+      "epochRunnerPreserved": true
+    },
+    "deadlineFixRollout": {
+      "installedAtUtc": "2026-10-23T10:14:49Z",
+      "sourceCommit": "490a285",
+      "configurationPreserved": true,
+      "contractUpgradePerformed": false,
+      "isolatedTestsPassed": 130,
+      "integratedTestsPassed": 174,
+      "previousRelease": "9761a318deb5c5c2c0ab25d6c9d8c5c601f38bc8",
+      "failure": "CommitDeadlinePassed (6012)",
+      "priceDeadlineSeconds": 5
+    },
+    "deadlineFixBasicVerification": {
+      "owner": "2aDWjWvQ3nzLq75wn1U6tHwp4Bok7LuWxHSj6KH5wg1h",
+      "tokenAccount": "EGrcC2B1LmAmeJtW64SPpW3f7jp6gjFXXhzarzpPzzuV",
+      "collateralMint": "5rpGrekfBLHdF8PD8eKLzXQPPmhyF7FCKeE1VA5CwV3X",
+      "classId": 0,
+      "deposit": {
+        "nonce": "5",
+        "sequence": "7",
+        "targetBatch": "126674",
+        "gross": "100000",
+        "fee": "20",
+        "mintedUnits": "99980000000000000"
+      },
+      "redemption": {
+        "nonce": "6",
+        "sequence": "8",
+        "gross": "99987",
+        "fee": "19",
+        "proceeds": "99968"
+      },
+      "feesAdded": "39",
+      "returnedCollateral": "799569",
+      "endSequence": "8",
+      "completed": true,
+      "custody": {
+        "amount": "5000431",
+        "liabilities": "5000431",
+        "covered": true
+      },
+      "initialLedger": {
+        "active": "4999000",
+        "pending": "0",
+        "payable": "0",
+        "residual": "0",
+        "fees": "1399"
+      },
+      "finalLedger": {
+        "active": "4998992",
+        "pending": "0",
+        "payable": "0",
+        "residual": "1",
+        "fees": "1438"
+      },
+      "startedAt": "2026-10-23T10:16:28.284Z",
+      "finishedAtUtc": "2026-10-23T10:18:03.791Z",
+      "signatures": {
+        "deposit": "2mZdKTFLP3zWR7JsMGkyF4T9wXMMC4yLiHidrTLGBfnkCzatWwfEKRXydrTsC4mFe9Rgr5Ya88XjgM2VTwEctxLp",
+        "redeem": "2UHdMLf1sQ4YewE3vhapFHEurqPdCJfe3w3g5Zv2uGTgz6XffCP7PGPLEwENXLFfenZsXi7UQY3hQfKTsreP87LG",
+        "withdraw": "4swhqJK25HNQxfgW1EeAMeJH9sb1AwbQwbuNggqpYYhpFCMH67zp5aN71LbJnHDr3KQrmUBrMt4LYEcNYzEx6ZBd"
+      },
+      "diagnosticRpcCallsSeparateFromPublisher": {
+        "getGenesisHash": 14,
+        "getAccountInfo": 21,
+        "getMultipleAccounts": 49,
+        "getTokenAccountBalance": 2,
+        "getLatestBlockhash": 3,
+        "simulateTransaction": 3,
+        "sendTransaction": 3,
+        "getBlockHeight": 3,
+        "getSignatureStatuses": 3
+      }
+    },
+    "expiredTestDepositRefund": {
+      "nonce": "3",
+      "amount": "100000",
+      "signature": "2DGd7BpE8A1sQ5385bwopd7G7wfvYQVCqH32tb8v9L3L9jqqG6qie6hWWsUgTLNKbQ966tGerdfJcov4FoYzYkau",
+      "finalized": true,
+      "destination": "EGrcC2B1LmAmeJtW64SPpW3f7jp6gjFXXhzarzpPzzuV"
     }
   },
   "epochReadinessVerification": {
@@ -1690,7 +1785,7 @@
     "directAlchemySecretUnchanged": true
   },
   "epochLiveLifecycleVerification": {
-    "status": "sealed-awaiting-opening",
+    "status": "entry-harness-failed-no-transactions",
     "epoch": "FN5K1VRfnvA1EyFMA3aa6mnpmBVchEXCPiBZdrzaktcq",
     "config": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9",
     "opensAtUtc": "2026-10-23T00:00:00Z",
@@ -1708,6 +1803,264 @@
     "collateralMint": "5rpGrekfBLHdF8PD8eKLzXQPPmhyF7FCKeE1VA5CwV3X",
     "completed": false,
     "operatorKeysUnchanged": true,
-    "basicRemainsOpen": true
+    "basicRemainsOpen": true,
+    "failedAtUtc": "2026-10-23T00:00:05.515Z",
+    "failure": "Raw IDL snake_case test_vault was looked up in camelCase testVault account map before transaction construction",
+    "submittedTestEntries": 0,
+    "submittedTestTransactions": 0,
+    "finalAudit": {
+      "checkedAtUtc": "2026-10-23T05:04:13.800Z",
+      "slot": 514134697,
+      "commitment": "finalized",
+      "epoch": "FN5K1VRfnvA1EyFMA3aa6mnpmBVchEXCPiBZdrzaktcq",
+      "phase": {
+        "open": {}
+      },
+      "opensAt": "1792713600",
+      "closesAt": "1792728000",
+      "nextNonce": "0",
+      "ledger": {
+        "pendingGross": "0",
+        "activeNet": "0",
+        "heldFees": "0",
+        "claimable": "0",
+        "committedFees": "0",
+        "residual": "0"
+      },
+      "closingSnapshot": null,
+      "sourceBalance": "999601",
+      "vaultBalance": "0",
+      "testVaultBalance": "0",
+      "normalizedQueueAccounts": [
+        "owner",
+        "config",
+        "epoch",
+        "lot",
+        "source",
+        "vault",
+        "testVault",
+        "tokenProgram",
+        "systemProgram"
+      ],
+      "normalizedWithdrawAccounts": [
+        "owner",
+        "config",
+        "epoch",
+        "lot",
+        "vault",
+        "testVault",
+        "destination",
+        "tokenProgram"
+      ],
+      "queueEncodingBytes": 86,
+      "submittedTransactions": 0
+    },
+    "runnerFix": {
+      "accountDefinitions": "program.idl.instructions (Anchor-normalized account names)",
+      "syntaxChecked": true,
+      "queueEncodingChecked": true,
+      "sha256": "420bbada367c5ac9646e653156a569e98fa9b476b95144d05b4a1bb697762945",
+      "rerun": false
+    },
+    "liveClosingAndPayoutVerification": "not performed; no test lots executed",
+    "requiredNextStep": "A new future four-hour lifecycle run with the corrected runner; do not enter this closed epoch or substitute later closing data",
+    "temporaryFollowupRemoved": true,
+    "temporaryVmTestWalletRemoved": true,
+    "originalTestWalletRetainedLocally": true,
+    "publisherAndPreviewActiveAfterAudit": true
+  },
+  "replacementEpochLiveLifecycleVerification": {
+    "epoch": "AnBEd8ne65Jmq5MP2dgqmx2KQHCGEz25kqBsmuzd8kjG",
+    "opensAt": 1792742400,
+    "closesAt": 1792756800,
+    "status": "both-existing-lots-executed-awaiting-exact-close",
+    "completed": false,
+    "originalRunnerFailedAtUtc": "2026-10-23T08:05:09.366Z",
+    "originalFailure": "Publisher did not execute test entries within five minutes",
+    "finalizedAudit": {
+      "phase": "open",
+      "nextNonce": "2",
+      "executedLots": "2",
+      "scoredLots": "0",
+      "allocatedLots": "0",
+      "ledger": {
+        "pendingGross": "0",
+        "activeNet": "199960",
+        "heldFees": "40",
+        "claimable": "0",
+        "committedFees": "0",
+        "residual": "0"
+      },
+      "custody": "200000",
+      "lots": [
+        {
+          "nonce": "0",
+          "address": "DNDPRhuUNPR3fDUZwLY3ATqHm9q2LFZxXBNqkAgAMcx6",
+          "owner": "2aDWjWvQ3nzLq75wn1U6tHwp4Bok7LuWxHSj6KH5wg1h",
+          "grossStake": "100000",
+          "fee": "20",
+          "admittedAt": "1792742407",
+          "state": {
+            "executed": {}
+          },
+          "execution": {
+            "snapshotId": [
+              151,
+              37,
+              148,
+              251,
+              16,
+              195,
+              88,
+              95,
+              7,
+              43,
+              152,
+              232,
+              186,
+              54,
+              167,
+              25,
+              155,
+              78,
+              121,
+              102,
+              72,
+              122,
+              182,
+              233,
+              125,
+              199,
+              107,
+              235,
+              117,
+              35,
+              180,
+              218
+            ],
+            "timestamp": "1792750498",
+            "references": [
+              "1019337721660",
+              "1018142081447",
+              "1023621692854",
+              "1017713995196",
+              "1052284389922",
+              "1047925790954",
+              "1004279600086",
+              "1086583572160",
+              "983211314716",
+              "1015421761692",
+              "990451211765",
+              "1014653626213",
+              "1007219895450",
+              "965904370828",
+              "979421312667",
+              "1003756478983",
+              "957272348098",
+              "947942576199",
+              "1014465186168",
+              "1009146636772",
+              "981653705040",
+              "993011772724",
+              "986210318894",
+              "971809729242",
+              "1008652639892",
+              "994477347211",
+              "1014720070688",
+              "973383069152",
+              "954569015162",
+              "975842942469"
+            ]
+          },
+          "basketSize": 30,
+          "backedAsset": 0
+        },
+        {
+          "nonce": "1",
+          "address": "2pDqEqaHHTRCJDhpgLgjR7LxB5X5xbUUE5R8tkw3yHFE",
+          "owner": "2aDWjWvQ3nzLq75wn1U6tHwp4Bok7LuWxHSj6KH5wg1h",
+          "grossStake": "100000",
+          "fee": "20",
+          "admittedAt": "1792742408",
+          "state": {
+            "executed": {}
+          },
+          "execution": {
+            "snapshotId": [
+              151,
+              37,
+              148,
+              251,
+              16,
+              195,
+              88,
+              95,
+              7,
+              43,
+              152,
+              232,
+              186,
+              54,
+              167,
+              25,
+              155,
+              78,
+              121,
+              102,
+              72,
+              122,
+              182,
+              233,
+              125,
+              199,
+              107,
+              235,
+              117,
+              35,
+              180,
+              218
+            ],
+            "timestamp": "1792750498",
+            "references": [
+              "1019337721660",
+              "1018142081447",
+              "1023621692854",
+              "1017713995196",
+              "1052284389922",
+              "1047925790954",
+              "1004279600086",
+              "1086583572160",
+              "983211314716",
+              "1015421761692",
+              "990451211765",
+              "1014653626213",
+              "1007219895450",
+              "965904370828",
+              "979421312667",
+              "1003756478983",
+              "957272348098",
+              "947942576199",
+              "1014465186168",
+              "1009146636772",
+              "981653705040",
+              "993011772724",
+              "986210318894",
+              "971809729242",
+              "1008652639892",
+              "994477347211",
+              "1014720070688",
+              "973383069152",
+              "954569015162",
+              "975842942469"
+            ]
+          },
+          "basketSize": 30,
+          "backedAsset": 1
+        }
+      ]
+    },
+    "checkedAtUtc": "2026-10-23T10:15:50.896Z",
+    "closingAndWithdrawalsVerified": false,
+    "newEntriesSubmittedDuringRecovery": 0
   }
 }
