@@ -143,6 +143,17 @@ A pool with a second collateral mint reports it as `deployment.secondaryCollater
 
 The publisher's `cox.publication-archive/v2` records carry `commitment: "confirmed"` and an `observedSlot`. Publications filled from them report `finalization.finalized: false`; v1 records and publications read from chain at finalized commitment report `true`. A record that mixes the two forms is refused.
 
+### Pools that add assets
+
+Basic pool schema 5 with methodology schema 3 can grow its asset list. The API reads the sealed list with the SDK's `readDynamicManifest` and takes each asset's class, Epoch id and Pyth feed from it. `CRYPTO` stays class 30; assets after the first 30 take classes from 31, so `CRYPTO` is no longer the last class. Class lists, references, previews and portfolio estimates all follow the methodology's class table.
+
+- **Publications:** each one is decoded with the methodology its own state names, read from chain by digest and kept in memory, so history stays readable after the list grows.
+- **Requests:** schema 3 requests carry 16-bit class ids, with 65535 as no class.
+- **Trades:** on these pools every transaction starts with a 256 KB memory request, and deposit, switch and redeem use `deposit_v2`, `switch_v2` and `redeem_v2`, whose last 8 bytes are the expected fee version. Quotes use `quote_request_v2` with 65535 as no class.
+- **Positions:** a wallet's position account must hold every class. A deposit creates one of 4,096 bytes, which fits up to 44 classes. When a trade answers that the position must be prepared, call `POST /v1/transactions/prepare-position` with `{ owner }` until it answers 409 `NOTHING_TO_DO`; each answer creates the position or grows it by up to 8,192 bytes, and `preparation` gives the current and required sizes.
+- **Epoch:** Epoch asset ids map to tickers from the methodology; each Epoch keeps the universe it opened with.
+- **A new methodology:** when the pool switches methodology, the process exits with "cox pool methodology changed" so it restarts with the new list. Cloud Run and systemd restart it.
+
 ### Live previews
 
 The publisher evaluates the methodology every second but writes to the chain only when there is work to settle. With `COX_PREVIEW_GCS`, the API follows its per-second `relative.preview/v1` records so the app can show live figures between publications. Each tick it lists the bucket from the next second and reads the newest record, so missing seconds stay gaps and are never filled. A record is relayed unchanged only after its timestamp, network, program, pool, methodology digest, scales, asset order, CRYPTO class and reference, and projection rows are checked. A record that fails is logged and skipped, and the previous one stays current.
