@@ -1375,3 +1375,11 @@ another agent needs to know.
   - **Verified:** against `https://api.getrelative.trade` in the dev server: BTC and ETH 1H, 4H, 1D and 1W open filled (the API held about 11 hours of previews), Markets sparklines filled on first paint. 53 web tests and the type check pass. Not checked with a connected wallet; not deployed to Vercel.
 - **Rules for agents:** Do not fetch preview history on a timer or per second; fetch it on load and on a range change. A malformed or missing step stays a gap; never fill or average it. History points are estimates like previews.
 - **Refs:** commits `32faa31`, `a124d1a`.
+
+### 2026-10-23 · Godwin (Claude Code) · Web app offers only USDC
+
+- **Area:** `apps/web`.
+- **What:** Godwin decided only USDC (Circle's devnet USDC, the pool's primary mint) is allowed in the web app. The tUSDC choices are removed: the swap card's mint picker, the asset page's "Pay with" tUSDC button and the portfolio's "Receive as" picker. Buys, refunds and withdrawals no longer send `collateralMint`, so the app API builds them against the primary mint. `Market.collaterals` and `collateralsOf` are gone. The landing page now says "devnet USDC" instead of "test USDC". Supersedes the second-mint part of Godwin's 2026-10-23 "Web app on pool 2 with live estimates; deployed" entry. 47 web tests and the type check pass; checked in the dev server against the live API.
+- **Rules for agents:** Do not offer the test mint (`5rpGrekf…wV3X`) or a mint picker in `apps/web`.
+- **Open:** Only the web app changed. Pool 2 still has a second vault on chain, and the app API, signer, SDK and program still accept `collateralMint`/`secondaryCollateralMint` (Joel and Peter); removing tUSDC there is their decision. Not deployed to Vercel.
+- **Refs:** commits `c0ac913`, `c8e25cc`.
