@@ -320,3 +320,36 @@ test("dual-collateral pool keys do not add custody accounts to fee configuration
     assert.deepEqual(left, right);
   }
 });
+
+test("dynamic positions materialize old staged credits before appending zero class balances", () => {
+  const originalPool = fixture("pool").account;
+  const originalPosition = fixture("position").account;
+  const pool = { ...originalPool, schemaVersion: 5, initialized: true, sequence: originalPosition.appliedSequence.addn(1),
+    classes: [...originalPool.classes, { backing: new anchor.BN(0), units: new anchor.BN(0) }] };
+  const position = { ...originalPosition, staged: true, stagedSequence: pool.sequence.addn(1),
+    stagedBurns: originalPosition.classes.map(() => new anchor.BN(0)), stagedMints: originalPosition.classes.map(() => new anchor.BN(7)),
+    stagedUnlocks: originalPosition.classes.map(() => new anchor.BN(0)), stagedPayable: new anchor.BN(11), stagedRefundable: new anchor.BN(13) };
+  const pending = committedPosition(position, pool);
+  assert.equal(pending.classes[0]!.units.toString(), originalPosition.classes[0]!.units.toString());
+  assert.equal(pending.classes.at(-1)!.units.toString(), "0");
+  assert.equal(pending.payable.toString(), position.payable.toString());
+  const finalized = committedPosition(position, { ...pool, sequence: position.stagedSequence });
+  assert.equal(finalized.classes[0]!.units.toString(), originalPosition.classes[0]!.units.addn(7).toString());
+  assert.equal(finalized.classes.at(-1)!.units.toString(), "0");
+  assert.equal(finalized.payable.toString(), position.payable.addn(11).toString());
+  assert.equal(position.classes.length, originalPosition.classes.length);
+});
+
+test("large dynamic position simulations fail with account-reader guidance before requesting a blockhash", async () => {
+  const value = fixture("pool"), owner = fixture("position").account.owner;
+  const pool = { ...value.account, schemaVersion: 5, testCollateralMint: null,
+    classes: Array.from({ length: 32 }, () => ({ backing: new anchor.BN(0), units: new anchor.BN(0) })),
+    references: Array.from({ length: 32 }, () => new anchor.BN("100000000000000")) };
+  const encoded = Buffer.from(value.info.data); encoded.writeUInt16LE(5, 8);
+  let reads = 0;
+  const connection = { getAccountInfo: async (key: PublicKey) => { reads++; assert.ok(key.equals(value.key)); return { ...value.info, data: encoded }; },
+    getLatestBlockhash: async () => { throw new Error("UnnecessaryBlockhashRequest"); } } as unknown as Connection;
+  const dynamic = { programId: program.programId, idl: program.idl, provider: { connection }, coder: { accounts: { decode: () => pool } } } as unknown as typeof program;
+  await assert.rejects(new CoxSimulations(dynamic, owner).position(value.key, owner), /CoxPositionSimulationLimit:UseCoxReader.position/);
+  assert.equal(reads, 1);
+});

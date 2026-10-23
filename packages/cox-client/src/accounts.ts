@@ -22,7 +22,7 @@ export interface Request extends Header {
   pool: PublicKey; owner: PublicKey; nonce: Integer; targetBatch: Integer; expiryBatch: Integer; operation: number; from: number; to: number; amount: Integer; units: Integer;
   minimumUnits: Integer; minimumProceeds: Integer; status: number; eligibleBatch: Integer; evaluated: boolean; boundBatch: Integer; boundSequence: Integer;
   receiptStatus: number; minted: Integer; proceeds: Integer; applied: boolean;
-  feeVersion: Integer; feeBps: number; feeCap: Integer; gross: Integer; fee: Integer; refundedAmount: Integer;
+  feeVersion: Integer; feeBps: number; feeCap: Integer; gross: Integer; fee: Integer; refundedAmount: Integer; fromId: number; toId: number;
 }
 export interface Batch extends Header {
   pool: PublicKey; batchId: Integer; sequence: Integer; cutoff: Integer; predecessorSequence: Integer; predecessorDigest: number[]; snapshotDigest: number[];
@@ -33,4 +33,5 @@ export interface Batch extends Header {
 export interface Publication extends Header {
   pool: PublicKey; sequence: Integer; batch: Integer; stateDigest: number[]; snapshotDigest: number[]; manifestDigest: number[]; statePreimage: number[]; prices: PriceWire[]; committedAt: Integer;
 }
-export interface Accounts { registry: Registry; methodology: Methodology; pool: Pool; position: Position; request: Request; batch: Batch; publication: Publication; retirement: Retirement }
+export interface UniverseSchedule extends Header { pool: PublicKey; predecessorDigest: number[]; sourceMethodology: number[]; version: Integer; identitiesDigest: number[]; expectedInstruments: number; activationTimestamp: Integer; expiresAt: Integer; cancelled: boolean; consumed: boolean }
+export interface Accounts { universeSchedule: UniverseSchedule; registry: Registry; methodology: Methodology; pool: Pool; position: Position; request: Request; batch: Batch; publication: Publication; retirement: Retirement }

@@ -250,3 +250,11 @@ cargo run --locked --manifest-path packages/cox/scripts/idl-builder/Cargo.toml -
 ```
 
 To regenerate account fixtures, run the [compiled lifecycle tests](../cox/crates/program-tests/README.md) with `COX_ACCOUNT_FIXTURES_PATH` set to the absolute fixture output path. Source or ABI changes require regeneration and verification of matching artifacts.
+
+### Dynamic-universe account reads
+
+Schema-5 Basic pools preserve CRYPTO at class 30 and support at most 255 underlying assets. Use `CoxReader.position(poolId, owner)` or `CoxSwapSdk.classBalances(owner)` for complete balances, including existing positions that have not yet materialized newly added zero balances. These read and validate account data directly. `CoxSimulations.position` is limited to 31 classes by Solana's return-data size and rejects larger dynamic pools with account-reader guidance. Versioned reference and quote simulations request the required 256 KiB heap.
+
+Universe approvals bind the predecessor, ordered instrument identities, future activation timestamp and expiry. Only the registry-authorized runtime may upload the corresponding exact-boundary capture; activation consumes its approval. A universe's recorded operator is its historical attestor. Admin-scheduled runtime rotation takes effect at the configured Basic publication batch and does not rewrite historical universe records; successor captures record the newly authorized operator.
+
+Before financial evaluation begins, a paused administrator may use `cancelDynamicPreparation` to recover an invalid or incomplete dynamic preparation in phases 4–6. It changes no balances, requests, fees, nonces or committed publication state. The batch becomes phase-7 cancellation evidence and its `pool.stageBatch` remains a high-water mark: that timestamp cannot be reused, even with different prices. Only a later publication can resume the untouched queue. Cancellation is forbidden once financial evaluation begins and is never permitted through the runtime signing service.

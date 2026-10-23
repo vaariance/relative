@@ -107,3 +107,19 @@ test("adaptive full roster snapshot matches the native publisher commitment and 
   assert.throws(() => adaptiveSnapshotDigest({ ...snapshot, roster: [1, 0] }), /InvalidAdaptiveSnapshot/);
   assert.throws(() => adaptiveSnapshotDigest({ ...snapshot, prices: [] }), /InvalidAdaptiveSnapshot/);
 });
+
+test("dynamic state supports 255 assets and reserves a distinct publication domain", () => {
+  const feeState = { fees: 0n, batchFees: 0n, feeVersion: 1n, feeBps: 2, feeCap: 200000n, feeNextVersion: 2n,
+    feePending: false, feePendingVersion: 0n, feePendingBps: 0, feePendingCap: 0n, feePendingCutoff: 0n,
+    feeInitialScheduled: true, feePolicyDigest: feePolicyDigest(state.manifest) };
+  const dynamic: State = { ...state, benchmarkMode: "operator-geometric-dynamic", tradingOpensAt: 1000n, testCollateralMint: null, feeState,
+    prices: Array(255).fill(100n), references: Array(256).fill(100000000000000n),
+    classes: Array.from({ length: 256 }, () => ({ preBacking: 0n, preUnits: 0n, postBacking: 0n, postUnits: 0n })) };
+  const bytes = stateBytes(dynamic);
+  assert.equal(bytes.subarray(4, 24).toString(), "COX/STATE/DYNAMIC/V1");
+  assert.deepEqual(decodeState(bytes), dynamic);
+  assert.throws(() => stateBytes({ ...dynamic, prices: Array(256).fill(100n) }), /InvalidDynamicState/);
+  assert.throws(() => stateBytes({ ...dynamic, references: [] }), /InvalidDynamicState/);
+  const legacyDomain = Buffer.from(bytes); legacyDomain.writeUInt32LE(12, 0);
+  assert.throws(() => decodeState(legacyDomain), /InvalidStateDomain/);
+});

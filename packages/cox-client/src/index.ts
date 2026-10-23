@@ -7,3 +7,5 @@ export * from "./simulations.ts";
 
 export * from "./retirement.ts";
 export * from "./epoch.ts";
+
+export * from "./dynamic.ts";

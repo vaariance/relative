@@ -3,6 +3,7 @@ import { BN, BorshAccountsCoder, type Idl, type Program } from "@coral-xyz/ancho
 import { PublicKey, type AccountInfo } from "@solana/web3.js";
 import type { Accounts, Pool, Position, Publication, Request } from "./accounts.ts";
 import { addresses } from "./pdas.ts";
+import { readDynamicManifest } from "./dynamic.ts";
 import { decodeState, sha256 } from "./wire.ts";
 
 const appended = {
@@ -35,25 +36,26 @@ export function decodeAccount<K extends keyof Accounts>(program: Program, name: 
   if (info.data.length < 10) throw new Error("AccountVersionMismatch");
   const schema = info.data.readUInt16LE(8);
   const legacy = name === "pool" || name === "request" ? schema === 1 : name === "batch" ? schema === 2 : false;
-  const supported = name === "pool" ? schema === 1 || schema === 2 || schema === 3 || schema === 4 : name === "request" ? schema === 1 || schema === 2 || schema === 4
-    : name === "batch" || name === "publication" ? schema === 2 || schema === 3 : name === "methodology" ? schema === 1 || schema === 2 : schema === 1;
+  const supported = name === "pool" ? schema === 1 || schema === 2 || schema === 3 || schema === 4 || schema === 5 : name === "request" ? schema === 1 || schema === 2 || schema === 3 || schema === 4
+    : name === "batch" || name === "publication" ? schema === 2 || schema === 3 || schema === 4 : name === "methodology" ? schema === 1 || schema === 2 || schema === 3 : schema === 1;
   if (!supported) throw new Error("AccountVersionMismatch");
   const fields: string[] = [...(legacy ? appended[name as keyof typeof appended] ?? [] : [])];
-  if (name === "pool" && schema !== 4) fields.push("tradingOpensAt", "testCollateralMint");
-  if (name === "request" && schema !== 4) fields.push("refundedAmount");
+  if (name === "pool" && schema < 4) fields.push("tradingOpensAt", "testCollateralMint");
+  if (name === "request" && schema !== 4 && schema !== 3) fields.push("refundedAmount");
+  if (name === "request" && schema !== 3) fields.push("fromId", "toId");
   const account = (fields.length ? compatibilityCoder(program, name, schema, fields) : program.coder.accounts).decode(name, info.data) as Accounts[K];
   for (const field of fields) {
-    const value = field === "testCollateralMint" ? null : field === "feeBps" || field === "feePendingBps" ? 0
+    const value = field === "fromId" || field === "toId" ? 65535 : field === "testCollateralMint" ? null : field === "feeBps" || field === "feePendingBps" ? 0
       : field === "feePending" || field === "feeInitialScheduled" ? false : new BN(0);
     Object.assign(account, { [field]: value });
   }
   return account;
 }
 export function checkedPublication(programId: PublicKey, pool: PublicKey, value: Publication) {
-  if (value.schemaVersion !== 2 && value.schemaVersion !== 3) throw new Error("AccountVersionMismatch");
+  if (value.schemaVersion !== 2 && value.schemaVersion !== 3 && value.schemaVersion !== 4) throw new Error("AccountVersionMismatch");
   if (!value.pool.equals(pool) || !sha256(Buffer.from(value.statePreimage)).equals(Buffer.from(value.stateDigest))) throw new Error("PublicationIdentityMismatch");
   const state = decodeState(Buffer.from(value.statePreimage));
-  if ((value.schemaVersion === 3) !== (state.feeState !== undefined)) throw new Error("PublicationVersionMismatch");
+  if ((value.schemaVersion >= 3) !== (state.feeState !== undefined) || (value.schemaVersion === 4) !== (state.benchmarkMode === "operator-geometric-dynamic")) throw new Error("PublicationVersionMismatch");
   if (!Buffer.from(state.program).equals(programId.toBuffer()) || !Buffer.from(state.pool).equals(pool.toBuffer()) || state.sequence.toString() !== value.sequence.toString() || state.batch.toString() !== value.batch.toString()
     || !Buffer.from(state.snapshot).equals(Buffer.from(value.snapshotDigest)) || !Buffer.from(state.manifest).equals(Buffer.from(value.manifestDigest))) throw new Error("PublicationStateMismatch");
   if (state.prices.length !== value.prices.length || state.prices.some((price, index) => price.toString() !== value.prices[index]!.priceE8.toString())) throw new Error("PublicationPriceMismatch");
@@ -61,7 +63,12 @@ export function checkedPublication(programId: PublicKey, pool: PublicKey, value:
 }
 export function committedPosition(position: Position, pool: Pool): Position {
   if (position.appliedSequence.gt(pool.sequence)) throw new Error("InconsistentRead");
-  if (!position.staged || !pool.initialized || position.stagedSequence.gt(pool.sequence)) return position;
+  const pad = (value: Position): Position => {
+    if (pool.schemaVersion !== 5 || value.classes.length === pool.classes.length) return value;
+    if (value.classes.length > pool.classes.length) throw new Error("InvalidPositionBalance");
+    return { ...value, classes: [...value.classes, ...Array.from({ length: pool.classes.length - value.classes.length }, () => ({ units: new BN(0), locked: new BN(0) }))] };
+  };
+  if (!position.staged || !pool.initialized || position.stagedSequence.gt(pool.sequence)) return pad(position);
   if ([position.stagedBurns, position.stagedMints, position.stagedUnlocks].some(values => values.length !== position.classes.length)) throw new Error("InvalidPositionStage");
   const classes = position.classes.map((value, index) => {
     const units = value.units.sub(position.stagedBurns[index]!).add(position.stagedMints[index]!);
@@ -69,7 +76,7 @@ export function committedPosition(position: Position, pool: Pool): Position {
     if (units.isNeg() || locked.isNeg() || locked.gt(units)) throw new Error("InvalidPositionBalance");
     return { units, locked };
   });
-  return { ...position, classes, appliedSequence: position.stagedSequence, payable: position.payable.add(position.stagedPayable), refundable: position.refundable.add(position.stagedRefundable), staged: false };
+  return pad({ ...position, classes, appliedSequence: position.stagedSequence, payable: position.payable.add(position.stagedPayable), refundable: position.refundable.add(position.stagedRefundable), staged: false });
 }
 export function committedRequest(request: Request, pool: Pool): Request {
   if (request.status !== 0 && request.applied && request.boundSequence.gt(pool.sequence)) throw new Error("InconsistentRead");
@@ -86,6 +93,11 @@ export class CoxReader {
     if (!info) throw new Error("CoxAccountNotFound");
     return decodeAccount(this.program, name, info);
   }
+  async universeSchedule(poolId: bigint, version: bigint) {
+    const pool = this.pdas.pool(poolId); const value = await this.account("universeSchedule", this.pdas.universeSchedule(pool, version));
+    if (!value.pool.equals(pool) || value.version.toString() !== version.toString()) throw new Error("UniverseScheduleIdentityMismatch");
+    return value;
+  }
   async registry() { return this.account("registry", this.pdas.registry()); }
   async retirement(poolId: bigint) {
     const pool = this.pdas.pool(poolId);
@@ -97,7 +109,7 @@ export class CoxReader {
     const key = this.pdas.pool(poolId);
     const pool = await this.account("pool", key);
     if (pool.poolId.toString() !== poolId.toString() || !pool.registry.equals(this.pdas.registry()) || !pool.vault.equals(this.pdas.vault(key))) throw new Error("PoolIdentityMismatch");
-    if (pool.classes.length < 3 || pool.classes.length > 31 || pool.references.length !== pool.classes.length) throw new Error("PoolShapeMismatch");
+    if (pool.classes.length < 3 || pool.classes.length > (pool.schemaVersion === 5 ? 256 : 31) || pool.schemaVersion === 5 && pool.classes.length < 31 || pool.references.length !== pool.classes.length) throw new Error("PoolShapeMismatch");
     if (pool.classes.reduce((sum, value) => sum + BigInt(value.backing.toString()), 0n) !== BigInt(pool.active.toString())) throw new Error("PoolBackingMismatch");
     return pool;
   }
@@ -105,13 +117,14 @@ export class CoxReader {
     const value = await this.account("methodology", address);
     if (!this.pdas.methodology(Buffer.from(value.digest)).equals(address)) throw new Error("MethodologyIdentityMismatch");
     if (value.sealed && (value.canonical.length !== value.expectedLength || !sha256(Buffer.from(value.canonical)).equals(Buffer.from(value.digest)))) throw new Error("MethodologyDigestMismatch");
+    if (value.schemaVersion === 3) readDynamicManifest(value);
     return value;
   }
   async position(poolId: bigint, owner: PublicKey) {
     const pool = await this.pool(poolId);
     const key = this.pdas.pool(poolId);
     const value = await this.account("position", this.pdas.position(key, owner));
-    if (!value.pool.equals(key) || !value.owner.equals(owner) || value.classes.length !== pool.classes.length) throw new Error("PositionIdentityMismatch");
+    if (!value.pool.equals(key) || !value.owner.equals(owner) || (pool.schemaVersion === 5 ? value.classes.length > pool.classes.length : value.classes.length !== pool.classes.length)) throw new Error("PositionIdentityMismatch");
     return committedPosition(value, pool);
   }
   async request(poolId: bigint, nonce: bigint) {

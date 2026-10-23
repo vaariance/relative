@@ -6,6 +6,7 @@ import { bytes32 } from "./wire.ts";
 
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const bn = (value: bigint) => new BN(value.toString());
+const dynamicClass = (value: number, sentinel = false) => { if (!Number.isInteger(value) || value < 0 || value > 255 && !(sentinel && value === 65535)) throw new Error("InvalidDynamicClass"); };
 export interface ManifestConfig { version: string; roster: number[]; origin: bigint; bybit: boolean; feedCheckDigest: Uint8Array }
 export interface AdaptiveManifestConfig {
   version: string;
@@ -97,6 +98,79 @@ export class CoxInstructions {
   redeemWithFee(keys: OwnerKeys, from: number, units: bigint, minimumProceeds: bigint, expiry: bigint, expectedFeeVersion: bigint) {
     return this.submit("redeemWithFee", { from, units: bn(units), minimumProceeds: bn(minimumProceeds), expiry: bn(expiry), expectedFeeVersion: bn(expectedFeeVersion) }, keys);
   }
+  depositV2(keys: OwnerKeys, to: number, amount: bigint, minimumUnits: bigint, expiry: bigint, expectedFeeVersion: bigint) {
+    dynamicClass(to);
+    return this.submit("depositV2", { to, amount: bn(amount), minimumUnits: bn(minimumUnits), expiry: bn(expiry), expectedFeeVersion: bn(expectedFeeVersion) }, keys);
+  }
+  switchV2(keys: OwnerKeys, from: number, to: number, units: bigint, minimumUnits: bigint, expiry: bigint, expectedFeeVersion: bigint) {
+    dynamicClass(from); dynamicClass(to);
+    return this.submit("switchV2", { from, to, units: bn(units), minimumUnits: bn(minimumUnits), expiry: bn(expiry), expectedFeeVersion: bn(expectedFeeVersion) }, keys);
+  }
+  redeemV2(keys: OwnerKeys, from: number, units: bigint, minimumProceeds: bigint, expiry: bigint, expectedFeeVersion: bigint) {
+    dynamicClass(from);
+    return this.submit("redeemV2", { from, units: bn(units), minimumProceeds: bn(minimumProceeds), expiry: bn(expiry), expectedFeeVersion: bn(expectedFeeVersion) }, keys);
+  }
+  registerDynamicMethodology(admin: PublicKey, digest: Uint8Array, length: number, activationBatch: bigint) {
+    return this.build("registerDynamicMethodology", { digest: [...bytes32(digest)], length, activationBatch: bn(activationBatch) }, { admin, registry: this.pdas.registry(), methodology: this.pdas.methodology(digest), systemProgram: SystemProgram.programId });
+  }
+  sealDynamicMethodology(runtime: PublicKey, pool: PublicKey, methodology: PublicKey, nextMethodology: PublicKey) {
+    return this.build("sealDynamicMethodology", {}, { runtime, registry: this.pdas.registry(), pool, methodology, nextMethodology });
+  }
+  migrateDynamicPool(admin: PublicKey, keys: PoolKeys, methodology: PublicKey, nextMethodology: PublicKey) {
+    return this.build("migrateDynamicPool", {}, { admin, registry: this.pdas.registry(), ...keys, methodology, nextMethodology });
+  }
+  scheduleUniverse(admin: PublicKey, pool: PublicKey, methodology: PublicKey, version: bigint, identitiesDigest: Uint8Array, expectedInstruments: number, activationTimestamp: bigint, expiresAt: bigint) {
+    if (!Number.isInteger(expectedInstruments) || expectedInstruments < 31 || expectedInstruments > 255 || activationTimestamp <= 0n || expiresAt < activationTimestamp || expiresAt > activationTimestamp + 86400n) throw new Error("InvalidUniverseSchedule");
+    return this.build("scheduleUniverse", { version: bn(version), identitiesDigest: [...bytes32(identitiesDigest)], expectedInstruments, activationTimestamp: bn(activationTimestamp), expiresAt: bn(expiresAt) }, { admin, registry: this.pdas.registry(), pool, methodology, schedule: this.pdas.universeSchedule(pool, version), systemProgram: SystemProgram.programId });
+  }
+  cancelUniverseSchedule(admin: PublicKey, pool: PublicKey, version: bigint) {
+    return this.build("cancelUniverseSchedule", {}, { admin, registry: this.pdas.registry(), pool, schedule: this.pdas.universeSchedule(pool, version) });
+  }
+  registerScheduledMethodology(runtime: PublicKey, pool: PublicKey, methodology: PublicKey, version: bigint, digest: Uint8Array, length: number) {
+    return this.build("registerScheduledMethodology", { digest: [...bytes32(digest)], length }, { runtime, registry: this.pdas.registry(), pool, methodology, schedule: this.pdas.universeSchedule(pool, version), nextMethodology: this.pdas.methodology(digest), systemProgram: SystemProgram.programId });
+  }
+  uploadScheduledMethodology(runtime: PublicKey, pool: PublicKey, methodology: PublicKey, version: bigint, nextMethodology: PublicKey, offset: number, bytes: Uint8Array) {
+    return this.build("uploadScheduledMethodology", { offset, bytes: Buffer.from(bytes) }, { runtime, registry: this.pdas.registry(), pool, methodology, schedule: this.pdas.universeSchedule(pool, version), nextMethodology });
+  }
+  sealScheduledMethodology(runtime: PublicKey, pool: PublicKey, methodology: PublicKey, version: bigint, nextMethodology: PublicKey) {
+    return this.build("sealScheduledMethodology", {}, { runtime, registry: this.pdas.registry(), pool, methodology, schedule: this.pdas.universeSchedule(pool, version), nextMethodology });
+  }
+  activateUniverse(runtime: PublicKey, keys: PoolKeys, methodology: PublicKey, nextMethodology: PublicKey, version: bigint) {
+    return this.build("activateUniverse", {}, { runtime, registry: this.pdas.registry(), ...keys, methodology, nextMethodology, schedule: this.pdas.universeSchedule(keys.pool, version) });
+  }
+  beginDynamicPublication(keys: PoolKeys & { payer: PublicKey; runtime: PublicKey; methodology: PublicKey }, batchId: bigint, sequence: bigint, predecessor: Uint8Array, snapshot: Uint8Array, benchmark: bigint) {
+    return this.build("beginDynamicPublication", { batchId: bn(batchId), sequence: bn(sequence), predecessor: [...bytes32(predecessor)], snapshot: [...bytes32(snapshot)], benchmark: bn(benchmark) }, { ...keys, registry: this.pdas.registry(), batch: this.pdas.batch(keys.pool), systemProgram: SystemProgram.programId });
+  }
+  appendDynamicPrices(runtime: PublicKey, pool: PublicKey, methodology: PublicKey, offset: number, prices: readonly AdaptivePublishPrice[]) {
+    if (!Number.isInteger(offset) || offset < 0 || offset > 254 || prices.length < 1 || prices.length > 16) throw new Error("InvalidDynamicPricePage");
+    return this.build("appendDynamicPrices", { offset, prices: prices.map(price => ({ ...price, priceE8: bn(price.priceE8), candleStart: bn(price.candleStart) })) }, { runtime, registry: this.pdas.registry(), pool, methodology, batch: this.pdas.batch(pool) });
+  }
+  sealDynamicPublication(runtime: PublicKey, pool: PublicKey, methodology: PublicKey) {
+    return this.build("sealDynamicPublication", {}, { runtime, registry: this.pdas.registry(), pool, methodology, batch: this.pdas.batch(pool) });
+  }
+  prepareDynamicRevaluation(runtime: PublicKey, pool: PublicKey, methodology: PublicKey, offset: number, limit = 16) {
+    if (!Number.isInteger(offset) || offset < 0 || offset > 254 || !Number.isInteger(limit) || limit < 1 || limit > 16) throw new Error("InvalidDynamicRevaluationPage");
+    return this.build("prepareDynamicRevaluation", { offset, limit }, { runtime, registry: this.pdas.registry(), pool, methodology, batch: this.pdas.batch(pool) });
+  }
+  finishDynamicRevaluation(runtime: PublicKey, pool: PublicKey, methodology: PublicKey, offset: number, limit = 16) {
+    if (!Number.isInteger(offset) || offset < 0 || offset > 255 || !Number.isInteger(limit) || limit < 1 || limit > 16) throw new Error("InvalidDynamicRevaluationPage");
+    return this.build("finishDynamicRevaluation", { offset, limit }, { runtime, registry: this.pdas.registry(), pool, methodology, batch: this.pdas.batch(pool) });
+  }
+  cancelDynamicPreparation(admin: PublicKey, pool: PublicKey) {
+    return this.build("cancelDynamicPreparation", {}, { admin, registry: this.pdas.registry(), pool, batch: this.pdas.batch(pool) });
+  }
+  growDynamicAccount(payer: PublicKey, pool: PublicKey, target: PublicKey, additionalBytes: number) {
+    if (!Number.isInteger(additionalBytes) || additionalBytes <= 0 || additionalBytes > 8192) throw new Error("InvalidDynamicGrowth");
+    return this.build("growDynamicAccount", { additionalBytes }, { payer, registry: this.pdas.registry(), pool, target, systemProgram: SystemProgram.programId });
+  }
+  initializeDynamicPosition(owner: PublicKey, pool: PublicKey) {
+    return this.build("initializeDynamicPosition", {}, { owner, pool, position: this.pdas.position(pool, owner), systemProgram: SystemProgram.programId });
+  }
+  quoteRequestV2(pool: PublicKey, operation: 0 | 1 | 2, from: number, to: number, amount: bigint, units: bigint, expectedFeeVersion: bigint) {
+    dynamicClass(from, true); dynamicClass(to, true);
+    return this.build("quoteRequestV2", { operation, from, to, amount: bn(amount), units: bn(units), expectedFeeVersion: bn(expectedFeeVersion) }, { pool });
+  }
+  readReferenceV2(pool: PublicKey, classIndex: number) { dynamicClass(classIndex); return this.build("readReferenceV2", { class: classIndex }, { pool }); }
   cancel(keys: Omit<OwnerKeys, "userToken">) {
     const { owner, ...rest } = keys;
     return this.build("cancel", {}, { ...rest, authority: owner, registry: this.pdas.registry() });
