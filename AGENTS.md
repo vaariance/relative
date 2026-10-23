@@ -1604,3 +1604,26 @@ another agent needs to know.
   - **Verified on current pool 2 (schema 4):** publications 0 to 8 without gaps, status fresh, vault covered (5,000,431), trading open, fee version 1, change feed `healthy`, previews 1 second old, 30 assets, Epoch routes 200, no warnings logged by the new revision.
 - **Rules for agents:** The schema 5 paths (class table, V2 instructions, `prepare-position`) have only been tested against constructed accounts; check them again on the live pool after Peter's migration.
 - **Open:** Peter: the schema 5 migration and the LIT activation time. Joel: the faucet API (ownership challenge, shared claim ledger, limits).
+
+### 2026-10-23 · Joel (Claude Code) · Devnet faucet API live behind an allowlist
+
+- **Area:** `apps/app-api` (`src/cox/faucet.ts`, `src/cox/document-store.ts`, server, main), `packages/app-api`; Cloud Run `cox-app-api-live`; Firestore database `cox-app-api`; Secret Manager `cox-faucet-ip-key`.
+- **What:** The API side of Peter's 2026-10-23 faucet plan.
+  - **Routes:** `POST /v1/faucet/challenge`, `POST /v1/faucet/claim`, `GET /v1/faucet/status?owner=`, with client calls `faucetChallenge`, `faucetClaim` and `faucetStatus`.
+  - **Grant:** 100 rlUSD, plus 0.01 devnet SOL when the wallet holds under 0.005, built with Peter's `devnetFaucetInstructions`.
+  - **Ledger:** challenges, wallet cooldowns, daily budgets and claims are kept in Firestore. One transaction uses the challenge, starts the 24-hour cooldown and counts the per-IP (3) and global (50) daily budgets.
+  - **Unclear sends:** signed bytes are saved before broadcast. An unclear send or confirmation is checked on chain before the wallet can claim again.
+  - **Deployed:** revision `cox-app-api-live-00021-cmn` (image `cox-app-api:67670d1`) with `COX_FAUCET_ENABLED=false` and one allowlisted test wallet, `AfXvGQpYcZwc7MWBPw9HW7TRsMXx4bL6sqbU6huxQYsN`. The signer endpoint and audience are Cloud Run settings only.
+  - **Verified on devnet:**
+    - One claim finalized at slot 514360859 (signature `4QBoB5kL…rVSUz5`), confirmed in 4.5 s.
+    - The wallet holds 100 rlUSD and 0.01 SOL; the faucet treasury went from 9,900 to 9,800 rlUSD.
+    - A second claim got 429 `FAUCET_COOLDOWN` with `retry-after`, and a wallet off the allowlist got 409 `FAUCET_DISABLED`.
+    - Two earlier attempts on `00018-bz9` were signed but never sent, because the API compared the signer's base64 signature as base58 (fixed in `5cd66e9`). Both were released, with no cooldown or budget kept.
+- **Rules for agents:**
+  - The visitor's address is the first `X-Forwarded-For` entry, which the gateway sets. The trade POST limit uses the last entry, Cloudflare's, so it may be shared by every gateway visitor; this is still unchecked.
+  - Never add a timer that reads wallets or the chain for the faucet.
+- **Open:**
+  - **Godwin:** the Get test funds UI against `apps/app-api/README.md` (Devnet faucet).
+  - **Peter:** approval to open claims (`COX_FAUCET_ENABLED=true`).
+  - **Joel:** set `COX_FAUCET_FORWARD_URL` on the VM API. Secret version 1 of `cox-faucet-ip-key` holds a stray carriage return and is unused; version 2 is live.
+- **Refs:** `apps/app-api/README.md` (Devnet faucet), commits `25ee894`..`67670d1`.
