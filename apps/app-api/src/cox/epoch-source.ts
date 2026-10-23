@@ -27,6 +27,7 @@ const PAST_EPOCHS = 2;
 const FUTURE_EPOCHS = 6;
 const LOT_OWNER_OFFSET = 98;
 const CACHE_LIMIT = 1_000;
+const DEFAULT_ASSET_IDS: ReadonlyMap<number, string> = new Map(PROTOCOL_ASSET_IDS.map((id, index) => [index, id]));
 const PHASES: Record<string, EpochPhase> = { open: "open", scoring: "scoring", allocating: "allocating", settled: "settled", voided: "voided" };
 const LOT_STATES: Record<string, EpochLotState> = { pending: "pending", executed: "executed", scored: "scored", claimable: "claimable", withdrawn: "withdrawn" };
 
@@ -97,6 +98,7 @@ export interface EpochSourceOptions {
   connection: Connection;
   program: Program;
   config: PublicKey;
+  assetIds?: ReadonlyMap<number, string>;
   now?: () => number;
 }
 
@@ -106,12 +108,6 @@ const seconds = (value: Integer): number => {
   if (!Number.isSafeInteger(parsed)) throw new Error("EpochTimeOutOfRange");
   return parsed;
 };
-
-function ticker(id: number): string {
-  const value = PROTOCOL_ASSET_IDS[id];
-  if (!value) throw new Error("EpochAssetUnknown");
-  return value;
-}
 
 function variant<T extends string>(value: Variant, names: Record<string, T>): { name: T; fields: Record<string, Integer> } {
   const keys = Object.keys(value);
@@ -192,6 +188,12 @@ export class EpochSource {
     return value;
   }
 
+  private ticker(id: number): string {
+    const value = (this.options.assetIds ?? DEFAULT_ASSET_IDS).get(id);
+    if (!value) throw new Error("EpochAssetUnknown");
+    return value;
+  }
+
   cacheUntilInvalidated(): void {
     this.caching = true;
   }
@@ -236,7 +238,7 @@ export class EpochSource {
   private view(address: PublicKey, opensAt: number, account: EpochAccount, vault: bigint | null): Epoch {
     const state = account.state;
     const closesAt = opensAt + EPOCH_SECONDS;
-    const universe = account.universe.map((asset) => ({ id: asset.id, assetId: ticker(asset.id), originPrice: text(asset.originPrice) }));
+    const universe = account.universe.map((asset) => ({ id: asset.id, assetId: this.ticker(asset.id), originPrice: text(asset.originPrice) }));
     if (!state || vault === null) {
       return { address: address.toBase58(), opensAt, closesAt, phase: "draft", sealed: false, entriesOpen: false, universe, nextNonce: null, lots: null, totalWeight: null, settlementPot: null, allZero: null, closingReferences: [], ledger: null };
     }
@@ -263,7 +265,7 @@ export class EpochSource {
       totalWeight: text(state.totalWeight),
       settlementPot: text(state.settlementPot),
       allZero: state.allZero,
-      closingReferences: state.closingReferences.map((r) => ({ assetId: ticker(r.assetId), reference: text(r.value) })),
+      closingReferences: state.closingReferences.map((r) => ({ assetId: this.ticker(r.assetId), reference: text(r.value) })),
       ledger,
     };
   }
@@ -325,8 +327,8 @@ export class EpochSource {
       grossStake: text(state.grossStake),
       fee: text(state.fee),
       admittedAt: seconds(state.admittedAt),
-      basket: state.basket.map(ticker),
-      backedAsset: ticker(state.backedAsset),
+      basket: state.basket.map((id) => this.ticker(id)),
+      backedAsset: this.ticker(state.backedAsset),
       execution: state.execution ? { timestamp: seconds(state.execution.timestamp), references: state.execution.references.map(text) } : null,
       state: name,
       score: name === "scored" ? text(fields.score!) : null,
@@ -355,7 +357,7 @@ export class EpochSource {
     if (!Array.isArray(input.basket) || input.basket.length !== EPOCH_BASKET_SIZE) throw new TransactionInputError(`basket must list ${EPOCH_BASKET_SIZE} assets`);
     const mint = this.collateral(input.collateralMint);
     const { address, account } = await this.state(selection);
-    const ids = new Map(account.universe.map((asset) => [ticker(asset.id), asset.id]));
+    const ids = new Map(account.universe.map((asset) => [this.ticker(asset.id), asset.id]));
     const basket = input.basket.map((asset) => {
       const id = typeof asset === "string" ? ids.get(asset) : undefined;
       if (id === undefined) throw new TransactionInputError(`basket asset ${String(asset)} is not in this Epoch's universe`);
