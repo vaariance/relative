@@ -9,7 +9,8 @@
     "./swap": "./src/swap.ts",
     "./routed": "./src/routed.ts",
     "./jupiter": "./src/jupiter.ts",
-    "./epoch": "./src/epoch.ts"
+    "./epoch": "./src/epoch.ts",
+    "./faucet": "./src/faucet.ts"
   },
   "scripts": {
     "test": "node --test test/*.test.ts",

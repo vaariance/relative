@@ -258,3 +258,20 @@ Schema-5 Basic pools preserve CRYPTO at class 30 and support at most 255 underly
 Universe approvals bind the predecessor, ordered instrument identities, future activation timestamp and expiry. Only the registry-authorized runtime may upload the corresponding exact-boundary capture; activation consumes its approval. A universe's recorded operator is its historical attestor. Admin-scheduled runtime rotation takes effect at the configured Basic publication batch and does not rewrite historical universe records; successor captures record the newly authorized operator.
 
 Before financial evaluation begins, a paused administrator may use `cancelDynamicPreparation` to recover an invalid or incomplete dynamic preparation in phases 4–6. It changes no balances, requests, fees, nonces or committed publication state. The batch becomes phase-7 cancellation evidence and its `pool.stageBatch` remains a high-water mark: that timestamp cannot be reused, even with different prices. Only a later publication can resume the untouched queue. Cancellation is forbidden once financial evaluation begins and is never permitted through the runtime signing service.
+
+
+### Devnet faucet transaction preparation
+
+The existing custom devnet mint is named **rlUSD**, with six decimals. Its mint address, balances and pool backing are unchanged. It is a test token distinct from Circle's devnet USDC; neither has real-dollar redemption value.
+
+`@cox/client/faucet` exports `devnetFaucetInstructions`, `devnetFaucetTokenAccount`, the fixed rlUSD test mint, `DEVNET_FAUCET_TOKEN_SYMBOL`, `DEVNET_FAUCET_TOKEN_DECIMALS` and grant limits. The pure builder creates no network calls and contains no signing credentials. It always includes idempotent recipient ATA creation, then a checked six-decimal token transfer; an optional SOL grant targets the same recipient. The default token amount is 100 rlUSD and the maximum optional SOL grant is 0.01 devnet SOL.
+
+```ts
+const instructions = devnetFaucetInstructions({
+  faucet: faucetPublicKey,
+  recipient: userWallet,
+  solLamports: needsDevnetSol ? 10_000_000n : 0n,
+});
+```
+
+Joel's authenticated API validates the ownership challenge, durable eligibility and budget before preparing this transaction, obtains a fresh blockhash, and requests the dedicated `devnet-faucet` signer with operation kind `devnet-faucet-claim` and expiry within 60 seconds. Persist the signed transaction identity before broadcast; never replace an ambiguous submission without reconciliation. Wallet users do not sign the grant transaction or receive faucet authority. The frontend calls the claim API, labels the collateral rlUSD, and refreshes balances after confirmation without adding wallet RPC polling. Public claims are not enabled by these builders.
