@@ -1401,3 +1401,37 @@ another agent needs to know.
 - **Verification:** 130 isolated native tests and 174 tests with the unfinished inclusion changes pass. Peter explicitly approved the scoped source/log commits and rollout. The five-second price limit, contracts and signing permissions are unchanged.
 - **Open:** Committed Linux build, live installation and successful trade verification remain required. The replacement 08:00–12:00 UTC Epoch queued two lots but its diagnostic runner timed out awaiting execution; this is not a passed lifecycle. Preserve its original closing timestamp and existing lots.
 - **Refs:** `apps/cox-publisher/native/src/executor.rs`, `apps/cox-publisher/native/src/worker.rs`; source commit `490a285`.
+
+### 2026-10-23 · Peter (Codex) · Real Epoch test stopped before entry construction
+
+- **Area:** Devnet Epoch `FN5K1VRfnvA1EyFMA3aa6mnpmBVchEXCPiBZdrzaktcq`, private lifecycle runner and existing deployment record.
+- **What:** The 00:00–04:00 UTC test failed at 00:00:05 before any transaction was constructed: raw IDL `test_vault` was looked up in a camelCase account map. Corrected the runner to use Anchor-normalized `program.idl.instructions`; syntax and real-IDL queue encoding checks pass. Preserved the failed runner/result. Finalized audit at slot 514134697 confirms nonce 0, no lots, all Epoch liabilities and both vaults zero, and the owner's original 999601 test-collateral units unchanged. Publisher/preview remain active. Removed the temporary VM wallet copy after verifying its local original and removed the temporary follow-up.
+- **Rules for agents:** This is a failed live lifecycle verification, not successful closing/payout/withdrawal evidence. Do not insert late entries, alter this Epoch's timing or replace its closing timestamp. The corrected runner was installed but not restarted. A new future four-hour run is required before passing the live Epoch gate.
+- **Open:** Live execution, exact closing, payout and withdrawal verification remain unproven. Deployment-record and agent-log commits require approval; keep the log commit separate. No API/UI, operator/admin keys or contract was changed by this follow-up.
+- **Refs:** `packages/cox/deploy/adaptive-pool-2-devnet.json`; private `.cox/epoch-00-live-failed-result.json`, `.cox/epoch-lifecycle-runner.cjs`.
+
+### 2026-10-23 · Peter (Codex) · Deadline release restored live execution
+
+- **Area:** Rust publisher release and existing devnet deployment record.
+- **What:** Approved source `490a285` and separate log `90d4def` were rebased onto the team's current `working` branch and pushed. Installed release `90d4deff3e344a7a88d1069e306bc93c067b7f2a`, Linux SHA-256 `fd8d427f125bcd8e14d04ea361dabcee00806211359dca3b07b29d603fc8d773`, preserving configuration and the previous release for rollback. No contract or signer binding changed. Refunded expired Basic diagnostic nonce 3 in full.
+- **Verification:** Fresh Basic nonce 5 deposit, nonce 6 redemption and withdrawal finalized through sequences 7–8, charging 20 and 19 test-collateral units. Final custody and liabilities both equal 5,000,431 units; the owner retains no test-position units, locks or payable. Other users' positions remain in the pool. Both already-queued replacement Epoch lots executed at 10:14:58 UTC with 30 references each; custody 200,000 equals net stakes 199,960 plus held fees 40.
+- **Open:** Exact 12:00 UTC Epoch closing, candidate payouts and withdrawals remain unverified. The failed 08:05 diagnostic report is preserved; recovery adds no entries. These results do not establish subsecond end-to-end settlement.
+- **Refs:** `packages/cox/deploy/adaptive-pool-2-devnet.json`; private `.cox/deadline-fixed-basic-roundtrip.json`, `.cox/event-driven-basic-refund.json`.
+
+### 2026-10-23 · Peter (Codex) · Dynamic contract SDK and signer foundation verified
+
+- **Area:** Basic contract, generated IDL, client SDK and signer dynamic bindings; prepared source only.
+- **What:** Prepared schema-5 in-place migration and immutable universe versions, stable classes/origins, scheduled inclusion and bounded snapshot preparation. CRYPTO remains class 30; this release supports at most 255 underlying assets plus CRYPTO. SDK reads zero-pad older positions and decode version-4 publications. Strict dynamic signer bindings and staged Epoch snapshots are opt-in; no live binding or contract changed.
+- **Verification:** Host 46, SDK 88, signer 68, compiled devnet 56 and production 53 tests pass (one existing ignored test per compiled suite). Devnet artifact SHA-256 `c9b4892051951e53f992100eeae36638dd64de32895a4c31cd5042df7dc0d276`. Captured-state rehearsal preserved sequence 4, one position, three requests and custody; local signature verification was disabled for rehearsal, so this is not a live signing proof.
+- **Rules for agents:** Preserve current positions and custody. Preparation phases 4–6 and canceled phase 7 are not committed financial state. Joel must finish versioned manifest/history/cache integration before live activation. Re-capture current state before migration; the old rehearsal capture is not a current predecessor.
+- **Open:** Scoped commit approval, real Epoch lifecycle pass, signer rollout, fresh-state rehearsal and operator-approved live inclusion. LIT is the selected candidate, not an active asset.
+- **Refs:** `packages/cox-client/README.md`, `apps/signer/README.md`; contract and SDK tests.
+
+### 2026-10-23 · Peter (Codex) · Native inclusion transition and recovery prepared
+
+- **Area:** Rust publisher, methodology, previews and backup recovery; prepared source only.
+- **What:** Added validated candidate preparation, exact-boundary signed Pyth capture, immutable predecessor-linked receipts, confirmed schedule checks and staged transition execution using the existing signer/checkpoint. Preserve global benchmark continuity and permanent origins; freeze each Epoch's roster and each executed 30-asset basket. Missing boundary data requires explicit rescheduling. Staged snapshots and receipts join recovery; old-universe preview export stops at the boundary.
+- **Verification:** Integrated native suite passes 174 tests, including 255-asset capacity, recovery, signer/lineage guards and staged snapshot behavior. Worst-case request is approximately 2.74 MB and stored journal 5.90 MB. LIT Pyth Pro feed 2921 was validated with signed one-second data; its proposed class is 31 and it has no invented mint.
+- **Rules for agents:** Before expanded activation raise backup `max_file_bytes` to 16 MiB; the deployed 1 MiB setting is insufficient. Historical signer keys unavailable after restart fail closed. Benchmark computation remains operator-attested. Neither the dynamic contract nor this prepared runtime has been deployed.
+- **Open:** Scoped source/log approval and release gates described in the publisher README; no live LIT approval, schedule or activation yet.
+- **Refs:** `apps/cox-publisher/README.md`, `packages/cox-methodology/README.md`; native inclusion/capacity tests.
