@@ -123,6 +123,7 @@ impl Rpc {
                 .get("code")
                 .and_then(Value::as_i64)
                 .ok_or(Error::InvalidResponse)?;
+            eprintln!("Solana RPC rejected {method}: code {code}");
             return Err(if [-32005, -32603].contains(&code) {
                 Error::Unavailable
             } else {

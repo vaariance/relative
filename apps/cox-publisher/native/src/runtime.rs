@@ -245,6 +245,9 @@ impl SnapshotArchive {
     }
 }
 impl Snapshots for SnapshotArchive {
+    fn selection_time_ms(&self, _: u64) -> Result<u64, worker::Error> {
+        now_ms().map_err(|_| worker::Error::Clock)
+    }
     fn select(
         &self,
         work: &[Work],
@@ -708,7 +711,10 @@ pub async fn run(path: &Path) -> Result<(), Error> {
                     }
                     schedule.after_tick(value,now);
                 },
-                Err(worker::Error::Storage|worker::Error::Clock|worker::Error::Signer)=>return Err(Error::Publisher),
+                Err(error @ (worker::Error::Storage|worker::Error::Clock|worker::Error::Signer))=>{
+                    eprintln!("Publisher stopped: {error:?}");
+                    return Err(Error::Publisher);
+                },
                 Err(error)=>{
                     changes.set_health(false).map_err(|_|Error::Storage)?;
                     eprintln!("Publisher reconciliation deferred: {error:?}");

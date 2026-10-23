@@ -45,6 +45,9 @@ pub trait Chain {
         -> Result<TransactionStatus, Error>;
 }
 pub trait Snapshots {
+    fn selection_time_ms(&self, fallback: u64) -> Result<u64, Error> {
+        Ok(fallback)
+    }
     fn select(
         &self,
         work: &[Work],
@@ -173,16 +176,17 @@ impl<C: Chain, P: Snapshots, S: Store> Publisher<C, P, S> {
             } => {
                 state.next_attempt_ms = next_ms;
                 self.persist(state.clone())?;
-                let Some(snapshot) = self.prices.select(&work, closing_ms, now_ms)? else {
+                let selection_ms = self.prices.selection_time_ms(now_ms)?;
+                let Some(snapshot) = self.prices.select(&work, closing_ms, selection_ms)? else {
                     return Ok(Tick::Waiting(next_ms));
                 };
                 if snapshot.timestamp_us % 1000 != 0 {
                     return Err(Error::Snapshot);
                 }
                 let timestamp = snapshot.timestamp_us / 1000;
-                if snapshot.benchmark <= 0 || snapshot.signed_payload.is_empty() || timestamp > now_ms
+                if snapshot.benchmark <= 0 || snapshot.signed_payload.is_empty() || timestamp > selection_ms
                     || closing_ms.is_some_and(|close| timestamp != close)
-                    || (closing_ms.is_none() && (now_ms - timestamp > self.max_price_age_ms || work.iter().any(|item| matches!(item, Work::Entry { eligible_after_ms, .. } if timestamp <= *eligible_after_ms)))) { return Err(Error::Snapshot); }
+                    || (closing_ms.is_none() && (selection_ms - timestamp > self.max_price_age_ms || work.iter().any(|item| matches!(item, Work::Entry { eligible_after_ms, .. } if timestamp <= *eligible_after_ms)))) { return Err(Error::Snapshot); }
                 let draft = self.chain.prepare(&work, Some(&snapshot)).await?;
                 if draft.request_id.is_empty()
                     || draft.unsigned_bytes.is_empty()

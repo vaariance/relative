@@ -10,7 +10,7 @@ async fn main() {
             (Some("--config"),Some(path),None) => match relative_publisher::runtime::run(std::path::Path::new(&path)).await {
                 Ok(())=>Ok(()),
                 Err(relative_publisher::runtime::Error::Disabled)=>{println!("Publisher is disabled");Ok(())},
-                Err(_)=>Err("Native publisher stopped; configuration, custody, feed or recovery validation failed"),
+                Err(error)=>{eprintln!("Native runtime exit: {error:?}");Err("Native publisher stopped; configuration, custody, feed or recovery validation failed")},
             },
             _=>Err("Usage: relative-publisher run --config PATH"),
         },

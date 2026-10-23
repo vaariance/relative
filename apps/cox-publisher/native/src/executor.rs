@@ -245,6 +245,16 @@ impl<S: DraftSigner> Executor<S> {
             .publication_archive
             .as_ref()
             .ok_or(worker::Error::Storage)?;
+        if let Some(record) = archive
+            .read(state.basic.pool.sequence)
+            .map_err(|_| worker::Error::Storage)?
+        {
+            return if record.state_digest == hex::encode(state.basic.pool.state_digest) {
+                Ok(())
+            } else {
+                Err(worker::Error::Storage)
+            };
+        }
         let response=chain_error(self.reader.rpc.call("getAccountInfo",json!([archive.address().to_string(),{"commitment":"confirmed","encoding":"base64","minContextSlot":state.slot}])).await)?;
         let slot = response
             .pointer("/context/slot")
@@ -804,10 +814,6 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
             }
             break transaction;
         };
-        let current = self.read_state().await?;
-        if critical_digest(&current) != guard {
-            return Err(worker::Error::StaleDraft);
-        }
         let clock = now()?;
         let mut expiry = clock.checked_add(20).ok_or(worker::Error::Clock)?;
         if let Some(observation) = observation {
@@ -865,9 +871,11 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
                     draft.expires_at_seconds,
                     draft.last_valid_block_height,
                 )
-            || draft.expires_at_seconds <= now()?
         {
             return Err(worker::Error::Signer);
+        }
+        if draft.expires_at_seconds <= now()? {
+            return Err(worker::Error::StaleDraft);
         }
         let current = self.read_state().await?;
         self.validate_anchor(&current)?;
@@ -875,7 +883,15 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
             return Err(worker::Error::StaleDraft);
         }
         self.preserve_publication(&current).await?;
-        let pending = self.signer.sign(draft).await?;
+        if draft.expires_at_seconds <= now()? {
+            return Err(worker::Error::StaleDraft);
+        }
+        let pending = match self.signer.sign(draft).await {
+            Err(worker::Error::Signer) if draft.expires_at_seconds <= now()? => {
+                return Err(worker::Error::StaleDraft);
+            }
+            result => result?,
+        };
         if !pending_valid(self.reader.operator, &pending)
             || pending
                 .signed_bytes
@@ -893,9 +909,6 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
         if !pending_valid(self.reader.operator, pending) {
             return Err(worker::Error::Signer);
         }
-        let current = self.read_state().await?;
-        self.validate_anchor(&current)?;
-        self.preserve_publication(&current).await?;
         let result=chain_error(self.reader.rpc.call("sendTransaction",json!([STANDARD.encode(&pending.signed_bytes),{"encoding":"base64","skipPreflight":false,"preflightCommitment":"confirmed","maxRetries":0}])).await)?;
         if result.as_str() != Some(pending.signature.as_str()) {
             return Err(worker::Error::Chain);
@@ -1212,6 +1225,30 @@ mod tests {
     fn transaction_identity_commits_expiry_and_valid_height() {
         assert_ne!(draft_hash(&[1, 2], 30, 100), draft_hash(&[1, 2], 31, 100));
         assert_ne!(draft_hash(&[1, 2], 30, 100), draft_hash(&[1, 2], 30, 101));
+    }
+    #[tokio::test]
+    async fn expired_unsigned_draft_is_stale_before_any_rpc_or_signer_call() {
+        let mut executor = executor();
+        let guard = [8; 32];
+        let unsigned_bytes = vec![1, 2, 3];
+        let expiry = 1;
+        let height = 100;
+        let hash = draft_hash(&unsigned_bytes, expiry, height);
+        let draft = DraftTransaction {
+            request_id: format!("rp:{}:{hash}", hex::encode(guard)),
+            unsigned_bytes,
+            blockhash: "unused".into(),
+            last_valid_block_height: height,
+            expires_at_seconds: expiry,
+        };
+        assert_eq!(
+            worker::Chain::sign(&mut executor, &draft).await,
+            Err(worker::Error::StaleDraft)
+        );
+        assert_eq!(
+            executor.reader.rpc.usage().unwrap().physical_http_requests,
+            0
+        );
     }
     #[test]
     fn size_trimming_keeps_snapshot_publication_and_rent_close_atomic() {

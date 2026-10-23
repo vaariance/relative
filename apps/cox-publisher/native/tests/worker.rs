@@ -229,3 +229,43 @@ async fn stale_unsigned_draft_is_cleared_without_broadcast_or_losing_signed_unce
         2
     );
 }
+#[tokio::test]
+async fn price_selection_uses_clock_after_authoritative_reads() {
+    struct FreshPrices;
+    impl Snapshots for FreshPrices {
+        fn selection_time_ms(&self, fallback: u64) -> Result<u64, Error> {
+            assert_eq!(fallback, 10_000);
+            Ok(13_000)
+        }
+        fn select(
+            &self,
+            _: &[Work],
+            closing: Option<u64>,
+            now: u64,
+        ) -> Result<Option<Observation>, Error> {
+            assert_eq!(now, 13_000);
+            assert_eq!(closing, None);
+            Ok(Some(Observation {
+                universe_digest: [1; 32],
+                timestamp_us: 13_000_000,
+                benchmark: 100,
+                prices_e8: vec![100],
+                signed_payload: vec![1],
+            }))
+        }
+    }
+    let state = Arc::new(Mutex::new(State {
+        work: true,
+        ..State::default()
+    }));
+    let mut publisher = Publisher::new(
+        Accounts(state.clone()),
+        FreshPrices,
+        Disk(state.clone()),
+        2,
+        2_000,
+    )
+    .unwrap();
+    assert_eq!(publisher.tick(10_000).await, Ok(Tick::Submitted(11_000)));
+    assert!(state.lock().unwrap().saved.pending.is_some());
+}
