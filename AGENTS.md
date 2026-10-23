@@ -1435,3 +1435,22 @@ another agent needs to know.
 - **Rules for agents:** Before expanded activation raise backup `max_file_bytes` to 16 MiB; the deployed 1 MiB setting is insufficient. Historical signer keys unavailable after restart fail closed. Benchmark computation remains operator-attested. Neither the dynamic contract nor this prepared runtime has been deployed.
 - **Open:** Scoped source/log approval and release gates described in the publisher README; no live LIT approval, schedule or activation yet.
 - **Refs:** `apps/cox-publisher/README.md`, `packages/cox-methodology/README.md`; native inclusion/capacity tests.
+
+### 2026-10-23 · Joel (Claude Code) · App API ready for pools that add assets (not deployed)
+
+- **Area:** `apps/app-api`, `packages/app-api`; branch `working`.
+- **What:** Peter's 2026-10-23 "SDK ready on working" request, on SDK `3807cdb`.
+  - **Manifest:** methodology schema 3 is read with `readDynamicManifest`. Each asset's class, Epoch id and Pyth feed come from its instrument. `CRYPTO` stays class 30, and LIT would be class 31 and Epoch asset 30.
+  - **Publications and requests:** every publication is decoded with the methodology its own state names, loaded from chain by digest and kept in memory, so history survives a methodology change. Schema 3 requests use `fromId`/`toId`, with 65535 as no class.
+  - **Batches:** only batch phase 2 counts as committed, so phases 4 to 7 are already ignored.
+  - **Positions:** read through the SDK's `committedPosition`, which pads older positions with zero units.
+  - **Trades on pool schema 5:** every transaction starts with a 256 KB heap frame. Trades use `deposit_v2`, `switch_v2` and `redeem_v2`, and quotes use `quote_request_v2`. Submission accepts the V2 instructions (fee version in their last 8 bytes) and `initialize_dynamic_position` and `grow_dynamic_account`.
+  - **Position preparation:** new `POST /v1/transactions/prepare-position` (`buildPreparePosition`) creates or grows a wallet's position until it fits; it answers 409 `NOTHING_TO_DO` when ready. Trades on a too-small position are refused with that instruction.
+  - **Methodology change:** if the pool switches methodology, the process exits with "cox pool methodology changed" and its supervisor restarts it with the new list.
+  - **Fixture:** only its source hash changed (`b5c42f14…`). A `cox.exe` rebuilt from Peter's current crates gives the same economics.
+  - **Verified:** 100 app API tests pass, including a 31-instrument manifest built with the SDK's encoder, V2 builds, preparation and relay. Godwin's web app type-checks.
+- **Rules for agents:** never derive a class from list position on a schema 5 pool; use the methodology's class table. Do not deploy before Peter's live Epoch verification and his go-ahead for the dynamic contract.
+- **Open:**
+  - **Peter:** a live schema 5 pool to verify against. Historical manifest loading is covered by code but has no test with two real methodologies yet.
+  - **Godwin:** call `prepare-position` when a trade asks for it.
+- **Refs:** `apps/app-api/README.md` (Pools that add assets), commits `79b5233`..`60820f4`.
