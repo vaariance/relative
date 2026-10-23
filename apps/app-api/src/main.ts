@@ -18,6 +18,10 @@ import { checkGenesis, failoverConnection, parseRpcUrls } from "./cox/rpc.js";
 import { createCoxApiServer, type CoxApiServerOptions } from "./cox/server.js";
 import { CoxSubmissions } from "./cox/submissions.js";
 import { CoxTransactions } from "./cox/transactions.js";
+import { FirestoreDocumentStore } from "./cox/document-store.js";
+import { CoxFaucet } from "./cox/faucet.js";
+import { createSigningClient } from "@eox/signing";
+import type { Connection } from "@solana/web3.js";
 
 const GENESIS: Record<string, string> = {
   "solana-devnet": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
@@ -42,7 +46,61 @@ function required(name: string): string {
   return value;
 }
 
-async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transactions" | "submissions" | "epochs" | "preview" | "previewHistory" | "classes">> {
+function whole(name: string, fallback: string, min: number): number {
+  const text = process.env[name] ?? fallback;
+  if (!/^[0-9]{1,15}$/.test(text) || Number(text) < min) throw new Error(`invalid ${name}: ${text}`);
+  return Number(text);
+}
+
+async function openFaucet(connection: Connection, genesis: string, network: string, token: () => Promise<string>, auth: GoogleAuth): Promise<CoxFaucet | null> {
+  const url = process.env.COX_FAUCET_SIGNER_URL;
+  if (!url) return null;
+  if (process.env.COX_FAUCET_FORWARD_URL) throw new Error("set only one of COX_FAUCET_SIGNER_URL and COX_FAUCET_FORWARD_URL");
+  if (!/^https:\/\/[A-Za-z0-9.-]+(\/)?$/.test(url)) throw new Error("invalid COX_FAUCET_SIGNER_URL");
+  const audience = required("COX_FAUCET_SIGNER_AUDIENCE");
+  const address = new PublicKey(required("COX_FAUCET_ADDRESS"));
+  const ipKeyText = required("COX_FAUCET_IP_KEY");
+  if (!/^[0-9a-f]{64,128}$/.test(ipKeyText)) throw new Error("COX_FAUCET_IP_KEY must be 32 to 64 bytes of lowercase hex");
+  const project = required("APP_API_SUBMISSIONS_FIRESTORE_PROJECT");
+  const allowlist = new Set((process.env.COX_FAUCET_ALLOWLIST ?? "").split(",").map((owner) => owner.trim()).filter(Boolean).map((owner) => new PublicKey(owner).toBase58()));
+  const idClient = await auth.getIdTokenClient(audience);
+  const identityToken = async (): Promise<string> => {
+    const headers = (await idClient.getRequestHeaders()) as Record<string, string>;
+    const value = (headers.Authorization ?? headers.authorization ?? "").replace(/^Bearer /, "");
+    if (!value) throw new Error("no identity token for the faucet signer");
+    return value;
+  };
+  const signer = createSigningClient({ baseUrl: url, identityToken });
+  const signingNetwork = `solana:${genesis.slice(0, 32)}`;
+  const key = (await signer.keyDirectory()).entries.filter((entry) => entry.role === "devnet-faucet" && entry.state === "active" && entry.network === signingNetwork);
+  if (key.length !== 1) throw new Error(`expected one active devnet-faucet key, found ${key.length}`);
+  if (key[0]!.address !== address.toBase58()) throw new Error(`faucet signer key ${key[0]!.address} is not COX_FAUCET_ADDRESS`);
+  const faucet = new CoxFaucet({
+    store: new FirestoreDocumentStore(project, process.env.APP_API_SUBMISSIONS_FIRESTORE_DATABASE ?? "(default)", token),
+    connection,
+    signer,
+    faucet: address,
+    keyVersion: key[0]!.keyVersion,
+    network: signingNetwork,
+    networkLabel: network,
+    enabled: process.env.COX_FAUCET_ENABLED === "true",
+    allowlist,
+    ipKey: Buffer.from(ipKeyText, "hex"),
+    limits: {
+      cooldownSeconds: whole("COX_FAUCET_COOLDOWN_SECONDS", "86400", 3600),
+      ipDaily: whole("COX_FAUCET_IP_DAILY", "3", 1),
+      globalDaily: whole("COX_FAUCET_GLOBAL_DAILY", "50", 1),
+      solGrantLamports: BigInt(whole("COX_FAUCET_SOL_LAMPORTS", "10000000", 0)),
+      solBelowLamports: BigInt(whole("COX_FAUCET_SOL_BELOW_LAMPORTS", "5000000", 0)),
+      reserveLamports: BigInt(whole("COX_FAUCET_RESERVE_LAMPORTS", "50000000", 0)),
+    },
+    onError: (error: unknown) => console.error("cox faucet", error),
+  });
+  console.log(`cox faucet ready for ${address.toBase58()} (${process.env.COX_FAUCET_ENABLED === "true" ? "open" : `allowlist of ${allowlist.size}`})`);
+  return faucet;
+}
+
+async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transactions" | "submissions" | "epochs" | "preview" | "previewHistory" | "classes" | "faucet">> {
   const network = process.env.COX_NETWORK ?? "solana-devnet";
   const genesis = GENESIS[network];
   if (!genesis) throw new Error(`unsupported COX_NETWORK: ${network}`);
@@ -70,6 +128,7 @@ async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transaction
   if (archiveGcs) source = gcsSource(archiveGcs, token);
   const historyGcs = process.env.APP_API_HISTORY_GCS;
   const segments = historyGcs ? gcsSegments(historyGcs, token) : directorySegments(join(stateDir, `history-${poolId}`));
+  const faucet = await openFaucet(connection, genesis, network, token, auth);
   const firestoreProject = process.env.APP_API_SUBMISSIONS_FIRESTORE_PROJECT;
   const store = firestoreProject
     ? new FirestoreSubmissionStore(firestoreProject, `coxSubmissionsPool${poolId}`, token, fetch, process.env.APP_API_SUBMISSIONS_FIRESTORE_DATABASE ?? "(default)")
@@ -133,7 +192,7 @@ async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transaction
         void previewHistory.backfill().catch((error: unknown) => console.error("cox preview history backfill failed", error));
       }
       preview?.start();
-      return { source, transactions, submissions, epochs, preview, previewHistory, classes: source.classes };
+      return { source, transactions, submissions, epochs, preview, previewHistory, classes: source.classes, faucet };
     } catch (error) {
       if (!(error instanceof Error) || !["CoxAccountNotFound", "PoolMethodologyNotSealed"].includes(error.message)) throw error;
       console.log(`cox pool ${poolId} is not active on ${network} yet (${error.message}); checking again in ${POOL_WAIT_MS / 1000} s`);
@@ -146,7 +205,9 @@ const sources = mode === "cox-live" ? await live() : { source: new CoxFixtureSou
 const postPerMinute = Number(process.env.APP_API_POST_LIMIT_PER_MINUTE ?? "30");
 if (!Number.isInteger(postPerMinute) || postPerMinute < 1) throw new Error(`invalid APP_API_POST_LIMIT_PER_MINUTE: ${postPerMinute}`);
 const postLimit = { perMinute: postPerMinute, trustForwardedFor: process.env.APP_API_TRUST_FORWARDED_FOR === "true" };
-const server = createCoxApiServer({ ...sources, corsOrigin, postLimit, onError: (error) => console.error("app-api request failed", error) });
+const faucetForward = process.env.COX_FAUCET_FORWARD_URL ?? null;
+if (faucetForward !== null && !/^https:\/\/[A-Za-z0-9.-]+$/.test(faucetForward)) throw new Error("invalid COX_FAUCET_FORWARD_URL");
+const server = createCoxApiServer({ ...sources, corsOrigin, postLimit, faucetForward, onError: (error) => console.error("app-api request failed", error) });
 server.listen(port, host, () => console.log(`app-api (${mode}) listening on http://${host}:${port}`));
 
 function shutdown(): void {

@@ -13,6 +13,7 @@
     "@coral-xyz/anchor": "0.31.1",
     "@cox/client": "workspace:*",
     "@eox/app-api": "workspace:*",
+    "@eox/signing": "workspace:*",
     "@solana/web3.js": "^1.98.0",
     "google-auth-library": "^9.15.0"
   },

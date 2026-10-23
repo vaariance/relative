@@ -19,6 +19,9 @@ importers:
       '@eox/app-api':
         specifier: workspace:*
         version: link:../../packages/app-api
+      '@eox/signing':
+        specifier: workspace:*
+        version: link:../../packages/signing
       '@solana/web3.js':
         specifier: ^1.98.0
         version: 1.99.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
