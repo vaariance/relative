@@ -1,7 +1,7 @@
 import "server-only";
 import { FIXTURE_DEMO_WALLET } from "./config";
 import { COINGECKO_IDS } from "./logos";
-import { type CoxAsset, type CoxDeployment, type CoxStatus, type CryptoComposition, type Portfolio, type Publication, CoxApiError, createCoxApiClient } from "@eox/app-api";
+import { type CoxAsset, type CoxDeployment, type CoxStatus, type CryptoComposition, type Portfolio, type Preview, type Publication, CoxApiError, createCoxApiClient } from "@eox/app-api";
 
 const HISTORY = 1440;
 const PAGE = 100;
@@ -27,6 +27,14 @@ export async function getDeployment(): Promise<CoxDeployment> {
 
 export async function getStatus(): Promise<CoxStatus> {
   return (await api.status()).data;
+}
+
+export async function getPreview(): Promise<Preview | null> {
+  try {
+    return (await api.preview()).data;
+  } catch {
+    return null;
+  }
 }
 
 export async function getAssets(): Promise<CoxAsset[]> {

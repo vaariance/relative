@@ -91,6 +91,10 @@ test mint). The choice is sent as `collateralMint`. Payables are one balance
 across both mints, and a withdrawal needs liquidity in the chosen mint's
 vault. Refunds use the primary mint.
 
+### Live estimates
+
+Prices, references, the $CRYPTO level, projected class unit values and wallet value come from the per-second previews: the first one is loaded on the server, then `preview` events on the stream replace it, and the wallet estimate is read from `/v1/preview/portfolio` every 5 seconds while it is fresh. One line under the top bar (`EstimateBar`) says "Live estimate", or "Estimate paused" after 10 seconds without a newer record or when the API marks it stale, and gives the time of the last on-chain settlement. Without a preview the figures fall back to the last settled publication values and the line says so; stale figures are dimmed. A projected unit value is used only when its basis is the latest publication. The browser also keeps every preview it receives, up to 4 hours (`appendHistory`). Market line charts (asset and $CRYPTO charts, the Markets trend column and the card sparklines) draw from it one point a minute (`perMinute`), adding a point only when a minute completes, so they move once a minute while the figures update every second. Each chart range uses the live history when it covers more of the range than settled publications do, and shows settled publications as dots; otherwise it draws settled values. On the position page, unit value and worth use the projected unit value every second, with 1s, 5s and 15s intervals, when its basis is the latest publication; reference and price there follow the one-minute rule. The history starts when the page opens and is lost on reload, so longer ranges usually show settled values until the API serves preview history.
+
 Units are shown at 10^(12 + collateral decimals) quanta per displayed unit, so
 with USDC one displayed unit is 10^18 quanta. An empty class mints one unit of
 10^12 quanta per collateral base unit, so 10 USDC reads as 10 CRYPTO and a

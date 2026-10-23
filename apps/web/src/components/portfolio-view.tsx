@@ -12,6 +12,7 @@ import { direction, formatAmount, formatSigned } from "@/lib/format";
 import { expiryAfter } from "@/lib/market";
 import { CRYPTO_CLASS, type ClassView, nameOf, positionName, toNumber, unitDigits } from "@/lib/view";
 import { useAccount } from "./account";
+import { useLive } from "./live";
 import { useOpenBatch } from "./open-batch";
 import { RequestList } from "./request-list";
 import { SendButton } from "./send-button";
@@ -19,6 +20,7 @@ import { Figure, StatCard } from "./stat-card";
 
 export function PortfolioView({ classes, status, decimals }: { classes: ClassView[]; status: CoxStatus; decimals: number }) {
   const { portfolio, owner, live, loading, market } = useAccount();
+  const { wallet } = useLive();
   const [receive, setReceive] = useState<string | null>(null);
   const receiveIn = market.collaterals.find((item) => item.mint === receive) ?? market.collaterals.find((item) => item.primary) ?? null;
   const router = useRouter();
@@ -28,17 +30,19 @@ export function PortfolioView({ classes, status, decimals }: { classes: ClassVie
   const rows = (portfolio?.positions ?? []).map((position) => {
     const units = toNumber(position.units, unitDigits(decimals));
     const unitValue = classes.find((item) => item.id === position.classId)?.unitValue ?? null;
-    const redeemable = unitValue === null ? null : units * unitValue;
+    const settled = unitValue === null ? null : units * unitValue;
+    const estimated = wallet?.byClass[position.classId];
+    const redeemable = estimated === undefined || estimated === null ? settled : estimated;
     const paid = paidFor(book, position.classId, units);
     const free = BigInt(position.units) - BigInt(position.locked);
-    return { free: free > 0n ? free.toString() : null, classId: position.classId, units, locked: toNumber(position.locked, unitDigits(decimals)), unitValue, redeemable, paid, change: redeemable === null || paid === null ? null : redeemable - paid };
+    return { settled, free: free > 0n ? free.toString() : null, classId: position.classId, units, locked: toNumber(position.locked, unitDigits(decimals)), unitValue, redeemable, paid, change: redeemable === null || paid === null ? null : redeemable - paid };
   });
   const redeemable = rows.reduce((sum, row) => sum + (row.redeemable ?? 0), 0);
   const total = rows.length > 0 && rows.every((row) => row.change !== null) ? rows.reduce((sum, row) => sum + (row.change ?? 0), 0) : null;
   const tone = (value: number | null) => (value === null ? "text-muted" : { up: "text-up", down: "text-down", flat: "text-muted" }[direction(value)]);
   const payable = portfolio?.payable ?? "0";
   const cards = [
-    { label: "Worth now, about", icon: Wallet, value: redeemable, note: total === null ? null : `Gain or loss so far: ${formatSigned(total, 6)} ${COLLATERAL.symbol}` },
+    { label: "Worth now, about", icon: Wallet, value: wallet?.total ?? redeemable, note: total === null ? null : `Gain or loss so far: ${formatSigned(total, 6)} ${COLLATERAL.symbol}` },
     { label: "Pending buys", icon: Clock, value: toNumber(portfolio?.pending ?? "0", decimals), note: null },
     { label: "Refundable", icon: Undo2, value: toNumber(portfolio?.refundable ?? "0", decimals), note: null },
   ];

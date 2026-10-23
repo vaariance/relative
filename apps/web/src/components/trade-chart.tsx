@@ -12,7 +12,7 @@ export interface ChartLine {
 
 export interface ChartMark {
   cutoff: number;
-  side: "buy" | "sell";
+  side: "buy" | "sell" | "settled";
   label: string;
 }
 
@@ -148,8 +148,16 @@ export function TradeChart({ bars, candles = false, digits, label, lines = [], m
           {marks.map((mark, order) => {
             const index = nearest(points, mark.cutoff);
             if (index === null) return null;
-            const buy = mark.side === "buy";
             const cx = x(index);
+            if (mark.side === "settled") {
+              return (
+                <g key={`${mark.cutoff}-${order}`}>
+                  <circle cx={cx} cy={y(values[index])} r="4.5" fill="var(--surface)" stroke="var(--ink)" strokeWidth="1.5" />
+                  <title>{mark.label}</title>
+                </g>
+              );
+            }
+            const buy = mark.side === "buy";
             const cy = y(values[index]) + (buy ? 20 : -20);
             return (
               <g key={`${mark.cutoff}-${order}`}>

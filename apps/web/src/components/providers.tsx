@@ -4,11 +4,12 @@ import { PrivyProvider } from "@privy-io/react-auth";
 import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
 import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react";
 import { clusterApiUrl } from "@solana/web3.js";
-import type { FeeTerms, Portfolio } from "@eox/app-api";
+import type { FeeTerms, Portfolio, Preview } from "@eox/app-api";
 import type { ReactNode } from "react";
 import type { Market } from "@/lib/market";
 import { AccountProvider } from "./account";
 import { LogoProvider } from "./coin-icon";
+import { LiveProvider } from "./live";
 import { AdapterSigner, PrivySigner } from "./signer";
 import { SnackbarProvider } from "./snackbar";
 
@@ -33,14 +34,16 @@ function Signing({ children }: { children: ReactNode }) {
   );
 }
 
-export function Providers({ live, demo, apiUrl, sequence, fee, market, logos, children }: { live: boolean; demo: Portfolio | null; apiUrl: string; sequence: number | null; fee: FeeTerms | null; market: Market; logos: Record<string, string>; children: ReactNode }) {
+export function Providers({ live, demo, apiUrl, sequence, fee, market, preview, logos, children }: { live: boolean; demo: Portfolio | null; apiUrl: string; sequence: number | null; fee: FeeTerms | null; market: Market; preview: Preview | null; logos: Record<string, string>; children: ReactNode }) {
   return (
     <ConnectionProvider endpoint={endpoint}>
       <WalletProvider wallets={wallets} autoConnect={!privyAppId}>
         <Signing>
           <SnackbarProvider>
-            <AccountProvider live={live} demo={demo} apiUrl={apiUrl} sequence={sequence} fee={fee} market={market}>
-              <LogoProvider logos={logos}>{children}</LogoProvider>
+            <AccountProvider live={live} demo={demo} apiUrl={apiUrl} sequence={sequence} fee={fee} market={market} preview={preview}>
+              <LiveProvider>
+                <LogoProvider logos={logos}>{children}</LogoProvider>
+              </LiveProvider>
             </AccountProvider>
           </SnackbarProvider>
         </Signing>

@@ -35,8 +35,10 @@ export function StatCard({
   aside,
   value,
   change,
+  badge,
   caption,
   spark,
+  chart,
   children,
 }: {
   icon: LucideIcon;
@@ -44,8 +46,10 @@ export function StatCard({
   aside?: ReactNode;
   value: ReactNode;
   change?: number | null;
+  badge?: ReactNode;
   caption?: ReactNode;
   spark?: { points: Point[]; tone: "up" | "down" | "flat" } | null;
+  chart?: ReactNode;
   children?: ReactNode;
 }) {
   const showSpark = spark && spark.points.length > 1;
@@ -53,16 +57,20 @@ export function StatCard({
     <div className="flex flex-col rounded-card border border-line bg-surface p-4 shadow-card">
       <CardTitle icon={icon} aside={aside}>{title}</CardTitle>
       <div className="mt-4 flex items-end justify-between gap-3">
-        <div className="min-w-0">
+        <div className="shrink-0">
           <div className="flex items-center gap-2 text-3xl font-medium tracking-tight">{value}</div>
-          {(change !== undefined && change !== null) || caption ? (
+          {(change !== undefined && change !== null) || badge || caption ? (
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">
-              {change !== undefined && change !== null && <ChangePill ratio={change} />}
+              {badge ?? (change !== undefined && change !== null && <ChangePill ratio={change} />)}
               {caption && <span>{caption}</span>}
             </div>
           ) : null}
         </div>
-        {showSpark && <Sparkline points={spark.points} tone={spark.tone} width={132} height={48} area />}
+        {(chart || showSpark) && (
+          <div className="flex min-w-0 flex-1 justify-end">
+            {chart ?? (showSpark && <Sparkline points={spark.points} tone={spark.tone} width={132} height={48} area fluid />)}
+          </div>
+        )}
       </div>
       {children}
     </div>

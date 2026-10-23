@@ -5,11 +5,14 @@ import { costBasis, paidFor } from "@/lib/basis";
 import { direction, formatAmount, formatSigned } from "@/lib/format";
 import { holdingsOf, positionName, positionNote } from "@/lib/view";
 import { useAccount } from "./account";
+import { useLive } from "./live";
 
 export function MyPosition({ classId, unitValue, decimals }: { classId: string; unitValue: number | null; decimals: number }) {
   const { portfolio, owner, live, loading } = useAccount();
+  const { wallet } = useLive();
   const holding = holdingsOf(portfolio, decimals)?.find((item) => item.classId === classId);
-  const worth = holding && unitValue !== null ? holding.units * unitValue : null;
+  const estimated = wallet?.byClass[classId];
+  const worth = holding ? (estimated ?? (unitValue !== null ? holding.units * unitValue : null)) : null;
   const paid = holding ? paidFor(costBasis(portfolio?.requests ?? [], decimals), classId, holding.units) : null;
   const change = worth === null || paid === null ? null : worth - paid;
   const tone = change === null ? "" : { up: "text-up", down: "text-down", flat: "text-muted" }[direction(change)];
@@ -27,7 +30,7 @@ export function MyPosition({ classId, unitValue, decimals }: { classId: string; 
             <div className="flex justify-between"><dt className="text-muted">Paid</dt><dd className="num">{formatAmount(paid, 4)} {COLLATERAL.symbol}</dd></div>
           )}
           <div className="flex justify-between border-t border-line pt-2">
-            <dt className="text-muted">Worth now, about</dt>
+            <dt className="text-muted">Worth now, about{estimated == null ? " (settled)" : " (live estimate)"}</dt>
             <dd className="num">{worth === null ? "n/a" : `${formatAmount(worth, 6)} ${COLLATERAL.symbol}`}</dd>
           </div>
           {change !== null && (

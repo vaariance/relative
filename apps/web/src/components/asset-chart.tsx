@@ -4,6 +4,9 @@ import { CandlestickChart, LineChart as LineIcon } from "lucide-react";
 import { useState } from "react";
 import type { Point } from "@/lib/view";
 import { barsOf } from "@/lib/bars";
+import { type SeriesKind, perMinute, seriesOf, spanOf } from "@/lib/estimate";
+import { useAccount } from "./account";
+import { useLive } from "./live";
 import { type ChartLine, type ChartMark, TradeChart } from "./trade-chart";
 
 export interface Series {
@@ -15,6 +18,7 @@ export interface Series {
   lines?: ChartLine[];
   marks?: ChartMark[];
   compare?: number;
+  live?: { kind: SeriesKind; id?: string; scale?: number; realtime?: boolean };
 }
 
 const ranges = [
@@ -23,6 +27,12 @@ const ranges = [
   { label: "1D", minutes: 1440, interval: 15 },
   { label: "1W", minutes: 10080, interval: 60 },
   { label: "1M", minutes: 43200, interval: 240 },
+];
+
+const seconds = [
+  { label: "1s", minutes: 1 / 60 },
+  { label: "5s", minutes: 5 / 60 },
+  { label: "15s", minutes: 15 / 60 },
 ];
 
 const intervals = [
@@ -60,13 +70,24 @@ export function AssetChart({ series, note, height }: { series: Series[]; note?: 
   const [range, setRange] = useState(240);
   const [candles, setCandles] = useState(false);
   const [chosen, setChosen] = useState<number | null>(null);
+  const { history } = useLive();
+  const { sequence } = useAccount();
   const current = series.find((item) => item.id === selected) ?? series[0];
   const preset = ranges.find((item) => item.minutes === range) ?? ranges[1];
-  const end = current.points[current.points.length - 1]?.cutoff ?? 0;
-  const shown = current.points.filter((point) => point.cutoff > end - range * 60);
-  const wanted = candles ? preset.interval : Math.max(1, Math.floor(preset.interval / 5));
-  const fitting = [...intervals].reverse().find((item) => item.minutes <= wanted && barsOf(shown, item.minutes).length >= MIN_BARS);
-  const interval = chosen ?? fitting?.minutes ?? 1;
+  const raw = current.live ? seriesOf(history, current.live.kind, current.live.id, sequence) : [];
+  const scaled = current.live?.scale === undefined ? raw : raw.map((point) => ({ cutoff: point.cutoff, value: point.value * (current.live?.scale ?? 1) }));
+  const realtime = current.live?.realtime === true;
+  const estimated = realtime ? scaled : perMinute(scaled);
+  const end = Math.max(current.points[current.points.length - 1]?.cutoff ?? 0, estimated[estimated.length - 1]?.cutoff ?? 0);
+  const settled = current.points.filter((point) => point.cutoff > end - range * 60);
+  const recent = estimated.filter((point) => point.cutoff > end - range * 60);
+  const live = recent.length > 1 && spanOf(recent) >= spanOf(settled);
+  const shown = live ? recent : settled;
+  const settledMarks = live ? settled.filter((point) => point.cutoff >= recent[0].cutoff).map((point) => ({ cutoff: point.cutoff, side: "settled" as const, label: `Settled on chain ${new Date(point.cutoff * 1000).toISOString().slice(11, 19)} UTC` })) : [];
+  const choices = live && realtime ? [...seconds, ...intervals] : intervals;
+  const wanted = candles ? preset.interval : live && realtime ? preset.interval / 5 : Math.max(1, Math.floor(preset.interval / 5));
+  const fitting = [...choices].reverse().find((item) => item.minutes <= wanted && barsOf(shown, item.minutes).length >= MIN_BARS);
+  const interval = chosen ?? fitting?.minutes ?? choices[0].minutes;
   const bars = barsOf(shown, interval);
   const held = shown.length > 1 ? end - shown[0].cutoff : 0;
   const short = shown.length > 1 && held < range * 60 * 0.9;
@@ -88,7 +109,7 @@ export function AssetChart({ series, note, height }: { series: Series[]; note?: 
         <label className="flex items-center gap-1 text-xs text-muted">
           <span className="sr-only">Interval</span>
           <select value={interval} onChange={(event) => setChosen(Number(event.target.value))} className="h-8 cursor-pointer rounded-control bg-transparent px-1.5 text-xs text-ink hover:bg-surface-2">
-            {intervals.map((item) => (
+            {choices.map((item) => (
               <option key={item.minutes} value={item.minutes}>{item.label}</option>
             ))}
           </select>
@@ -107,16 +128,17 @@ export function AssetChart({ series, note, height }: { series: Series[]; note?: 
       </div>
       <div className="px-1 pb-1 pt-2">
         {bars.length > 1 ? (
-          <TradeChart bars={bars} candles={candles} digits={current.digits} label={current.label} lines={lines} marks={current.marks} compare={current.compare} height={height} />
+          <TradeChart bars={bars} candles={candles} digits={current.digits} label={current.label} lines={lines} marks={[...(current.marks ?? []), ...settledMarks]} compare={current.compare} height={height} />
         ) : (
           <p className="flex items-center justify-center px-6 text-center text-sm text-muted" style={{ height: height ?? 420 }}>
-            {shown.length > 1 ? "There is not enough history yet for bars this wide. Choose a shorter interval." : "This line starts with the next price update."}
+            {shown.length > 1 ? "There is not enough history yet for bars this wide. Choose a shorter interval." : current.live ? realtime ? "The live line starts in a few seconds." : "The live line starts within two minutes." : "No settled values in this period yet. Choose a longer range."}
           </p>
         )}
       </div>
-      {(note || short) && (
+      {(note || short || live) && (
         <p className="border-t border-line px-4 py-2 text-xs text-muted">
-          {short && (held >= 23 * 3600 ? "Showing the last 24 hours, the most this page loads. " : `Showing ${span(held)} of history so far. `)}
+          {live && `Live estimates since ${new Date(recent[0].cutoff * 1000).toISOString().slice(11, 16)} UTC, ${realtime ? "updated every second" : "one point a minute"} while this page is open. ${settledMarks.length > 0 ? "Dots are on-chain settlements. " : ""}`}
+          {short && !live && (held >= 23 * 3600 ? "Showing the last 24 hours, the most this page loads. " : `Showing ${span(held)} of history so far. `)}
           {note}
         </p>
       )}

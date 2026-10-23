@@ -6,11 +6,12 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { costBasis, paidFor } from "@/lib/basis";
 import { COLLATERAL } from "@/lib/config";
-import { direction, formatAmount, formatPrice, formatSigned, formatUtcTime } from "@/lib/format";
+import { direction, formatAmount, formatSigned, formatUtcTime } from "@/lib/format";
 import { expiryAfter } from "@/lib/market";
 import { tradesOf } from "@/lib/trades";
 import { CRYPTO_CLASS, type ClassView, type Point, type ValuePoint, holdingsOf, nameOf, positionName, positionNote } from "@/lib/view";
 import { useAccount } from "./account";
+import { LiveFigure, useLive } from "./live";
 import { AssetChart, type Series } from "./asset-chart";
 import { useOpenBatch } from "./open-batch";
 import { RequestList } from "./request-list";
@@ -44,6 +45,7 @@ function Stat({ label, children, tone = "" }: { label: string; children: ReactNo
 
 export function PositionView({ classId, claim, crypto, values, reference, price, cutoffs, status, decimals }: PositionProps) {
   const { portfolio, owner, live, loading, market } = useAccount();
+  const { wallet } = useLive();
   const open = useOpenBatch(status.currentBatch);
   const holding = holdingsOf(portfolio, decimals)?.find((item) => item.classId === classId) ?? null;
   const position = portfolio?.positions.find((item) => item.classId === classId) ?? null;
@@ -51,7 +53,8 @@ export function PositionView({ classId, claim, crypto, values, reference, price,
   const trades = tradesOf(requests, classId, decimals);
   const units = holding?.units ?? 0;
   const unitValue = values[values.length - 1]?.value ?? null;
-  const worth = holding && unitValue !== null ? units * unitValue : null;
+  const estimated = wallet?.byClass[classId];
+  const worth = holding ? (estimated ?? (unitValue !== null ? units * unitValue : null)) : null;
   const paid = holding ? paidFor(costBasis(requests, decimals), classId, units) : null;
   const entry = paid !== null && units > 0 ? paid / units : null;
   const change = worth === null || paid === null ? null : worth - paid;
@@ -75,12 +78,13 @@ export function PositionView({ classId, claim, crypto, values, reference, price,
       marks,
       compare: entry ?? undefined,
       lines: [...(entry === null ? [] : [{ value: entry, label: `Bought at ${formatAmount(entry, 6)}`, tone: "ink" as const }])],
+      live: { kind: "unitValue", id: classId, realtime: true },
     },
     ...(holding && since.length > 1
-      ? [{ id: "worth", label: `Worth (${COLLATERAL.symbol})`, points: since.map((point) => ({ cutoff: point.cutoff, value: point.value * units })), digits: 6, compare: paid ?? undefined, lines: paid === null ? [] : [{ value: paid, label: `Paid ${formatAmount(paid, 4)}`, tone: "ink" as const }] }]
+      ? [{ id: "worth", label: `Worth (${COLLATERAL.symbol})`, points: since.map((point) => ({ cutoff: point.cutoff, value: point.value * units })), digits: 6, compare: paid ?? undefined, lines: paid === null ? [] : [{ value: paid, label: `Paid ${formatAmount(paid, 4)}`, tone: "ink" as const }], live: { kind: "unitValue" as const, id: classId, scale: units, realtime: true } }]
       : []),
-    ...(reference.length > 1 ? [{ id: "reference", label: "Relative reference", points: reference, digits: 4, marks }] : []),
-    ...(price.length > 1 ? [{ id: "price", label: "Price (USD)", points: price, digits: price[price.length - 1].value >= 1 ? 2 : 6, marks }] : []),
+    ...(reference.length > 1 ? [{ id: "reference", label: "Relative reference", points: reference, digits: 4, marks, live: classId === CRYPTO_CLASS ? undefined : { kind: "reference" as const, id: classId } }] : []),
+    ...(price.length > 1 ? [{ id: "price", label: "Price (USD)", points: price, digits: price[price.length - 1].value >= 1 ? 2 : 6, marks, live: { kind: "price" as const, id: classId } }] : []),
   ];
   const empty = loading ? "Loading your position." : live && !owner ? "Connect a wallet to see your position." : `You have no ${positionName(classId)} right now.`;
 
@@ -123,9 +127,9 @@ export function PositionView({ classId, claim, crypto, values, reference, price,
             <Stat label={lastExit ? sides[lastExit.side] : "Sold at"}>{lastExit?.price == null ? "—" : formatAmount(lastExit.price, 6)}</Stat>
             <Stat label="Position units">{formatAmount(units, 4)}</Stat>
             <Stat label={`Paid (${COLLATERAL.symbol})`}>{paid === null ? "—" : formatAmount(paid, 4)}</Stat>
-            <Stat label={`Worth now (${COLLATERAL.symbol})`}>{worth === null ? "n/a" : formatAmount(worth, 6)}</Stat>
+            <Stat label={`Worth now (${COLLATERAL.symbol}, ${estimated == null ? "settled" : "estimate"})`}>{worth === null ? "n/a" : formatAmount(worth, 6)}</Stat>
             <Stat label="Gain or loss" tone={tone}>{change === null ? "—" : `${formatSigned(change, 6)}${percent === null ? "" : ` (${formatSigned(percent, 3)}%)`}`}</Stat>
-            {price.length > 0 && <Stat label={`${classId} price (USD)`}>{formatPrice(price[price.length - 1].value)}</Stat>}
+            {price.length > 0 && <Stat label={`${classId} price (USD)`}><LiveFigure kind="price" id={classId} committed={price[price.length - 1].value} plain /></Stat>}
           </dl>
         ) : (
           <p className="border-t border-line px-4 py-3 text-sm text-muted">{empty}</p>

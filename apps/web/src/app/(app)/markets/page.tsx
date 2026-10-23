@@ -1,16 +1,15 @@
-import { Activity, Coins, LayoutList, TrendingDown, TrendingUp } from "lucide-react";
+import { Activity, Coins, LayoutList } from "lucide-react";
 import Link from "next/link";
-import { Change } from "@/components/change";
 import { CoinIcon } from "@/components/coin-icon";
 import { FirstPublication } from "@/components/first-publication";
+import { LeaderCards } from "@/components/leader-cards";
+import { LiveChange, LiveFigure, LiveSparkline } from "@/components/live";
 import { RowLink } from "@/components/row-link";
-import { Sparkline } from "@/components/sparkline";
 import { CardTitle, Figure, StatCard } from "@/components/stat-card";
 import { getAssets, getDeployment, getPublications } from "@/lib/data";
-import { direction, formatAmount, formatPrice } from "@/lib/format";
-import { changeSince, decimalsOf, standingOf, classViews, currentOf, findClass, latest, levelSeries, priceSeries, referenceSeries } from "@/lib/view";
+import { formatAmount } from "@/lib/format";
+import { decimalsOf, standingOf, classViews, currentOf, findClass, latest, levelSeries, priceSeries, referenceSeries } from "@/lib/view";
 
-const HOUR = 3600;
 const SPARK = 240;
 const EMPTY = "—";
 
@@ -48,8 +47,6 @@ export default async function MarketsPage() {
         })
         .sort((left, right) => right.standing - left.standing)
     : [];
-  const best = ranked[0] ?? null;
-  const worst = ranked.length > 1 ? ranked[ranked.length - 1] : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -59,28 +56,12 @@ export default async function MarketsPage() {
         <StatCard
           icon={Activity}
           title="Index"
-          value={current ? <Figure text={formatAmount(latest(level), 4)} /> : EMPTY}
-          change={current ? changeSince(level, HOUR) : null}
-          caption="last hour"
-          spark={current ? { points: level.slice(-SPARK), tone: direction(changeSince(level, HOUR)) } : null}
+          value={<LiveFigure kind="level" committed={current ? latest(level) : null} />}
+          badge={<LiveChange kind="level" pill committed={current ? latest(level) / 100 - 1 : null} />}
+          chart={<LiveSparkline kind="level" card fallback={current ? level.slice(-SPARK) : []} />}
         />
-        <StatCard
-          icon={TrendingUp}
-          title="Leading"
-          value={best ? <><CoinIcon id={best.id} size={28} />{best.id}</> : EMPTY}
-          change={best ? best.standing : null}
-          caption="vs $CRYPTO"
-          spark={best ? { points: best.reference, tone: direction(best.standing) } : null}
-        />
-        <StatCard
-          icon={TrendingDown}
-          title="Trailing"
-          value={worst ? <><CoinIcon id={worst.id} size={28} />{worst.id}</> : EMPTY}
-          change={worst ? worst.standing : null}
-          caption="vs $CRYPTO"
-          spark={worst ? { points: worst.reference, tone: direction(worst.standing) } : null}
-        />
-        <StatCard icon={Coins} title="Pool TVL" value={<Figure text={formatAmount(active)} unit="USDC" />} caption={`across ${classes.length} classes`} />
+        <LeaderCards contenders={ranked.map((item) => ({ id: item.id, standing: item.standing, points: item.reference }))} />
+        <StatCard icon={Coins} title="Pool TVL" value={<Figure text={formatAmount(active)} unit="USDC" />} caption={`settled, across ${classes.length} classes`} />
       </div>
 
       {!current && <FirstPublication />}
@@ -96,7 +77,7 @@ export default async function MarketsPage() {
               <th scope="col" className="px-4 py-3 text-right font-normal">Price (USD)</th>
               <th scope="col" className="px-4 py-3 text-right font-normal">Relative reference</th>
               <th scope="col" className="px-4 py-3 text-right font-normal">Performance</th>
-              <th scope="col" className="px-4 py-3 font-normal">Last 4h</th>
+              <th scope="col" className="px-4 py-3 font-normal">Trend</th>
               <th scope="col" className="px-4 py-3 text-right font-normal">Class backing</th>
             </tr>
           </thead>
@@ -114,10 +95,10 @@ export default async function MarketsPage() {
                       {asset.name !== asset.assetId && <span className="text-xs text-muted">{asset.name}</span>}
                     </Link>
                   </th>
-                  <td className="num px-4 py-3 text-right">{formatPrice(latest(priceSeries([current], asset.assetId)))}</td>
-                  <td className="num px-4 py-3 text-right text-base">{formatAmount(latest(reference), 4)}</td>
-                  <td className="px-4 py-3 text-right"><Change ratio={standingOf(reference)} /></td>
-                  <td className="px-4 py-3"><Sparkline points={reference.slice(-SPARK)} tone={direction(standingOf(reference))} /></td>
+                  <td className="num px-4 py-3 text-right"><LiveFigure kind="price" id={asset.assetId} committed={latest(priceSeries([current], asset.assetId))} plain /></td>
+                  <td className="num px-4 py-3 text-right text-base"><LiveFigure kind="reference" id={asset.assetId} committed={latest(reference)} plain /></td>
+                  <td className="px-4 py-3 text-right"><LiveChange kind="reference" id={asset.assetId} committed={standingOf(reference)} /></td>
+                  <td className="px-4 py-3"><LiveSparkline kind="reference" id={asset.assetId} fallback={reference.slice(-SPARK)} /></td>
                   <td className="num px-4 py-3 text-right">{formatAmount(claim.backing)}</td>
                 </RowLink>
               );

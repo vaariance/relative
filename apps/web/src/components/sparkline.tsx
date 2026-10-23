@@ -1,6 +1,6 @@
 import type { Point } from "@/lib/view";
 
-export function Sparkline({ points, tone, width = 120, height = 32, area = false }: { points: Point[]; tone: "up" | "down" | "flat"; width?: number; height?: number; area?: boolean }) {
+export function Sparkline({ points, tone, width = 120, height = 32, area = false, fluid = false }: { points: Point[]; tone: "up" | "down" | "flat"; width?: number; height?: number; area?: boolean; fluid?: boolean }) {
   const values = points.map((point) => point.value);
   const low = Math.min(...values);
   const high = Math.max(...values);
@@ -15,7 +15,7 @@ export function Sparkline({ points, tone, width = 120, height = 32, area = false
   const stroke = tone === "up" ? "var(--up)" : tone === "down" ? "var(--down)" : "var(--muted)";
   const fill = `spark-${tone}`;
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true" className="shrink-0">
+    <svg width={fluid ? "100%" : width} height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio={fluid ? "none" : undefined} aria-hidden="true" className={fluid ? "block" : "shrink-0"} style={fluid ? { maxWidth: width } : undefined}>
       {area && (
         <>
           <defs>
@@ -27,7 +27,7 @@ export function Sparkline({ points, tone, width = 120, height = 32, area = false
           <path d={`${path} L${width},${height} L0,${height} Z`} fill={`url(#${fill})`} />
         </>
       )}
-      <path d={path} fill="none" stroke={stroke} strokeWidth="1.5" />
+      <path d={path} fill="none" stroke={stroke} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
     </svg>
   );
 }

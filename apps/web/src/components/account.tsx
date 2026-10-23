@@ -1,6 +1,6 @@
 "use client";
 
-import type { CoxStatus, FeeTerms, Portfolio, WalletPortfolioEvent } from "@eox/app-api";
+import type { CoxStatus, FeeTerms, Portfolio, Preview, WalletPortfolioEvent } from "@eox/app-api";
 import { useRouter } from "next/navigation";
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { walletPortfolio } from "@/app/actions";
@@ -10,6 +10,7 @@ import { useSigner } from "./signer";
 const PORTFOLIO_MS = 15000;
 const PAGE_MS = 30000;
 const SETTLE_MS = 400;
+const PREVIEW_MS = 2000;
 
 interface Account {
   live: boolean;
@@ -20,10 +21,11 @@ interface Account {
   apiUrl: string;
   sequence: number | null;
   market: Market;
+  preview: Preview | null;
   refresh: () => Promise<void>;
 }
 
-const AccountContext = createContext<Account>({ live: false, owner: null, portfolio: null, loading: false, fee: null, apiUrl: "", sequence: null, market: NO_MARKET, refresh: async () => undefined });
+const AccountContext = createContext<Account>({ live: false, owner: null, portfolio: null, loading: false, fee: null, apiUrl: "", sequence: null, market: NO_MARKET, preview: null, refresh: async () => undefined });
 
 function parse<T>(event: Event): T | null {
   try {
@@ -40,6 +42,7 @@ export function AccountProvider({
   sequence,
   fee,
   market,
+  preview: initialPreview,
   children,
 }: {
   live: boolean;
@@ -48,6 +51,7 @@ export function AccountProvider({
   sequence: number | null;
   fee: FeeTerms | null;
   market: Market;
+  preview: Preview | null;
   children: ReactNode;
 }) {
   const { address } = useSigner();
@@ -57,6 +61,8 @@ export function AccountProvider({
   const start = useRef(sequence);
   const [own, setOwn] = useState<{ owner: string; portfolio: Portfolio | null } | null>(null);
   const [streaming, setStreaming] = useState(false);
+  const [streamed, setStreamed] = useState<Preview | null>(null);
+  const preview = streamed && (!initialPreview || streamed.record.timestamp >= initialPreview.record.timestamp) ? streamed : initialPreview;
   const watched = live ? owner : null;
 
   const refresh = useCallback(async () => {
@@ -99,6 +105,10 @@ export function AccountProvider({
       if (known !== null && known !== next) reload();
       known = next;
     });
+    stream.addEventListener("preview", (event) => {
+      const data = parse<Preview>(event);
+      if (data?.record) setStreamed(data);
+    });
     stream.addEventListener("portfolio", (event) => {
       const data = parse<WalletPortfolioEvent>(event);
       if (data && data.owner === current.current) setOwn({ owner: data.owner, portfolio: data.portfolio });
@@ -115,17 +125,31 @@ export function AccountProvider({
     if (streaming) return;
     const page = window.setInterval(() => router.refresh(), PAGE_MS);
     const wallet = window.setInterval(() => void refresh(), PORTFOLIO_MS);
+    const controller = new AbortController();
+    const poll = async () => {
+      try {
+        const response = await fetch(`${apiUrl}/v1/preview`, { signal: controller.signal, cache: "no-store" });
+        const payload = (await response.json().catch(() => null)) as { data?: Preview } | null;
+        if (response.ok && payload?.data?.record) setStreamed(payload.data);
+      } catch {
+        return;
+      }
+    };
+    void poll();
+    const previews = window.setInterval(() => void poll(), PREVIEW_MS);
     return () => {
       window.clearInterval(page);
       window.clearInterval(wallet);
+      window.clearInterval(previews);
+      controller.abort();
     };
-  }, [streaming, router, refresh]);
+  }, [streaming, router, refresh, apiUrl]);
 
   const value = useMemo<Account>(() => {
-    if (!live) return { live, owner, portfolio: demo, loading: false, fee, apiUrl, sequence, market, refresh };
+    if (!live) return { live, owner, portfolio: demo, loading: false, fee, apiUrl, sequence, market, preview, refresh };
     const loaded = own !== null && own.owner === owner;
-    return { live, owner, portfolio: loaded ? own.portfolio : null, loading: owner !== null && !loaded, fee, apiUrl, sequence, market, refresh };
-  }, [live, owner, demo, own, fee, apiUrl, sequence, market, refresh]);
+    return { live, owner, portfolio: loaded ? own.portfolio : null, loading: owner !== null && !loaded, fee, apiUrl, sequence, market, preview, refresh };
+  }, [live, owner, demo, own, fee, apiUrl, sequence, market, preview, refresh]);
 
   return <AccountContext.Provider value={value}>{children}</AccountContext.Provider>;
 }

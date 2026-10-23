@@ -4,17 +4,16 @@ import { notFound } from "next/navigation";
 import { AssetChart } from "@/components/asset-chart";
 import { CoinIcon } from "@/components/coin-icon";
 import { FirstPublication } from "@/components/first-publication";
+import { LiveChange, LiveFigure, LiveSparkline, StandingNote } from "@/components/live";
 import { MyPosition } from "@/components/my-position";
 import { RequestList } from "@/components/request-list";
-import { Figure, StatCard } from "@/components/stat-card";
+import { StatCard } from "@/components/stat-card";
 import { TradeForm } from "@/components/trade-form";
 import { getAssets, getDeployment, getPublications, getStatus } from "@/lib/data";
-import { direction, formatAmount, formatPrice } from "@/lib/format";
-import { CRYPTO_CLASS, changeSince, classViews, currentOf, decimalsOf, findClass, latest, levelSeries, priceSeries, referenceSeries, standingOf } from "@/lib/view";
+import { formatAmount } from "@/lib/format";
+import { CRYPTO_CLASS, classViews, currentOf, decimalsOf, findClass, latest, levelSeries, priceSeries, referenceSeries, standingOf } from "@/lib/view";
 
-const HOUR = 3600;
 const SPARK = 60;
-const EMPTY = "—";
 
 function NoChart() {
   return (
@@ -39,9 +38,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   const price = priceSeries(publications, asset.assetId);
   const reference = referenceSeries(publications, asset.assetId);
   const level = levelSeries(publications);
-  const priceHour = current ? changeSince(price, HOUR) : 0;
   const relative = current ? standingOf(reference) : 0;
-  const standing = direction(relative);
 
   return (
     <div className="flex flex-col gap-6">
@@ -64,25 +61,23 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           icon={DollarSign}
           title="Price"
           aside="USD"
-          value={current ? <Figure text={formatPrice(latest(price))} /> : EMPTY}
-          change={current ? priceHour : null}
-          caption={current ? "last hour" : "No price yet"}
-          spark={current ? { points: price.slice(-SPARK), tone: direction(priceHour) } : null}
+          value={<LiveFigure kind="price" id={asset.assetId} committed={current ? latest(price) : null} />}
+          chart={<LiveSparkline kind="price" id={asset.assetId} card fallback={current ? price.slice(-SPARK) : []} />}
         />
         <StatCard
           icon={Activity}
           title="Relative reference"
           aside="starts at 100"
-          value={current ? <Figure text={formatAmount(latest(reference), 4)} /> : EMPTY}
-          change={current ? relative : null}
-          caption={standing === "up" ? "ahead of $CRYPTO" : standing === "down" ? "behind $CRYPTO" : "level with $CRYPTO"}
-          spark={current ? { points: reference, tone: standing } : null}
+          value={<LiveFigure kind="reference" id={asset.assetId} committed={current ? latest(reference) : null} />}
+          badge={<LiveChange kind="reference" id={asset.assetId} pill committed={current ? relative : null} />}
+          caption={<StandingNote id={asset.assetId} committed={current ? relative : null} />}
+          chart={<LiveSparkline kind="reference" id={asset.assetId} card fallback={current ? reference : []} />}
         />
         <StatCard
           icon={Layers}
           title="Class unit value"
-          value={claim.unitValue === null ? "n/a" : <Figure text={formatAmount(claim.unitValue, 6)} />}
-          caption={`${formatAmount(claim.backing)} USDC backing`}
+          value={<LiveFigure kind="unitValue" id={asset.assetId} committed={claim.unitValue} />}
+          caption={`${formatAmount(claim.backing)} USDC backing, settled`}
         />
       </div>
 
@@ -91,9 +86,9 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           {current ? (
             <AssetChart
               series={[
-                { id: "reference", label: "Relative reference", points: reference, digits: 4, baseline: 100 },
-                { id: "price", label: "Price", points: price, digits: latest(price) >= 1 ? 2 : latest(price) >= 0.01 ? 4 : 6 },
-                { id: "crypto", label: "$CRYPTO", points: level, digits: 4, baseline: 100 },
+                { id: "reference", label: "Relative reference", points: reference, digits: 4, baseline: 100, live: { kind: "reference", id: asset.assetId } },
+                { id: "price", label: "Price", points: price, digits: latest(price) >= 1 ? 2 : latest(price) >= 0.01 ? 4 : 6, live: { kind: "price", id: asset.assetId } },
+                { id: "crypto", label: "$CRYPTO", points: level, digits: 4, baseline: 100, live: { kind: "level" } },
               ]}
             />
           ) : (
