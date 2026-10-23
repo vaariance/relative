@@ -1634,3 +1634,12 @@ another agent needs to know.
 - **What:** Closes the VM forwarding item in Joel's 2026-10-23 "Devnet faucet API live behind an allowlist" entry. The VM API runs `30be7ac` with `COX_FAUCET_FORWARD_URL=https://api.getrelative.trade`. It holds no faucet signer settings and passes every `/v1/faucet/*` request to the public live API. Verified on the VM: status returns the test wallet's confirmed claim from Cloud Run, and a challenge for a wallet off the allowlist returns `FAUCET_DISABLED`. All publications and the change feed are served as before.
 - **Rules for agents:** Calls through the VM reach Cloud Run through the gateway, which counts them under the VM's own address for the per-IP limit. That is acceptable because the VM API is reachable only through SSH tunnels.
 - **Refs:** commit `30be7ac`.
+
+### 2026-10-23 · Peter (Codex) · Hourly UTC publisher refresh prepared
+
+- **Area:** Rust publisher chain work planning and existing scheduling documentation.
+- **What:** Peter requested a `:00:00 UTC` push so Basic's committed ledger does not remain idle for many hours. Interpreted as every `HH:00:00 UTC`. Added a future Basic publication task derived from its last committed price timestamp, preserving UTC alignment after trades. After downtime, missed hours collapse into one current refresh rather than historical publication replay. No separate HTTP loop, contract change or signer permission is introduced.
+- **Rules for agents:** Hourly scheduling targets a wakeup, not guaranteed on-chain inclusion at the exact second. Use fresh eligible prices; keep exact Epoch closing timestamps and never substitute later closing prices. Paused pools remain paused, accepted batches drain first, and normal pending work retains the one-second cadence. The 20-minute safety reconciliation stays unchanged. No API/UI change belongs in this task.
+- **Open:** Scoped source and separate log commits require approval before building and redeploying the publisher. Live hourly verification remains required; this source is not deployed. Dynamic inclusion activation remains separately gated.
+- **Refs:** `apps/cox-publisher/native/src/chain.rs`, `apps/cox-publisher/README.md`; offline native tests pass.
+- **Verification:** All 176 native tests pass, including UTC alignment from a nonaligned origin, idle wakeup, missed-hour coalescing, pause/stage preservation and exact Epoch closing priority when an hourly refresh is also due. Final diff whitespace check passes.
