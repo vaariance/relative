@@ -16,6 +16,7 @@ export interface PreviewIdentity {
   pools: readonly string[];
   methodologyDigest: string;
   assets: readonly string[];
+  classes: readonly string[];
 }
 
 export interface PreviewStore {
@@ -82,13 +83,13 @@ export function parsePreview(text: string, timestamp: number, identity: PreviewI
   const n = identity.assets.length;
   if (!Array.isArray(value.assets) || value.assets.length !== n) fail(`preview ${timestamp} must list ${n} assets`);
   value.assets.forEach((row: Record<string, unknown>, i) => {
-    if (integer(row?.classId, "asset classId") !== i || row.assetId !== identity.assets[i]) fail(`preview ${timestamp} asset ${i} is not ${identity.assets[i]}`);
+    if (row?.assetId !== identity.assets[i] || integer(row.classId, "asset classId") !== identity.classes.indexOf(identity.assets[i]!)) fail(`preview ${timestamp} asset ${i} is not ${identity.assets[i]}`);
     amount(row.priceE8, `${identity.assets[i]} priceE8`, POSITIVE);
     amount(row.reference, `${identity.assets[i]} reference`, POSITIVE);
   });
-  if (integer(value.cryptoClass, "cryptoClass") !== n) fail(`preview ${timestamp} puts CRYPTO at class ${String(value.cryptoClass)}`);
+  if (integer(value.cryptoClass, "cryptoClass") !== identity.classes.indexOf("CRYPTO")) fail(`preview ${timestamp} puts CRYPTO at class ${String(value.cryptoClass)}`);
   if (value.cryptoReference !== (100n * BigInt(SCALES.reference)).toString()) fail(`preview ${timestamp} has CRYPTO reference ${String(value.cryptoReference)}`);
-  projection(value.basicProjection, n + 1);
+  projection(value.basicProjection, identity.classes.length);
   if (value.chainChange !== undefined) parseChainChange(value.chainChange);
   return value as unknown as PreviewRecord;
 }

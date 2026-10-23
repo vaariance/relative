@@ -112,6 +112,7 @@ async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transaction
               pools: [source.poolAddress.toBase58(), poolId.toString()],
               methodologyDigest: source.manifest.digest,
               assets: source.manifest.assets.map((asset) => asset.assetId),
+              classes: source.classes,
             },
             now: () => Math.floor(Date.now() / 1000),
             onError: (error: unknown) => console.error("cox preview tick failed", error),

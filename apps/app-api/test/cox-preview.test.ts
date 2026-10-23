@@ -11,8 +11,8 @@ const WALLET = "HgC4Jn7XMLzNsDjVdsr1x7BDuGBb2SBvx5TFLSUYaEyU";
 const PROGRAM = "G6iQGoupNSfduw1QJxQ9vcVi9FnCC6cbippXsi4QQzJF";
 const POOL = "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4";
 const METHODOLOGY = "2b8360bed080095ebd1a0a8ca81479010580d24d771881b59b6b86557964bdba";
-const IDENTITY: PreviewIdentity = { networks: ["solana-devnet"], program: PROGRAM, pools: [POOL, "2"], methodologyDigest: METHODOLOGY, assets: ["BTC", "ETH"] };
 const CLASSES = ["BTC", "ETH", "CRYPTO"];
+const IDENTITY: PreviewIdentity = { networks: ["solana-devnet"], program: PROGRAM, pools: [POOL, "2"], methodologyDigest: METHODOLOGY, assets: ["BTC", "ETH"], classes: CLASSES };
 
 function record(timestamp = T, overrides: Record<string, unknown> = {}, sequence = 1): Record<string, unknown> {
   return {
@@ -83,6 +83,33 @@ describe("preview records", () => {
     expect(bad({ basicProjection: { sequence: 1, stateDigest: "ab".repeat(32), publicationTimestamp: T, addedResidual: "0", classes: [] } })).toThrow("must list 3 classes");
     expect(bad({ basicProjection: { ...(record().basicProjection as object), addedResidual: undefined } })).toThrow("basicProjection.addedResidual");
     expect(() => parsePreview("{", T, IDENTITY)).toThrow("not JSON");
+  });
+});
+
+describe("preview records after an asset is added behind CRYPTO", () => {
+  const classes = ["BTC", "ETH", "CRYPTO", "LIT"];
+  const identity: PreviewIdentity = { ...IDENTITY, assets: ["BTC", "ETH", "LIT"], classes };
+  const added = () => {
+    const base = record();
+    const projection = base.basicProjection as { classes: Record<string, unknown>[] };
+    return record(T, {
+      assets: [...(base.assets as unknown[]), { classId: 3, assetId: "LIT", priceE8: "150000000", reference: "100000000000000" }],
+      basicProjection: { ...(base.basicProjection as object), classes: [...projection.classes, { classId: 3, backing: "800000", units: "400000000000000000" }] },
+    });
+  };
+
+  it("keeps CRYPTO at its own class and reads the added asset from the class after it", () => {
+    const parsed = parsePreview(JSON.stringify(added()), T, identity);
+    expect(parsed.assets.map((a) => [a.assetId, a.classId])).toEqual([["BTC", 0], ["ETH", 1], ["LIT", 3]]);
+    const portfolio: Portfolio = { owner: WALLET, appliedSequence: 1, payable: "0", refundable: "0", pending: "0", requests: [], positions: [{ classId: "LIT", units: "100000000000000000", locked: "0" }] };
+    expect(previewPortfolio({ record: parsed, ageSeconds: 0, stale: false }, portfolio, 1, classes).positions[0]!.estimatedValue).toBe("200000");
+  });
+
+  it("refuses a record that puts the added asset or CRYPTO at another class", () => {
+    const moved = added();
+    (moved.assets as Record<string, unknown>[])[2]!.classId = 2;
+    expect(() => parsePreview(JSON.stringify(moved), T, identity)).toThrow("asset 2 is not LIT");
+    expect(() => parsePreview(JSON.stringify({ ...added(), cryptoClass: 3 }), T, identity)).toThrow("CRYPTO at class 3");
   });
 });
 
