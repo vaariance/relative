@@ -17,6 +17,7 @@ Environment=COX_POLL_MS=1000
 Environment=COX_EPOCH_CONFIG=61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9
 Environment=COX_PUBLICATION_ARCHIVE_GCS=gs://colosseum-cox-publication-archives-dev/pool-2/history/
 Environment=COX_PREVIEW_GCS=gs://colosseum-cox-publication-archives-dev/pool-2/preview/
+Environment=COX_CHAIN_CHANGES_GCS=gs://colosseum-cox-publication-archives-dev/pool-2/chain-changes/
 Environment=COX_RPC_URLS=https://api.devnet.solana.com
 Environment=APP_API_STATE_DIR=/opt/eox/state/cox-app-api-live
 EnvironmentFile=-/opt/eox/cox-app-api-live.env
