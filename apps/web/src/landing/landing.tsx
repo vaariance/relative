@@ -451,7 +451,7 @@ const questions: Question[] = [
   { ask: "How do I cash out?", answer: "Choose cash out on any coin you back. It fills at the next price, and then you collect the USDC to your wallet." },
   { ask: "Are there fees?", answer: "A small one: 0.02% of each trade, and never more than 2 USDC. Solana also charges its usual small network fee." },
   { ask: "What do I need to start?", answer: "A Solana wallet set to devnet, a little devnet SOL for network fees, and devnet USDC. The Faucet page in the app links to both." },
-  { ask: "Is this real money?", answer: "Not yet. Relative runs on Solana devnet with test USDC, which has no real value." },
+  { ask: "Is this real money?", answer: "Not yet. Relative runs on Solana devnet with devnet USDC, which has no real value." },
 ];
 
 export async function Landing() {
@@ -641,7 +641,7 @@ export async function Landing() {
             <div {...stylex.props(styles.footColumn)}>
               <p {...stylex.props(styles.label)}>Status</p>
               <span {...stylex.props(styles.footFact)}>Solana devnet</span>
-              <span {...stylex.props(styles.footFact)}>Test USDC only</span>
+              <span {...stylex.props(styles.footFact)}>Devnet USDC only</span>
               <span {...stylex.props(styles.footFact)}>{board?.count ?? 30} coins ranked</span>
               <span {...stylex.props(styles.footFact)}>Prices every minute</span>
             </div>
@@ -653,7 +653,7 @@ export async function Landing() {
             </nav>
           </div>
           <div {...stylex.props(styles.footNote)}>
-            <span>Relative is a test product. Test USDC has no real value.</span>
+            <span>Relative is a test product. Devnet USDC has no real value.</span>
             <span>Nothing on this page is financial advice.</span>
           </div>
           <div aria-hidden="true" {...stylex.props(styles.footWord)}>
