@@ -414,7 +414,7 @@ export interface CoxApiErrorBody {
   error: { code: CoxErrorCode; message: string };
 }
 
-export type TransactionOperation = "deposit" | "switch" | "redeem" | "cancel" | "refund" | "withdraw" | "epoch-entry" | "epoch-withdraw";
+export type TransactionOperation = "deposit" | "switch" | "redeem" | "cancel" | "refund" | "withdraw" | "epoch-entry" | "epoch-withdraw" | "prepare-position";
 
 export interface DepositInput {
   owner: string;
@@ -443,6 +443,17 @@ export interface RedeemInput {
   minimumProceeds: BaseUnits;
   expiryBatch: number;
   expectedFeeVersion?: string;
+}
+
+export interface PreparePositionInput {
+  owner: string;
+}
+
+export interface PositionPreparation {
+  position: string;
+  bytes: string;
+  requiredBytes: string;
+  ready: boolean;
 }
 
 export interface RequestActionInput {
@@ -512,6 +523,7 @@ export interface UnsignedTransaction {
   minimumUnits: UnitQuanta | null;
   minimumProceeds: BaseUnits | null;
   feeTerms: FeeTerms | null;
+  preparation?: PositionPreparation;
 }
 
 export type SubmissionState = "submitted" | "confirmed" | "finalized" | "failed" | "expired";
