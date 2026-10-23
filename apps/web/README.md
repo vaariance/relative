@@ -28,8 +28,9 @@ Open <http://localhost:3100> for the landing page, or <http://localhost:3100/mar
 | Secret | Purpose |
 | --- | --- |
 | `COINGECKO_API_KEY` | CoinGecko Demo API key, sent as `x-cg-demo-api-key` when coin logos are looked up once a day. Optional: without it the lookup uses CoinGecko's keyless access, which has a lower shared limit. |
+| `TUSDC_FAUCET_SECRET_KEY` | Solana secret key (base58, or the CLI's JSON array) of the faucet key that is the mint authority of tUSDC. Needs a little devnet SOL: it pays each claim's fee and opens new wallets' tUSDC accounts. Without it, or if it is not the mint authority, a claim answers that the faucet is not available. |
 
-Treat this as a secret, not as configuration. Store it as a Sensitive environment variable on the host and in the untracked `.env.local` for local work. Never commit it, never log it, and never give it a `NEXT_PUBLIC_` name. It is read only in `src/lib/data.ts`, which is marked server-only so it cannot be bundled for browsers.
+Treat these as secrets, not as configuration. Store them as Sensitive environment variables on the host and in the untracked `.env.local` for local work. Never commit them, never log them, and never give them a `NEXT_PUBLIC_` name. `COINGECKO_API_KEY` is read only in `src/lib/data.ts`, which is marked server-only; `TUSDC_FAUCET_SECRET_KEY` is read only in the server actions in `src/app/faucet-actions.ts`.
 
 The browser RPC and API deployment must target the same network. Private infrastructure credentials must not be supplied through `NEXT_PUBLIC_*` variables.
 
@@ -108,9 +109,17 @@ fresh class has a unit value of 1. Requests are still sent in exact quanta.
 
 ## Faucet page
 
-The Faucet page links to Solana's devnet SOL faucet and Circle's devnet USDC
-faucet, shows the connected wallet's address to paste there, and reads its
-devnet SOL and USDC balances (`COX_RPC_URL`, default public devnet).
+The Faucet page shows the connected wallet's address, links to Solana's devnet
+SOL faucet, grants test tokens, links to Circle's devnet USDC faucet, and reads
+the wallet's devnet SOL, USDC and tUSDC balances (`COX_RPC_URL`, default
+public devnet).
+
+"Get 20 tUSDC" mints 20 tUSDC (`5rpGrekf…wV3X`) to the wallet from a server
+action signed by `TUSDC_FAUCET_SECRET_KEY`, creating the wallet's token account
+if needed. Each wallet can claim twice in any 24 hours. Every grant carries the
+memo `relative-faucet:<wallet>`, and the limit is counted from the faucet key's
+recent transactions on chain, so it holds across server instances without a
+database.
 
 ## Gain or loss
 
