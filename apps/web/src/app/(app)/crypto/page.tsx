@@ -65,7 +65,7 @@ export default async function CryptoPage() {
             </section>
           )}
         </div>
-        <SwapForm crypto={claim} nextBatch={status.currentBatch} decimals={decimals} />
+        <SwapForm classes={[CRYPTO_CLASS]} nextBatch={status.currentBatch} decimals={decimals} />
         <MyPosition classId={CRYPTO_CLASS} unitValue={claim.unitValue} decimals={decimals} />
       </div>
     </div>

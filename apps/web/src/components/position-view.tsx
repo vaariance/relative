@@ -17,6 +17,7 @@ import { useOpenBatch } from "./open-batch";
 import { RequestList } from "./request-list";
 import { SendButton } from "./send-button";
 import type { ChartMark } from "./trade-chart";
+import { SwapForm } from "./swap-form";
 import { TradeForm } from "./trade-form";
 
 interface PositionProps {
@@ -107,7 +108,7 @@ export function PositionView({ classId, claim, crypto, values, reference, price,
             <span className="text-xs text-muted">Unit value</span>
             <p className="w-full text-xs text-muted">{positionNote(classId)}</p>
           </div>
-          {holding && classId === CRYPTO_CLASS && (
+          {holding && (
             <span className="flex flex-col items-end gap-1">
               <SendButton
                 trading
@@ -179,13 +180,7 @@ export function PositionView({ classId, claim, crypto, values, reference, price,
 
         <div className="flex flex-col gap-4">
           {classId === CRYPTO_CLASS ? (
-            <section className="rounded-card border border-line bg-surface p-4 shadow-card">
-              <h2 className="text-sm font-medium">Trade</h2>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <Link href="/swap" className="flex h-11 items-center justify-center rounded-pill bg-accent text-sm font-medium text-accent-ink transition-opacity duration-150 hover:opacity-90">Swap</Link>
-                <Link href="/markets" className="flex h-11 items-center justify-center rounded-pill border border-line text-sm transition-colors duration-150 hover:bg-surface-2">Markets</Link>
-              </div>
-            </section>
+            <SwapForm classes={[CRYPTO_CLASS]} nextBatch={status.currentBatch} decimals={decimals} />
           ) : (
             <TradeForm claim={claim} crypto={crypto} nextBatch={status.currentBatch} decimals={decimals} />
           )}
