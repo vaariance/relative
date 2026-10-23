@@ -1532,3 +1532,8 @@ another agent needs to know.
 - **What:** At Godwin's request, `/epochs` shows a "Coming soon" card unless the server variable `EPOCHS_ENABLED` is `true`; then it shows the full Epochs page. Off by default everywhere, including local development and production. With the flag off the page makes no Epoch API calls. The menu item stays. Checked in the dev server both ways.
 - **Rules for agents:** Do not set `EPOCHS_ENABLED` on Vercel production, or in shared local defaults, until Godwin approves the Epochs page for users.
 - **Refs:** commit `ead6681`, `apps/web/README.md` (Configuration, Epochs page).
+
+### 2026-10-23 · Godwin (Claude Code) · Epochs on in local development
+
+- **What:** At Godwin's request, `epochsEnabled` in `apps/web/src/lib/config.ts` returns true whenever `NODE_ENV` is `development` (`pnpm dev`), so Epochs works on a local machine with no setting. Deployed builds still show "Coming soon" unless `EPOCHS_ENABLED=true`. Qualifies Godwin's 2026-10-23 "Epochs page behind EPOCHS_ENABLED" entry, which had local development off by default.
+- **Refs:** commit `5a09164`.
