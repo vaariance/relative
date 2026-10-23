@@ -1454,3 +1454,11 @@ another agent needs to know.
   - **Peter:** a live schema 5 pool to verify against. Historical manifest loading is covered by code but has no test with two real methodologies yet.
   - **Godwin:** call `prepare-position` when a trade asks for it.
 - **Refs:** `apps/app-api/README.md` (Pools that add assets), commits `79b5233`..`60820f4`.
+
+### 2026-10-23 · Godwin (Claude Code) · Web app trades any class directly with USDC
+
+- **Area:** `apps/web` (`swap-form.tsx`, `trade-form.tsx`, `position-view.tsx`, `portfolio-view.tsx`, Swap and $CRYPTO pages).
+- **What:** At Peter's request, the web app uses direct entry (`product.md` version 15): USDC goes straight into the chosen class and straight back out, one request and one fee. The Swap card picks any of the 30 assets or $CRYPTO in both directions (`buildDeposit`, `buildRedeem`). On coin pages, Sell now receives USDC by default (`buildRedeem`), with $CRYPTO as a switch; Buy is unchanged (USDC by default). Cash out is on every Portfolio row and position page, not only $CRYPTO. The $CRYPTO page and $CRYPTO position page show the swap card fixed to $CRYPTO. Supersedes the rules in Godwin's 2026-10-11 "Web app: swap for CRYPTO, then buy and sell assets with CRYPTO" and "Web app on the real-time stream" entries that USDC enters and leaves only through $CRYPTO and that redeeming is offered only for $CRYPTO. 54 web tests and the type check pass; the Swap and ETH pages were checked in the dev server against the live API without a wallet.
+- **Rules for agents:** $CRYPTO is the benchmark and one holdable class, not a required step into or out of a coin. Transactions still come from the app API; the web app does not import `@cox/client/swap`.
+- **Open:** No direct sale to USDC or swap into a coin class has been signed with a real wallet. Not deployed to Vercel.
+- **Refs:** commit `a106a11`, `apps/web/README.md` (Swap, buy and sell).
