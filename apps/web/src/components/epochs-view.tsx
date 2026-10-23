@@ -1,8 +1,8 @@
 "use client";
 
 import type { Epoch, EpochLot, EpochOverview, PreviewHistory } from "@eox/app-api";
-import { ArrowLeft, ChevronLeft, ChevronRight, CircleHelp, Trophy, X } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CircleHelp, Layers, Search, Timer, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { walletEpochLots } from "@/app/actions";
 import { parseScaled } from "@/lib/amounts";
 import { COLLATERAL } from "@/lib/config";
@@ -18,9 +18,8 @@ import { SendButton } from "./send-button";
 const REFERENCE_DIGITS = 12;
 const PREVIEW_BASE = 100;
 const LOTS_MS = 20_000;
-const LEADERS = 10;
+const panel = "rounded-card border border-line bg-surface shadow-card";
 const field = "num h-11 w-full rounded-control border border-line bg-bg px-3 text-sm text-ink placeholder:text-muted";
-const primary = "flex h-11 w-full items-center justify-center gap-2 rounded-pill bg-accent text-sm font-medium text-accent-ink";
 
 function useNow(start: number): number {
   const [now, setNow] = useState(start);
@@ -91,252 +90,243 @@ function useBoard(epoch: Epoch | null, coins: string[], now: number): { rows: Bo
   return { rows: shareBoard(coins, opening, end), final: closing !== null, ready: opening !== null && end !== null };
 }
 
-function Ring({ progress, children }: { progress: number; children: ReactNode }) {
-  const radius = 54;
-  const length = 2 * Math.PI * radius;
-  const done = Math.min(1, Math.max(0, progress));
+function StageDot({ stage }: { stage: Stage }) {
+  if (stage === "live") return <span className="size-2 shrink-0 animate-pulse rounded-full bg-down" />;
+  if (stage === "upcoming") return <span className="size-2 shrink-0 rounded-full bg-accent" />;
+  return <span className="size-2 shrink-0 rounded-full bg-line" />;
+}
+
+function RoundList({ epochs, now, selected, onSelect }: { epochs: Epoch[]; now: number; selected: string | null; onSelect: (address: string) => void }) {
+  const ordered = [...epochs].sort((a, b) => {
+    const rank = (epoch: Epoch) => ({ live: 0, upcoming: 1, closing: 2, settled: 3, voided: 4 })[stageOf(epoch, now)];
+    return rank(a) - rank(b) || b.opensAt - a.opensAt;
+  });
   return (
-    <div className="relative grid size-32 place-items-center">
-      <svg viewBox="0 0 120 120" className="absolute inset-0 -rotate-90" aria-hidden="true">
-        <circle cx="60" cy="60" r={radius} fill="none" stroke="currentColor" strokeWidth="6" className="text-surface-2" />
-        <circle cx="60" cy="60" r={radius} fill="none" stroke="currentColor" strokeWidth="6" strokeLinecap="round" strokeDasharray={length} strokeDashoffset={length * done} className="text-accent transition-[stroke-dashoffset] duration-1000 ease-linear" />
-      </svg>
-      <div className="relative text-center">{children}</div>
+    <nav aria-label="Rounds" className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] xl:flex-col xl:gap-1 xl:overflow-visible xl:pb-0">
+      <h2 className="hidden px-3 pb-2 text-[11px] font-medium uppercase tracking-wider text-muted xl:block">Rounds</h2>
+      {ordered.map((epoch) => {
+        const stage = stageOf(epoch, now);
+        const on = epoch.address === selected;
+        const time = new Date(epoch.opensAt * 1000).toUTCString().slice(17, 22);
+        const day = new Date(epoch.opensAt * 1000).toUTCString().slice(5, 11);
+        return (
+          <button
+            key={epoch.address}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onSelect(epoch.address)}
+            className={`flex shrink-0 cursor-pointer items-center gap-3 rounded-control px-3 py-2.5 text-left transition-colors duration-150 xl:w-full ${on ? "bg-surface-2 text-ink" : "text-muted hover:bg-surface hover:text-ink"} border xl:border-0 ${on ? "border-line" : "border-transparent"}`}
+          >
+            <StageDot stage={stage} />
+            <span className="flex flex-col">
+              <span className="text-sm font-medium">{STAGE_LABEL[stage]}</span>
+              <span className="num text-[11px] text-muted">{day} · {time} UTC</span>
+            </span>
+            <span className="num ml-auto pl-3 text-xs text-muted">{entriesOf(epoch)}</span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+function RoundHeader({ epoch, now, decimals, onHelp }: { epoch: Epoch; now: number; decimals: number; onHelp: () => void }) {
+  const stage = stageOf(epoch, now);
+  const pot = potOf(epoch, decimals);
+  const timer = stage === "live" ? `Closes in ${countdown(epoch.closesAt - now)}` : stage === "upcoming" ? `Opens in ${countdown(epoch.opensAt - now)}` : null;
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="font-display text-title font-semibold tracking-tight">Epochs {stage === "live" ? "Live" : ""}</h1>
+        <button type="button" onClick={onHelp} className="grid size-10 shrink-0 cursor-pointer place-items-center rounded-pill text-muted transition-colors duration-150 hover:bg-surface-2 hover:text-ink" aria-label="How it works">
+          <CircleHelp size={18} aria-hidden="true" />
+        </button>
+      </div>
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
+        <StageDot stage={stage} />
+        <span className={stage === "live" ? "font-medium text-down" : "font-medium text-ink"}>{STAGE_LABEL[stage]}</span>
+        <span>·</span>
+        <span className="num">{windowText(epoch)}</span>
+        {timer && (
+          <>
+            <span>·</span>
+            <span className="num flex items-center gap-1 text-ink"><Timer size={14} aria-hidden="true" />{timer}</span>
+          </>
+        )}
+        <span>·</span>
+        <span className="num">{pot === null ? "—" : formatAmount(pot)} {COLLATERAL.symbol} pot</span>
+        <span>·</span>
+        <span className="num">{entriesOf(epoch)} entries</span>
+      </p>
     </div>
   );
 }
 
-const PILL: Record<Stage, string> = {
-  live: "bg-accent text-accent-ink",
-  upcoming: "bg-surface-2 text-ink",
-  closing: "bg-surface-2 text-muted",
-  settled: "bg-surface-2 text-muted",
-  voided: "bg-surface-2 text-muted",
-};
+function CoinRow({ row, rank, live, picked, onPick }: { row: BoardRow; rank: number; live: boolean; picked: boolean; onPick: () => void }) {
+  const tone = row.change === null ? "text-muted" : row.change > 0 ? "text-up" : row.change < 0 ? "text-down" : "text-muted";
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_110px_150px_140px]">
+      <span className="flex min-w-0 items-center gap-3">
+        <span className="num w-5 shrink-0 text-right text-xs text-muted">{rank}</span>
+        <CoinIcon id={row.id} size={28} />
+        <span className="flex min-w-0 flex-col">
+          <span className="truncate text-sm font-medium">{row.id}</span>
+          <span className={`num text-xs sm:hidden ${tone}`}>{row.change === null ? "—" : `${row.change > 0 ? "+" : ""}${formatAmount(row.change * 100, 2)}%`} · {formatAmount(row.share * 100, 1)}% share</span>
+        </span>
+      </span>
+      <span className={`num hidden text-right text-sm sm:block ${tone}`}>{row.change === null ? "—" : `${row.change > 0 ? "+" : ""}${formatAmount(row.change * 100, 2)}%`}</span>
+      <span className="hidden items-center justify-end gap-2 sm:flex">
+        <span className="h-1.5 w-16 overflow-hidden rounded-pill bg-surface-2">
+          <span className="block h-full rounded-pill bg-accent" style={{ width: `${Math.round(row.share * 100)}%` }} />
+        </span>
+        <span className="num w-12 text-right text-sm">{formatAmount(row.share * 100, 1)}%</span>
+      </span>
+      <button
+        type="button"
+        disabled={!live}
+        onClick={onPick}
+        aria-pressed={picked}
+        className={`num flex h-10 w-[120px] items-center justify-between rounded-control border px-3 text-sm font-medium transition-colors duration-150 sm:w-full ${
+          picked ? "border-accent bg-accent text-accent-ink" : "border-line bg-surface-2 text-ink"
+        } ${live ? "cursor-pointer hover:border-accent" : "cursor-not-allowed opacity-50"}`}
+      >
+        <span>{row.id}</span>
+        <span className={picked ? "" : "text-muted"}>{formatAmount(row.share * 100, 1)}%</span>
+      </button>
+    </div>
+  );
+}
 
-function EntryForm({ epoch, coins, decimals, fee, picked, onPick, onBack, onSent }: { epoch: Epoch; coins: string[]; decimals: number; fee: { bps: number; cap: string }; picked: string | null; onPick: (id: string) => void; onBack: () => void; onSent: () => void }) {
+function CoinSection({ title, rows, offset, live, picked, onPick }: { title: string; rows: BoardRow[]; offset: number; live: boolean; picked: string | null; onPick: (id: string) => void }) {
+  if (rows.length === 0) return null;
+  return (
+    <section className="flex flex-col gap-2">
+      <div className="hidden grid-cols-[minmax(0,1fr)_110px_150px_140px] items-end gap-3 px-4 sm:grid">
+        <h2 className="text-base font-semibold">{title}</h2>
+        <span className="text-right text-[11px] font-medium uppercase tracking-wider text-muted">vs $CRYPTO</span>
+        <span className="text-right text-[11px] font-medium uppercase tracking-wider text-muted">Share of gains</span>
+        <span className="text-center text-[11px] font-medium uppercase tracking-wider text-muted">Back</span>
+      </div>
+      <h2 className="px-1 text-base font-semibold sm:hidden">{title}</h2>
+      <div className={`${panel} divide-y divide-line`}>
+        {rows.map((row, index) => (
+          <CoinRow key={row.id} row={row} rank={offset + index + 1} live={live} picked={picked === row.id} onPick={() => onPick(row.id)} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Slip(props: { epoch: Epoch; coins: string[]; live: boolean; decimals: number; fee: { bps: number; cap: string }; picked: string | null; share: number | null; onClear: () => void; onSent: () => void }) {
+  const { epoch, coins, live, decimals, fee, picked, share } = props;
   const [amount, setAmount] = useState("");
   const gross = amount.trim() === "" ? null : parseScaled(amount, decimals);
   const charge = gross !== null && gross > 0n ? feeOf(gross, fee.bps, BigInt(fee.cap)) : null;
-  const problem = amount.trim() === "" ? "" : gross === null || gross <= 0n ? "Enter an amount above zero." : picked === null ? "Pick a coin first." : coins.length !== 30 ? "This round's coin list cannot be entered from here." : null;
-  const intent: Intent | null = problem === null && gross !== null && picked !== null ? { operation: "epoch-entry", opensAt: epoch.opensAt, grossStake: gross.toString(), basket: coins, backedAsset: picked } : null;
+  const problem = amount.trim() === "" ? "" : gross === null || gross <= 0n ? "Enter an amount above zero." : coins.length !== 30 ? "This round's coin list cannot be entered from here." : null;
+  const intent: Intent | null = live && picked !== null && problem === null && gross !== null ? { operation: "epoch-entry", opensAt: epoch.opensAt, grossStake: gross.toString(), basket: coins, backedAsset: picked } : null;
 
   return (
-    <div className="flex flex-1 flex-col gap-3">
-      <button type="button" onClick={onBack} className="flex w-fit cursor-pointer items-center gap-1 text-xs text-muted transition-colors duration-150 hover:text-ink">
-        <ArrowLeft size={14} aria-hidden="true" /> Back
-      </button>
-      <div>
-        <label htmlFor="epoch-coin" className="mb-1 block text-xs text-muted">Your coin</label>
-        <div className="relative">
-          {picked && (
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2">
-              <CoinIcon id={picked} size={20} />
+    <div className="flex flex-col">
+      <div className="flex items-center justify-between px-5 pt-5">
+        <span className="flex items-center gap-2 text-sm font-semibold">
+          <Layers size={16} aria-hidden="true" className="text-accent" /> Entry
+        </span>
+        <span className="text-sm text-muted">{picked ? "1 pick" : "Pick 1 coin"}</span>
+      </div>
+      {picked === null ? (
+        <div className="flex flex-col items-center gap-3 px-5 py-14 text-center text-muted">
+          <Layers size={40} aria-hidden="true" className="opacity-30" />
+          <span className="text-sm">{live ? "No coin picked yet" : "Entries open when a round is live"}</span>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3 p-5">
+          <div className="flex items-center gap-3 rounded-control bg-surface-2 p-3">
+            <CoinIcon id={picked} size={32} />
+            <span className="flex flex-col">
+              <span className="text-sm font-medium">{picked}</span>
+              <span className="num text-xs text-muted">{share === null ? "Beats $CRYPTO the most" : `Scores ${formatAmount(share * 100, 1)}% if it ended now`}</span>
             </span>
-          )}
-          <select id="epoch-coin" value={picked ?? ""} onChange={(event) => onPick(event.target.value)} className={`${field} cursor-pointer ${picked ? "pl-10" : ""}`}>
-            <option value="" disabled>Pick a coin</option>
-            {coins.map((id) => (
-              <option key={id} value={id}>{id}</option>
-            ))}
-          </select>
+            <button type="button" onClick={props.onClear} aria-label="Remove pick" className="ml-auto grid size-8 cursor-pointer place-items-center rounded-pill text-muted hover:bg-surface hover:text-ink">
+              <X size={14} aria-hidden="true" />
+            </button>
+          </div>
+          <div className="relative">
+            <input aria-label="Stake" inputMode="decimal" placeholder="Stake" value={amount} onChange={(event) => setAmount(event.target.value)} className={`${field} pr-16`} />
+            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted">{COLLATERAL.symbol}</span>
+          </div>
+          <dl className="flex flex-col gap-1.5 text-xs">
+            <div className="flex justify-between">
+              <dt className="text-muted">Fee (0.02%)</dt>
+              <dd className="num">{charge === null ? "—" : `${formatAmount(Number(charge) / 10 ** decimals, 4)} ${COLLATERAL.symbol}`}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-muted">Into the pot</dt>
+              <dd className="num">{charge === null || gross === null ? "—" : `${formatAmount(Number(gross - charge) / 10 ** decimals, 4)} ${COLLATERAL.symbol}`}</dd>
+            </div>
+          </dl>
+          <SendButton
+            intent={intent}
+            label={!live ? "Round not live" : amount.trim() === "" ? "Enter a stake" : `Back ${picked}`}
+            connectLabel="Connect wallet to enter"
+            problem={live ? problem : "This round is not taking entries."}
+            describe={gross !== null ? `You staked ${amount} ${COLLATERAL.symbol} on ${picked} for this round.` : undefined}
+            onDone={() => {
+              setAmount("");
+              props.onSent();
+            }}
+            className="h-11 rounded-pill bg-accent text-sm font-medium text-accent-ink"
+          />
         </div>
-      </div>
-      <div>
-        <label htmlFor="epoch-stake" className="mb-1 block text-xs text-muted">Stake</label>
-        <div className="relative">
-          <input id="epoch-stake" inputMode="decimal" placeholder="0" value={amount} onChange={(event) => setAmount(event.target.value)} className={`${field} pr-16`} />
-          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted">{COLLATERAL.symbol}</span>
-        </div>
-      </div>
-      <p className="num text-xs text-muted">
-        {charge === null || gross === null ? "A 0.02% fee is taken from the stake." : `${formatAmount(Number(gross - charge) / 10 ** decimals, 4)} ${COLLATERAL.symbol} goes into the pot after a ${formatAmount(Number(charge) / 10 ** decimals, 4)} fee.`}
-      </p>
-      <div className="mt-auto flex flex-col gap-1">
-        <SendButton
-          intent={intent}
-          label={amount.trim() === "" ? "Enter a stake" : picked ? `Back ${picked}` : "Pick a coin"}
-          connectLabel="Connect wallet to enter"
-          problem={problem}
-          describe={picked && gross !== null ? `You staked ${amount} ${COLLATERAL.symbol} on ${picked} for this round.` : undefined}
-          onDone={() => {
-            setAmount("");
-            onSent();
-          }}
-          className="h-11 rounded-pill bg-accent text-sm font-medium text-accent-ink"
-        />
-      </div>
+      )}
     </div>
   );
 }
 
-interface RoundCardProps {
-  epoch: Epoch;
-  coins: string[];
-  now: number;
-  decimals: number;
-  fee: { bps: number; cap: string };
-  selected: boolean;
-  entering: boolean;
-  picked: string | null;
-  claimable: number;
-  winner: BoardRow | null;
-  onSelect: () => void;
-  onEnter: (entering: boolean) => void;
-  onPick: (id: string) => void;
-  onSent: () => void;
-}
-
-function RoundCard(props: RoundCardProps) {
-  const { epoch, now, decimals, selected, entering, claimable, winner } = props;
-  const stage = stageOf(epoch, now);
-  const live = stage === "live";
-  const pot = potOf(epoch, decimals);
-  const entries = entriesOf(epoch);
-  const open = live && epoch.entriesOpen;
-
+function YourEntries({ epochs, lots, decimals, onSent }: { epochs: Epoch[]; lots: EpochLot[]; decimals: number; onSent: () => void }) {
+  const { owner } = useAccount();
+  const byOpen = new Map(epochs.map((epoch) => [epoch.opensAt, epoch]));
+  const sorted = [...lots].sort((a, b) => b.epochOpensAt - a.epochOpensAt || Number(b.nonce) - Number(a.nonce));
   return (
-    <article
-      onClick={entering ? undefined : props.onSelect}
-      data-selected={selected}
-      className={`flex min-h-[340px] w-[280px] shrink-0 snap-center flex-col gap-4 rounded-card border bg-surface p-5 shadow-card transition-[opacity,border-color] duration-150 sm:w-[300px] ${entering ? "" : "cursor-pointer"} ${
-        live ? "border-accent shadow-[0_12px_40px_-16px_var(--color-accent)]" : selected ? "border-muted" : "border-line opacity-75 hover:opacity-100"
-      }`}
-    >
-      <header className="flex flex-col items-start gap-2">
-        <span className={`flex items-center gap-1.5 rounded-pill px-2.5 py-1 text-xs font-medium ${PILL[stage]}`}>
-          {live && <span className="size-1.5 animate-pulse rounded-full bg-accent-ink" />}
-          {STAGE_LABEL[stage]}
-        </span>
-        <span className="num text-xs text-muted">{windowText(epoch)}</span>
-      </header>
-
-      {entering && open ? (
-        <EntryForm
-          epoch={epoch}
-          coins={props.coins}
-          decimals={decimals}
-          fee={props.fee}
-          picked={props.picked}
-          onPick={props.onPick}
-          onBack={() => props.onEnter(false)}
-          onSent={() => {
-            props.onEnter(false);
-            props.onSent();
-          }}
-        />
+    <div className="flex flex-col gap-3 border-t border-line p-5">
+      <span className="text-sm font-semibold">Your entries</span>
+      {!owner ? (
+        <span className="text-xs text-muted">Connect a wallet to see your entries.</span>
+      ) : sorted.length === 0 ? (
+        <span className="text-xs text-muted">None yet.</span>
       ) : (
-        <>
-          <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-            {live ? (
-              <Ring progress={(now - epoch.opensAt) / (epoch.closesAt - epoch.opensAt)}>
-                <span className="block text-[11px] text-muted">Closes in</span>
-                <span className="num block text-lg font-semibold">{countdown(epoch.closesAt - now)}</span>
-              </Ring>
-            ) : stage === "upcoming" ? (
-              <div>
-                <span className="block text-xs text-muted">Opens in</span>
-                <span className="num block text-3xl font-semibold">{countdown(epoch.opensAt - now)}</span>
-              </div>
-            ) : winner && winner.share > 0 ? (
-              <div className="flex flex-col items-center gap-2">
-                <Trophy size={18} aria-hidden="true" className="text-accent" />
-                <CoinIcon id={winner.id} size={44} />
-                <span className="text-sm font-medium">{winner.id} led the round</span>
-                <span className="num text-xs text-up">{winner.change === null ? "" : `+${formatAmount(winner.change * 100, 2)}% vs $CRYPTO`}</span>
-              </div>
-            ) : (
-              <span className="text-sm text-muted">{stage === "voided" ? "Cancelled. Stakes refunded." : stage === "closing" ? "Round over. Results coming." : "Round over. Select it to see the result."}</span>
-            )}
-          </div>
-
-          <dl className="grid grid-cols-2 gap-2 text-center">
-            <div className="rounded-control bg-surface-2 px-2 py-2">
-              <dt className="text-[11px] text-muted">Pot</dt>
-              <dd className="num text-sm font-medium">{pot === null ? "—" : `${formatAmount(pot)} ${COLLATERAL.symbol}`}</dd>
-            </div>
-            <div className="rounded-control bg-surface-2 px-2 py-2">
-              <dt className="text-[11px] text-muted">Entries</dt>
-              <dd className="num text-sm font-medium">{entries}</dd>
-            </div>
-          </dl>
-
-          {open ? (
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                props.onSelect();
-                props.onEnter(true);
-              }}
-              className={`${primary} cursor-pointer transition-opacity duration-150 hover:opacity-90`}
-            >
-              Enter round
-            </button>
-          ) : claimable > 0 ? (
-            <span className="flex h-11 items-center justify-center rounded-pill border border-accent text-sm text-accent">{formatAmount(claimable, 4)} {COLLATERAL.symbol} to collect</span>
-          ) : (
-            <span className="flex h-11 items-center justify-center rounded-pill border border-line text-sm text-muted">{stage === "upcoming" ? "Not open yet" : live ? "Not taking entries" : "Round over"}</span>
-          )}
-        </>
+        <ul className="flex flex-col gap-3">
+          {sorted.map((lot) => {
+            const epoch = byOpen.get(lot.epochOpensAt) ?? null;
+            const score = scoreOf(lot);
+            const claimable = lot.claimable === null ? null : units(lot.claimable, decimals);
+            const withdrawable = lot.state !== "withdrawn" && lot.claimable !== null && BigInt(lot.claimable) > 0n;
+            return (
+              <li key={lot.address} className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <CoinIcon id={lot.backedAsset} size={22} />
+                  <span className="text-sm font-medium">{lot.backedAsset}</span>
+                  <span className="num text-xs text-muted">{formatAmount(units(lot.grossStake, decimals))} {COLLATERAL.symbol}</span>
+                  <span className="ml-auto text-xs text-muted">{lotStatus(lot, epoch)}</span>
+                </div>
+                <div className="num flex justify-between text-[11px] text-muted">
+                  <span>{epoch ? windowText(epoch) : ""}</span>
+                  <span>{score === null ? "" : `Score ${formatAmount(score * 100, 1)}%`}</span>
+                </div>
+                {withdrawable && epoch && (
+                  <SendButton
+                    intent={{ operation: "epoch-withdraw", opensAt: epoch.opensAt, nonce: lot.nonce }}
+                    label={`Collect ${formatAmount(claimable ?? 0, 4)} ${COLLATERAL.symbol}`}
+                    connectLabel="Connect"
+                    onDone={onSent}
+                    className="h-9 rounded-pill bg-accent text-xs font-medium text-accent-ink"
+                  />
+                )}
+              </li>
+            );
+          })}
+        </ul>
       )}
-    </article>
-  );
-}
-
-function Leaders({ rows, final, ready, live, stage, picked, onPick }: { rows: BoardRow[]; final: boolean; ready: boolean; live: boolean; stage: Stage; picked: string | null; onPick: (id: string) => void }) {
-  const [all, setAll] = useState(false);
-  const shown = all ? rows : rows.slice(0, LEADERS);
-  const top = rows[0]?.share ?? 0;
-
-  if (stage === "upcoming") return null;
-  if (!ready) {
-    return <p className="text-sm text-muted">{stage === "live" ? "Loading the leaders…" : "The result appears once the closing prices are in."}</p>;
-  }
-
-  return (
-    <section className="flex flex-col gap-3">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <h2 className="text-base font-semibold">{final ? "Final result" : "Leaders now"}</h2>
-          <p className="text-xs text-muted">{final ? "Each coin's share of the gains, from open to close." : "If the round ended now, an entry on each coin would score its share of the gains."}</p>
-        </div>
-        {live && <span className="hidden text-xs text-muted sm:block">Tap a coin to back it</span>}
-      </div>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-        {shown.map((row, index) => {
-          const tone = row.change === null ? "text-muted" : row.change > 0 ? "text-up" : row.change < 0 ? "text-down" : "text-muted";
-          const chosen = live && picked === row.id;
-          return (
-            <button
-              key={row.id}
-              type="button"
-              disabled={!live}
-              onClick={() => onPick(row.id)}
-              className={`flex flex-col gap-2 rounded-card border bg-surface p-3 text-left transition-colors duration-150 ${live ? "cursor-pointer hover:bg-surface-2" : "cursor-default"} ${chosen ? "border-accent" : "border-line"} ${row.share === 0 ? "opacity-60" : ""}`}
-            >
-              <span className="flex items-center justify-between">
-                <span className="flex items-center gap-2">
-                  <CoinIcon id={row.id} size={24} />
-                  <span className="text-sm font-medium">{row.id}</span>
-                </span>
-                <span className="num text-[11px] text-muted">#{index + 1}</span>
-              </span>
-              <span className="num text-xl font-semibold">{formatAmount(row.share * 100, 1)}%</span>
-              <span className="h-1 overflow-hidden rounded-pill bg-surface-2">
-                <span className="block h-full rounded-pill bg-accent" style={{ width: `${top > 0 ? Math.round((row.share / top) * 100) : 0}%` }} />
-              </span>
-              <span className={`num text-xs ${tone}`}>{row.change === null ? "—" : `${row.change > 0 ? "+" : ""}${formatAmount(row.change * 100, 2)}% vs $CRYPTO`}</span>
-            </button>
-          );
-        })}
-      </div>
-      {rows.length > LEADERS && (
-        <button type="button" onClick={() => setAll(!all)} className="mx-auto h-9 cursor-pointer rounded-pill border border-line px-4 text-xs transition-colors duration-150 hover:bg-surface-2">
-          {all ? "Show top 10" : `Show all ${rows.length} coins`}
-        </button>
-      )}
-    </section>
+    </div>
   );
 }
 
@@ -347,7 +337,7 @@ function HowItWorks({ onClose }: { onClose: () => void }) {
     ["Share the pot", "Coins that rose against $CRYPTO split the pot by their share of the gains, weighted by stake. If none rose, everyone is refunded."],
   ];
   return (
-    <div className="relative grid gap-4 rounded-card border border-line bg-surface p-4 pr-10 shadow-card sm:grid-cols-3">
+    <div className={`${panel} relative grid gap-4 p-4 pr-10 sm:grid-cols-3`}>
       <button type="button" onClick={onClose} aria-label="Close" className="absolute right-2 top-2 grid size-8 cursor-pointer place-items-center rounded-pill text-muted hover:bg-surface-2 hover:text-ink">
         <X size={14} aria-hidden="true" />
       </button>
@@ -361,59 +351,16 @@ function HowItWorks({ onClose }: { onClose: () => void }) {
   );
 }
 
-function YourEntries({ epochs, lots, decimals, onSent }: { epochs: Epoch[]; lots: EpochLot[]; decimals: number; onSent: () => void }) {
-  if (lots.length === 0) return null;
-  const byOpen = new Map(epochs.map((epoch) => [epoch.opensAt, epoch]));
-  const sorted = [...lots].sort((a, b) => b.epochOpensAt - a.epochOpensAt || Number(b.nonce) - Number(a.nonce));
-  return (
-    <section className="flex flex-col gap-3">
-      <h2 className="text-base font-semibold">Your entries</h2>
-      <div className="overflow-hidden rounded-card border border-line bg-surface shadow-card">
-        {sorted.map((lot) => {
-          const epoch = byOpen.get(lot.epochOpensAt) ?? null;
-          const score = scoreOf(lot);
-          const claimable = lot.claimable === null ? null : units(lot.claimable, decimals);
-          const withdrawable = lot.state !== "withdrawn" && lot.claimable !== null && BigInt(lot.claimable) > 0n;
-          return (
-            <div key={lot.address} className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-4 py-3 last:border-b-0">
-              <span className="flex min-w-[100px] items-center gap-2">
-                <CoinIcon id={lot.backedAsset} size={24} />
-                <span className="text-sm font-medium">{lot.backedAsset}</span>
-              </span>
-              <span className="num text-xs text-muted">{epoch ? windowText(epoch) : ""}</span>
-              <span className="num text-xs">{formatAmount(units(lot.grossStake, decimals))} {COLLATERAL.symbol} staked</span>
-              {score !== null && <span className="num text-xs text-muted">Score {formatAmount(score * 100, 1)}%</span>}
-              <span className="ml-auto flex items-center gap-3">
-                <span className="text-xs text-muted">{lotStatus(lot, epoch)}</span>
-                {withdrawable && epoch && (
-                  <SendButton
-                    intent={{ operation: "epoch-withdraw", opensAt: epoch.opensAt, nonce: lot.nonce }}
-                    label={`Collect ${formatAmount(claimable ?? 0, 4)}`}
-                    connectLabel="Connect"
-                    onDone={onSent}
-                    className="h-9 rounded-pill bg-accent px-4 text-xs font-medium text-accent-ink"
-                  />
-                )}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
 export function EpochsView({ overview, roster, serverNow }: { overview: EpochOverview; roster: string[]; serverNow: number }) {
   const now = useNow(serverNow);
   const { owner, market } = useAccount();
   const decimals = market.decimals || 6;
   const epochs = useMemo(() => [...overview.epochs].sort((a, b) => a.opensAt - b.opensAt), [overview.epochs]);
   const [selected, setSelected] = useState<string | null>(() => pickDefault(epochs, serverNow));
-  const [entering, setEntering] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
   const [lots, setLots] = useState<EpochLot[]>([]);
   const [help, setHelp] = useState(false);
-  const track = useRef<HTMLDivElement>(null);
+  const [query, setQuery] = useState("");
   const epoch = epochs.find((item) => item.address === selected) ?? epochs[0] ?? null;
   const coins = epoch ? coinsOf(epoch, roster) : [];
   const board = useBoard(epoch, coins, now);
@@ -432,80 +379,70 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
     return () => window.clearInterval(timer);
   }, [loadLots]);
 
-  const centred = useRef(false);
-  useEffect(() => {
-    const strip = track.current;
-    const card = strip?.querySelector<HTMLElement>('[data-selected="true"]');
-    if (!strip || !card) return;
-    const left = card.getBoundingClientRect().left - strip.getBoundingClientRect().left + strip.scrollLeft;
-    strip.scrollTo({ left: left - (strip.clientWidth - card.offsetWidth) / 2, behavior: centred.current ? "smooth" : "auto" });
-    centred.current = true;
-  }, [selected]);
+  if (!epoch) {
+    return (
+      <div className="flex flex-col gap-4">
+        <h1 className="font-display text-title font-semibold tracking-tight">Epochs</h1>
+        <section className={`${panel} p-6 text-sm text-muted`}>No rounds are scheduled yet. Check back soon.</section>
+      </div>
+    );
+  }
 
-  const scroll = (way: number) => track.current?.scrollBy({ left: way * 316, behavior: "smooth" });
-  const pick = (id: string) => {
-    setPicked(id);
-    if (live) setEntering(true);
-  };
-  const claimableIn = (opensAt: number) =>
-    lots.filter((lot) => lot.epochOpensAt === opensAt && lot.state !== "withdrawn" && lot.claimable !== null).reduce((sum, lot) => sum + units(lot.claimable!, decimals), 0);
+  const rows = board.ready ? board.rows : coins.map((id) => ({ id, change: null, share: 0 }));
+  const shown = rows.filter((row) => row.id.toLowerCase().includes(query.trim().toLowerCase()));
+  const ahead = board.ready ? shown.filter((row) => (row.change ?? 0) > 0) : [];
+  const behind = board.ready ? shown.filter((row) => (row.change ?? 0) <= 0) : shown;
+  const share = picked ? (board.rows.find((row) => row.id === picked)?.share ?? null) : null;
+  const choose = (id: string) => setPicked(picked === id ? null : id);
 
   return (
-    <div className="flex flex-col gap-8">
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="max-w-xl text-sm text-muted">Four-hour rounds. Back the coin you think beats $CRYPTO the most. Coins that rose share the pot.</p>
-          <button type="button" onClick={() => setHelp(!help)} aria-expanded={help} className="flex h-9 cursor-pointer items-center gap-1.5 rounded-pill border border-line px-3 text-xs transition-colors duration-150 hover:bg-surface-2">
-            <CircleHelp size={14} aria-hidden="true" /> How it works
-          </button>
-        </div>
+    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[200px_minmax(0,1fr)_320px]">
+      <aside className="min-w-0 xl:sticky xl:top-6 xl:self-start">
+        <RoundList epochs={epochs} now={now} selected={epoch.address} onSelect={(address) => {
+          setSelected(address);
+          setPicked(null);
+        }} />
+      </aside>
+
+      <div className="flex min-w-0 flex-col gap-6">
+        <RoundHeader epoch={epoch} now={now} decimals={decimals} onHelp={() => setHelp(!help)} />
         {help && <HowItWorks onClose={() => setHelp(false)} />}
+
+        <label className="relative">
+          <Search size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search coins" aria-label="Search coins" className={`${field} pl-9`} />
+        </label>
+
+        {stage === "upcoming" && <p className="text-sm text-muted">This round opens in {countdown(epoch.opensAt - now)}. Moves and shares fill in once it starts.</p>}
+        {stage === "closing" && !board.final && <p className="text-sm text-muted">This round has ended. Final shares appear once its closing prices are recorded.</p>}
+
+        <CoinSection title={board.final ? "Finished ahead of $CRYPTO" : "Ahead of $CRYPTO"} rows={ahead} offset={0} live={live} picked={picked} onPick={choose} />
+        <CoinSection title={board.ready ? (board.final ? "Finished behind $CRYPTO" : "Behind $CRYPTO") : "Coins"} rows={behind} offset={ahead.length} live={live} picked={picked} onPick={choose} />
+        {shown.length === 0 && <p className="text-sm text-muted">No coin matches “{query}”.</p>}
       </div>
 
-      {epochs.length === 0 ? (
-        <section className="rounded-card border border-line bg-surface p-6 text-sm text-muted shadow-card">No rounds are scheduled yet. Check back soon.</section>
-      ) : (
-        <div className="relative">
-          <div ref={track} className="-mx-4 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 py-2 [scrollbar-width:none] sm:mx-0 sm:px-12">
-            {epochs.map((item) => (
-              <RoundCard
-                key={item.address}
-                epoch={item}
-                coins={coinsOf(item, roster)}
-                now={now}
-                decimals={decimals}
-                fee={overview.configuration.entryFee}
-                selected={item.address === epoch?.address}
-                entering={entering && item.address === epoch?.address}
-                picked={picked}
-                claimable={claimableIn(item.opensAt)}
-                winner={item.address === epoch?.address && board.final ? (board.rows[0] ?? null) : null}
-                onSelect={() => {
-                  if (item.address !== epoch?.address) setEntering(false);
-                  setSelected(item.address);
-                }}
-                onEnter={setEntering}
-                onPick={setPicked}
-                onSent={() => void loadLots()}
-              />
-            ))}
-          </div>
-          {epochs.length > 1 && (
-            <>
-              <button type="button" onClick={() => scroll(-1)} aria-label="Earlier rounds" className="absolute left-0 top-1/2 hidden size-9 -translate-y-1/2 cursor-pointer place-items-center rounded-pill border border-line bg-surface text-muted shadow-card hover:text-ink sm:grid">
-                <ChevronLeft size={16} aria-hidden="true" />
-              </button>
-              <button type="button" onClick={() => scroll(1)} aria-label="Later rounds" className="absolute right-0 top-1/2 hidden size-9 -translate-y-1/2 cursor-pointer place-items-center rounded-pill border border-line bg-surface text-muted shadow-card hover:text-ink sm:grid">
-                <ChevronRight size={16} aria-hidden="true" />
-              </button>
-            </>
-          )}
+      <aside className={`${panel} hidden self-start xl:sticky xl:top-6 xl:block`}>
+        <Slip epoch={epoch} coins={coins} live={live} decimals={decimals} fee={overview.configuration.entryFee} picked={picked} share={share} onClear={() => setPicked(null)} onSent={() => {
+          setPicked(null);
+          void loadLots();
+        }} />
+        <YourEntries epochs={epochs} lots={lots} decimals={decimals} onSent={() => void loadLots()} />
+      </aside>
+
+      <div className="xl:hidden">
+        <div className={panel}>
+          <YourEntries epochs={epochs} lots={lots} decimals={decimals} onSent={() => void loadLots()} />
+        </div>
+      </div>
+
+      {picked && (
+        <div className="fixed inset-x-0 bottom-0 z-40 max-h-[80vh] overflow-y-auto rounded-t-card border-t border-line bg-surface shadow-card xl:hidden">
+          <Slip epoch={epoch} coins={coins} live={live} decimals={decimals} fee={overview.configuration.entryFee} picked={picked} share={share} onClear={() => setPicked(null)} onSent={() => {
+            setPicked(null);
+            void loadLots();
+          }} />
         </div>
       )}
-
-      {epoch && <Leaders rows={board.rows} final={board.final} ready={board.ready} live={live} stage={stage} picked={picked} onPick={pick} />}
-
-      <YourEntries epochs={epochs} lots={lots} decimals={decimals} onSent={() => void loadLots()} />
     </div>
   );
 }
