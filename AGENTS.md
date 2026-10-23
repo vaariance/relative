@@ -1525,3 +1525,10 @@ another agent needs to know.
 - **Rules for agents:** The web app must hold no faucet or mint key. tUSDC claims go through Joel's API once Peter verifies the faucet signer.
 - **Open:** Joel: the typed faucet API contract (challenge, eligibility, claim, status). Godwin: Get test funds UI against it, and a tUSDC option on Buy and Swap.
 - **Refs:** commit `ad94e33`.
+
+### 2026-10-23 · Godwin (Claude Code) · Epochs page behind EPOCHS_ENABLED
+
+- **Area:** `apps/web` (`src/app/(app)/epochs/page.tsx`, `epochsEnabled` in `src/lib/config.ts`).
+- **What:** At Godwin's request, `/epochs` shows a "Coming soon" card unless the server variable `EPOCHS_ENABLED` is `true`; then it shows the full Epochs page. Off by default everywhere, including local development and production. With the flag off the page makes no Epoch API calls. The menu item stays. Checked in the dev server both ways.
+- **Rules for agents:** Do not set `EPOCHS_ENABLED` on Vercel production, or in shared local defaults, until Godwin approves the Epochs page for users.
+- **Refs:** commit `ead6681`, `apps/web/README.md` (Configuration, Epochs page).
