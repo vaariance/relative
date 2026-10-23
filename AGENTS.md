@@ -1489,3 +1489,9 @@ another agent needs to know.
 - **Area:** `apps/web` (`faucet-panel.tsx`, Faucet page).
 - **What:** At Godwin's request, the Faucet page follows the layout of Circle's faucet. Three token cards (tUSDC, USDC, SOL), then the network (Solana Devnet), the wallet address and one button. tUSDC sends 20 tUSDC; USDC and SOL copy the address and open Circle's or Solana's faucet. Without a wallet the button opens login. Supersedes the numbered steps in Godwin's 2026-10-23 "Faucet test collateral as one step" entry. Checked at desktop and phone widths in the dev server without a wallet.
 - **Refs:** commit `70d2fda`.
+
+### 2026-10-23 · Godwin (Claude Code) · Faucet requires SOL before collateral
+
+- **Area:** `apps/web` (`faucet-panel.tsx`, `src/app/faucet-actions.ts`, `MIN_GAS_SOL` in `src/lib/config.ts`).
+- **What:** At Godwin's request, a wallet must hold at least 0.01 devnet SOL before the Faucet page lets it claim tUSDC or open the Circle USDC faucet. Below that, the page selects the SOL card, marks it "Start here", and locks the other two buttons ("Get SOL first"). `claimTestTokens` also refuses below the minimum with code `NO_GAS`. `faucetStatus` (replacing `faucetClaims`) returns the SOL balance and claims left, and is read again whenever the tab gets focus. The Circle link is only gated in the page, since Circle's site cannot be controlled. Not checked with a connected wallet.
+- **Refs:** commit `f2b3238`.
