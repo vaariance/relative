@@ -1433,8 +1433,8 @@
   },
   "lastRuntimeAuditSlot": 513977460,
   "nativeRuntime": {
-    "sourceCommit": "90d4deff3e344a7a88d1069e306bc93c067b7f2a",
-    "linuxSha256": "fd8d427f125bcd8e14d04ea361dabcee00806211359dca3b07b29d603fc8d773",
+    "sourceCommit": "acd9f157b9be93c10af8e82b640ecd8b06c06bfd",
+    "linuxSha256": "06851d9a983c0beb1975d89d5f2b4d021d65dd66a75985e79071ae905d0fee79",
     "service": "cox-publisher.service",
     "region": "europe-west1",
     "running": true,
@@ -1738,6 +1738,99 @@
         "Publisher only; excludes APIs, signer, wallets and operator commands.",
         "No runtime gRPC billing/byte counters; authenticated dashboard comparison remains open."
       ]
+    },
+    "hourlyRefreshRollout": {
+      "verifiedAtUtc": "2026-10-23T21:01:18Z",
+      "sourceCommit": "acd9f157b9be93c10af8e82b640ecd8b06c06bfd",
+      "linuxSha256": "06851d9a983c0beb1975d89d5f2b4d021d65dd66a75985e79071ae905d0fee79",
+      "configurationPreserved": true,
+      "runtimeIdentityPreserved": true,
+      "nativeTestsPassed": 182,
+      "schedule": "HH:00:00 UTC through shared publisher; missed hours coalesce",
+      "confirmedClockGuard": "Clock sysvar in existing confirmed account batch; five-second wall-time limit unchanged",
+      "publication": {
+        "checkedAt": "2026-10-23T21:00:47.254Z",
+        "commitment": "finalized",
+        "sequence": "10",
+        "publicationSequence": "10",
+        "cutoff": 1792789200,
+        "cutoffUtc": "2026-10-23T21:00:00.000Z",
+        "committedAt": "1792789220",
+        "committedUtc": "2026-10-23T21:00:20.000Z",
+        "pending": "0",
+        "active": "4998992",
+        "payable": "0",
+        "fees": "1438",
+        "residual": "1",
+        "nextRequestNonce": "7",
+        "classUnits": [
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "4999000000000000000",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0"
+        ],
+        "stage": null
+      },
+      "preservedFinancialFields": [
+        "active",
+        "payable",
+        "fees",
+        "residual",
+        "nextRequestNonce",
+        "classUnits"
+      ],
+      "apiReconciliation": {
+        "sequence": 10,
+        "vault": "5000431",
+        "ledger": "5000431",
+        "fees": "1438",
+        "covered": true
+      },
+      "idleVerification": {
+        "fromUtc": "2026-10-23T21:00:47Z",
+        "toUtc": "2026-10-23T21:01:18Z",
+        "physicalHttpRequestsBefore": 106,
+        "physicalHttpRequestsAfter": 106,
+        "publisherRestarts": 0,
+        "previewRestarts": 0
+      },
+      "limitations": [
+        "Hourly wakeup is not guaranteed exact-second transaction inclusion; observed commitment was 20 seconds after cutoff.",
+        "Three rejected sendTransaction calls were logged during this successful scheduled cycle; no further rapid polling followed completion.",
+        "Dynamic inclusion was not activated."
+      ],
+      "earlierAttempt": {
+        "sourceCommit": "cf2ecf8dd179f345725b6f2d98e178e4b3cd2616",
+        "rolledBackTo": "90d4deff3e344a7a88d1069e306bc93c067b7f2a",
+        "correction": "Earlier no-signing/no-broadcast assertion was incomplete: later journal review found sendTransaction attempts and finalized publication 9 at 20:41:21 UTC. Publication 10 is the separately verified corrected release result."
+      }
     }
   },
   "epochReadinessVerification": {
