@@ -1,39 +1,18 @@
 import type { CoxDeployment, TradingStatus } from "@eox/app-api";
-import { CIRCLE_DEVNET_USDC, COLLATERAL } from "./config";
 
 export const VALID_SECONDS = 180;
-
-export interface Collateral {
-  mint: string;
-  symbol: string;
-  name: string;
-  primary: boolean;
-}
 
 export interface Market {
   trading: TradingStatus | null;
   interval: number;
-  collaterals: Collateral[];
   decimals: number;
 }
 
-export const NO_MARKET: Market = { trading: null, interval: 60, collaterals: [], decimals: 0 };
-
-function describe(mint: string, primary: boolean): Collateral {
-  if (mint === CIRCLE_DEVNET_USDC) return { mint, symbol: COLLATERAL.symbol, name: COLLATERAL.name, primary };
-  return { mint, symbol: "tUSDC", name: "test USDC", primary };
-}
-
-export function collateralsOf(deployment: Pick<CoxDeployment, "collateralMint" | "secondaryCollateralMint"> | null): Collateral[] {
-  if (!deployment?.collateralMint) return [];
-  const list = [describe(deployment.collateralMint, true)];
-  if (deployment.secondaryCollateralMint && deployment.secondaryCollateralMint !== deployment.collateralMint) list.push(describe(deployment.secondaryCollateralMint, false));
-  return list;
-}
+export const NO_MARKET: Market = { trading: null, interval: 60, decimals: 0 };
 
 export function marketOf(deployment: CoxDeployment | null, trading: TradingStatus | null): Market {
   const interval = deployment?.publicationIntervalSeconds;
-  return { trading, interval: Number.isSafeInteger(interval) && interval! > 0 ? interval! : 60, collaterals: collateralsOf(deployment), decimals: deployment?.collateralDecimals ?? 0 };
+  return { trading, interval: Number.isSafeInteger(interval) && interval! > 0 ? interval! : 60, decimals: deployment?.collateralDecimals ?? 0 };
 }
 
 export function batchesFor(interval: number, seconds = VALID_SECONDS): number {

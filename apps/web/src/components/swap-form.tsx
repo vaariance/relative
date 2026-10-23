@@ -23,10 +23,6 @@ export function SwapForm({ crypto, nextBatch, decimals }: { crypto: ClassView; n
   const open = useOpenBatch(nextBatch);
   const [buying, setBuying] = useState(true);
   const [amount, setAmount] = useState("");
-  const [mint, setMint] = useState<string | null>(null);
-  const options = market.collaterals;
-  const chosen = options.find((item) => item.mint === mint) ?? options.find((item) => item.primary) ?? null;
-  const collateralMint = buying && options.length > 1 && chosen ? chosen.mint : undefined;
 
   const parsed = Number(amount);
   const empty = amount.trim() === "";
@@ -42,13 +38,11 @@ export function SwapForm({ crypto, nextBatch, decimals }: { crypto: ClassView; n
     validForBatches: batchesFor(market.interval),
     targetBatch: open.batch?.batch ?? null,
     collateralDecimals: decimals,
-    collateralMint,
   });
   const { quote, pending, problem } = useQuote(planned.intent);
   const quoted = quote === null ? null : buying ? (quote.mintedUnits === null ? null : toNumber(quote.mintedUnits, unitDigits(decimals))) : toNumber(quote.proceeds ?? quote.net, decimals);
   const blocked = unitsProblem ? QUOTE_MESSAGES.balance : problem ? QUOTE_MESSAGES[problem] : null;
-  const symbol = chosen?.symbol ?? COLLATERAL.symbol;
-  const give = buying ? symbol : "$CRYPTO";
+  const give = buying ? COLLATERAL.symbol : "$CRYPTO";
   const get = buying ? "$CRYPTO" : COLLATERAL.symbol;
 
   return (
@@ -61,17 +55,7 @@ export function SwapForm({ crypto, nextBatch, decimals }: { crypto: ClassView; n
           </div>
           <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
             <input id="swap-amount" inputMode="decimal" placeholder="0" value={amount} onChange={(event) => setAmount(event.target.value)} className={field} />
-            {buying && options.length > 1 ? (
-              <select aria-label="Pay with" value={chosen?.mint ?? ""} onChange={(event) => setMint(event.target.value)} className={`${fixed} cursor-pointer`}>
-                {options.map((item) => (
-                  <option key={item.mint} value={item.mint}>
-                    {item.symbol} · {item.name}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <span className={fixed}>{give}</span>
-            )}
+            <span className={fixed}>{give}</span>
           </div>
         </div>
 

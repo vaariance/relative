@@ -15,7 +15,7 @@ import { SendButton } from "./send-button";
 import { QUOTE_MESSAGES, useQuote } from "./use-quote";
 
 type Side = "buy" | "sell";
-type Pay = string;
+type Pay = "collateral" | typeof CRYPTO_PAY;
 
 const CRYPTO_PAY = "crypto";
 
@@ -31,16 +31,13 @@ export function TradeForm({ claim, crypto, nextBatch, decimals }: { claim: Class
   const holdings = holdingsOf(portfolio, decimals);
   const open = useOpenBatch(nextBatch);
   const [side, setSide] = useState<Side>("buy");
-  const [pay, setPay] = useState<Pay>("primary");
+  const [pay, setPay] = useState<Pay>("collateral");
   const [amount, setAmount] = useState("");
   const [minimum, setMinimum] = useState("");
 
   const buying = side === "buy";
-  const options = market.collaterals.length > 0 ? market.collaterals : [{ mint: "primary", symbol: COLLATERAL.symbol, name: COLLATERAL.name, primary: true }];
-  const chosen = pay === CRYPTO_PAY ? null : (options.find((item) => item.mint === pay) ?? options.find((item) => item.primary) ?? options[0]!);
-  const direct = buying && chosen !== null;
-  const pays = direct ? chosen.symbol : "$CRYPTO";
-  const collateralMint = direct && market.collaterals.length > 1 ? chosen.mint : undefined;
+  const direct = buying && pay !== CRYPTO_PAY;
+  const pays = direct ? COLLATERAL.symbol : "$CRYPTO";
   const from = buying ? CRYPTO_CLASS : claim.id;
   const to = buying ? claim.id : CRYPTO_CLASS;
   const parsed = Number(amount);
@@ -49,7 +46,7 @@ export function TradeForm({ claim, crypto, nextBatch, decimals }: { claim: Class
   const held = holdings?.find((item) => item.classId === from);
   const available = direct ? null : held ? held.units - held.locked : holdings === null ? null : 0;
   const unitsProblem = valid && !direct ? unlockedProblem(holdings, from, parsed) : null;
-  const planned = planRequest({ operation: direct ? "deposit" : "switch", fromClass: direct ? null : from, toClass: to, amount, minimum, validForBatches: batchesFor(market.interval), targetBatch: open.batch?.batch ?? null, collateralDecimals: decimals, collateralMint });
+  const planned = planRequest({ operation: direct ? "deposit" : "switch", fromClass: direct ? null : from, toClass: to, amount, minimum, validForBatches: batchesFor(market.interval), targetBatch: open.batch?.batch ?? null, collateralDecimals: decimals });
   const { quote, pending, problem } = useQuote(planned.intent);
   const quoted = quote === null || quote.mintedUnits === null ? null : toNumber(quote.mintedUnits, unitDigits(decimals));
   const blocked = unitsProblem ? QUOTE_MESSAGES.balance : problem ? QUOTE_MESSAGES[problem] : null;
@@ -83,7 +80,7 @@ export function TradeForm({ claim, crypto, nextBatch, decimals }: { claim: Class
           {buying && (
             <div role="group" aria-label="Pay with" className="mt-2 flex items-center gap-1 text-xs">
               <span className="mr-1 text-muted">Pay with</span>
-              {[...options.map((item) => ({ id: item.mint, label: item.symbol, on: chosen?.mint === item.mint })), { id: CRYPTO_PAY, label: "$CRYPTO", on: chosen === null }].map((item) => (
+              {([{ id: "collateral", label: COLLATERAL.symbol, on: direct }, { id: CRYPTO_PAY, label: "$CRYPTO", on: !direct }] as const).map((item) => (
                 <button key={item.id} type="button" aria-pressed={item.on} onClick={() => setPay(item.id)} className={`h-7 cursor-pointer rounded-pill px-3 transition-colors duration-150 ${item.on ? "bg-surface-2 text-ink" : "text-muted hover:text-ink"}`}>
                   {item.label}
                 </button>

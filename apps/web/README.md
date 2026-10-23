@@ -85,11 +85,9 @@ Every trade stays valid for about three minutes (`VALID_SECONDS` in
 `deployment.publicationIntervalSeconds`: 3 batches on a minute pool, 180 on a
 one-second pool such as pool 2.
 
-When the pool has `deployment.secondaryCollateralMint`, buying with collateral
-and withdrawing offer both mints: USDC (Circle's devnet USDC) and tUSDC (the
-test mint). The choice is sent as `collateralMint`. Payables are one balance
-across both mints, and a withdrawal needs liquidity in the chosen mint's
-vault. Refunds use the primary mint.
+The only collateral the app offers is USDC (Circle's devnet USDC, the pool's
+primary mint). Buys, refunds and withdrawals never send `collateralMint`, so
+the API uses the primary mint; a pool's `secondaryCollateralMint` is ignored.
 
 ### Live estimates
 
