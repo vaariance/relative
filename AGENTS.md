@@ -1346,3 +1346,20 @@ another agent needs to know.
   - Do not compute or average history points; a missing step stays a gap.
   - The first VM deploy attempt lost its SSH connection after `setup.sh` had replaced `/opt/eox/app` but before `pnpm install`. Running services kept working from memory, but any restart would have failed. If a VM deploy drops, check `/opt/eox/app/node_modules` and rerun `deploy/dev/deploy.sh` at once.
 - **Refs:** `apps/app-api/README.md` (Live previews), commits `4abc5f0`..`1723a85`.
+
+### 2026-10-23 · Godwin (Claude Code) · Web app on pool 2 with live estimates; deployed
+
+- **Area:** `apps/web`; Vercel project `cox-web`.
+- **What:**
+  - **Pool 2:** trades follow `status.trading` (closed buttons say why and no quotes are requested; withdraw, cancel and refund stay open) and `TRADING_CLOSED` has its own message. Expiry is about three minutes converted to batches with `publicationIntervalSeconds` (`src/lib/market.ts`). Buying with collateral and withdrawing offer USDC and tUSDC as `collateralMint`.
+  - **Live estimates:** prices, references, the $CRYPTO level, projected unit values and wallet value come from the previews (`src/lib/estimate.ts`, `src/components/live.tsx`). One line under the top bar says "Live estimate" or "Estimate paused" and gives the last on-chain settlement time.
+  - **Charts:** the browser keeps the previews it receives for up to 4 hours. Market line charts and sparklines add one point a minute, with settled publications as dots. Position unit value and worth update every second.
+  - **Other:** Next.js 16.4.2 (security advisories), optional Privy, pino and ox build warnings removed.
+  - **Deployed:** `ca371dd` to production at <https://getrelative.trade> (deployment `cox-2tvb7dhcj-gef-228639f6`).
+  - **RPC proxy check (Peter):** Vercel sets no `NEXT_PUBLIC_SOLANA_RPC_URL` or `COX_RPC_URL`, so the site uses public devnet and never depended on the retired proxy.
+- **Rules for agents:**
+  - Label preview values as estimates and keep settled publication values separate; a later publication does not confirm a preview.
+  - The web app reads previews only from the app API: the stream, and `/v1/preview` every 2 seconds while the stream is down. Do not add Solana or Alchemy calls to it.
+  - Market line charts move once a minute; only the user's own position may update every second.
+- **Open:** Godwin: start charts from Joel's `/v1/preview/history` so they open filled instead of only collecting from page load. The landing page's unused names and the Privacy Policy (Privy, CoinGecko, DefiLlama) are unchanged.
+- **Refs:** `apps/web/README.md` (Trading gate, expiry and collateral; Live estimates), commits `1d4319d`..`ca371dd`.
