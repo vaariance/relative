@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { COX_APP_API_SCHEMA_VERSION, type CoxErrorCode, type CoxPublicationEvent, type CoxPublicationPage, type Publication } from "@eox/app-api";
 import { CoxLiveStream, StreamLimitError } from "./live-stream.js";
@@ -45,29 +46,32 @@ export interface CoxApiServerOptions {
   classes?: readonly string[];
   faucet?: CoxFaucet | null;
   faucetForward?: string | null;
+  gatewaySecret?: string | null;
   postLimit?: { perMinute: number; trustForwardedFor: boolean } | null;
   trustForwardedFor?: boolean;
   stream?: { statusMs?: number; portfolioMs?: number; maxConnections?: number; maxPerClient?: number; maxWallets?: number };
 }
 
-function clientAddress(req: IncomingMessage, trustForwardedFor: boolean): string {
+export const GATEWAY_HEADER = "x-relative-gateway";
+
+function forwardedEntries(req: IncomingMessage): string[] {
   const forwarded = req.headers["x-forwarded-for"];
-  const value = Array.isArray(forwarded) ? forwarded.join(",") : forwarded;
-  if (trustForwardedFor && value) {
-    const last = value.split(",").map((part) => part.trim()).filter(Boolean).at(-1);
-    if (last) return last;
-  }
-  return req.socket.remoteAddress ?? "unknown";
+  const value = Array.isArray(forwarded) ? forwarded.join(",") : forwarded ?? "";
+  return value.split(",").map((part) => part.trim()).filter(Boolean);
 }
 
-function faucetClientAddress(req: IncomingMessage, trustForwardedFor: boolean): string {
-  const forwarded = req.headers["x-forwarded-for"];
-  const value = Array.isArray(forwarded) ? forwarded.join(",") : forwarded;
-  if (trustForwardedFor && value) {
-    const first = value.split(",").map((part) => part.trim()).find(Boolean);
-    if (first) return first;
-  }
-  return req.socket.remoteAddress ?? "unknown";
+function fromGateway(req: IncomingMessage, secret: Buffer): boolean {
+  const header = req.headers[GATEWAY_HEADER];
+  const value = Array.isArray(header) ? header[0] : header;
+  if (!value) return false;
+  return timingSafeEqual(createHash("sha256").update(value).digest(), secret);
+}
+
+function clientAddress(req: IncomingMessage, trustForwardedFor: boolean, gatewaySecret: Buffer | null): string {
+  const entries = forwardedEntries(req);
+  if (!trustForwardedFor || entries.length === 0) return req.socket.remoteAddress ?? "unknown";
+  if (gatewaySecret && !fromGateway(req, gatewaySecret)) return entries.at(-1)!;
+  return entries[0]!;
 }
 
 function cors(res: ServerResponse, origin: string | null): void {
@@ -127,11 +131,13 @@ export function createCoxApiServer(options: CoxApiServerOptions): Server {
   const postLimit = options.postLimit ?? null;
   const buckets = new Map<string, { tokens: number; at: number }>();
   const trustForwardedFor = options.trustForwardedFor ?? postLimit?.trustForwardedFor ?? false;
+  const gatewaySecret = options.gatewaySecret ? createHash("sha256").update(options.gatewaySecret).digest() : null;
+  const visitor = (req: IncomingMessage) => clientAddress(req, trustForwardedFor, gatewaySecret);
   const live = new CoxLiveStream({ source, preview: previews, now, onError: options.onError, ...options.stream });
 
   function admit(req: IncomingMessage, res: ServerResponse): void {
     if (!postLimit) return;
-    const key = clientAddress(req, postLimit.trustForwardedFor);
+    const key = visitor(req);
     const nowMs = Date.now();
     if (buckets.size > 10_000) for (const [k, b] of buckets) if (nowMs - b.at > 60_000) buckets.delete(k);
     const bucket = buckets.get(key) ?? { tokens: postLimit.perMinute, at: nowMs };
@@ -170,7 +176,7 @@ export function createCoxApiServer(options: CoxApiServerOptions): Server {
   const faucetForward = options.faucetForward ? options.faucetForward.replace(/\/+$/, "") : null;
 
   async function forwardFaucet(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
-    const headers: Record<string, string> = { accept: "application/json", "x-forwarded-for": faucetClientAddress(req, trustForwardedFor) };
+    const headers: Record<string, string> = { accept: "application/json", "x-forwarded-for": visitor(req) };
     let payload: string | undefined;
     if (req.method === "POST") {
       admit(req, res);
@@ -200,7 +206,7 @@ export function createCoxApiServer(options: CoxApiServerOptions): Server {
       admit(req, res);
       const input = await body(req);
       if (b === "challenge") return send(res, await faucet.challenge(input));
-      return send(res, await faucet.claim(input, faucetClientAddress(req, trustForwardedFor)));
+      return send(res, await faucet.claim(input, visitor(req)));
     }
     if (b === "status" || b === "challenge" || b === "claim") {
       res.setHeader("allow", b === "status" ? "GET" : "POST");
@@ -320,7 +326,7 @@ export function createCoxApiServer(options: CoxApiServerOptions): Server {
       if (wallet !== null && !OWNER_PATTERN.test(wallet)) throw new ApiError(400, "INVALID_REQUEST", "invalid wallet");
       const header = req.headers["last-event-id"];
       const from = after(Array.isArray(header) ? header[0] : header ?? url.searchParams.get("after"));
-      return live.open(req, res, clientAddress(req, trustForwardedFor), wallet, from);
+      return live.open(req, res, visitor(req), wallet, from);
     }
     if (path.length === 2 && a === "publications") return page(url, res);
     if (path.length === 2 && a === "preview") return send(res, latestPreview());

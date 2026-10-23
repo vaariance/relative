@@ -209,7 +209,9 @@ if (!Number.isInteger(postPerMinute) || postPerMinute < 1) throw new Error(`inva
 const postLimit = { perMinute: postPerMinute, trustForwardedFor: process.env.APP_API_TRUST_FORWARDED_FOR === "true" };
 const faucetForward = process.env.COX_FAUCET_FORWARD_URL ?? null;
 if (faucetForward !== null && !/^https:\/\/[A-Za-z0-9.-]+$/.test(faucetForward)) throw new Error("invalid COX_FAUCET_FORWARD_URL");
-const server = createCoxApiServer({ ...sources, corsOrigin, postLimit, faucetForward, onError: (error) => console.error("app-api request failed", error) });
+const gatewaySecret = process.env.APP_API_GATEWAY_SECRET ?? null;
+if (gatewaySecret !== null && !/^[A-Za-z0-9_-]{32,128}$/.test(gatewaySecret)) throw new Error("APP_API_GATEWAY_SECRET must be 32 to 128 URL-safe characters");
+const server = createCoxApiServer({ ...sources, corsOrigin, postLimit, faucetForward, gatewaySecret, onError: (error) => console.error("app-api request failed", error) });
 server.listen(port, host, () => console.log(`app-api (${mode}) listening on http://${host}:${port}`));
 
 function shutdown(): void {

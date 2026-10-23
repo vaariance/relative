@@ -314,24 +314,46 @@ describe("change-driven chain reads", () => {
 });
 
 describe("transaction rate limit", () => {
-  it("limits POSTs per client using the address the proxy appended last", async () => {
+  async function limited(options: { gatewaySecret?: string }) {
     const source = await open();
     const program = loadProgram(connection as unknown as Connection, idlPath);
     const transactions = new CoxTransactions({ connection: connection as unknown as Connection, program, poolId: 0n, pool: source.poolAddress, vault: source.vaultAddress, mint: source.collateralMint, origin: source.manifest.origin, classes: source.classes });
     const submissions = new CoxSubmissions({ connection: connection as unknown as Connection, programId: program.programId, store: new FileSubmissionStore(join(dir, "submissions.json")), feeVersion: async () => 0n });
-    const server = createCoxApiServer({ source, transactions, submissions, postLimit: { perMinute: 2, trustForwardedFor: true } });
+    const server = createCoxApiServer({ source, transactions, submissions, postLimit: { perMinute: 2, trustForwardedFor: true }, ...options });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/transactions/withdraw`;
-    const post = (forwarded: string) => fetch(url, { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": forwarded }, body: JSON.stringify({ owner: "bad" }) });
+    const post = (forwarded: string, gateway?: string) =>
+      fetch(url, { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": forwarded, ...(gateway ? { "x-relative-gateway": gateway } : {}) }, body: JSON.stringify({ owner: "bad" }) });
+    return { server, url, post };
+  }
+
+  it("limits POSTs per visitor, the first address the gateway forwards, not the proxy that appended last", async () => {
+    const { server, url, post } = await limited({});
     try {
       expect((await post("1.1.1.1, 9.9.9.9")).status).toBe(400);
+      expect((await post("1.1.1.1, 8.8.8.8")).status).toBe(400);
+      const blocked = await post("1.1.1.1, 7.7.7.7");
+      expect(blocked.status).toBe(429);
+      expect(blocked.headers.get("retry-after")).toBe("30");
+      expect(((await blocked.json()) as { error: { code: string } }).error.code).toBe("RATE_LIMITED");
       expect((await post("2.2.2.2, 9.9.9.9")).status).toBe(400);
-      const limited = await post("3.3.3.3, 9.9.9.9");
-      expect(limited.status).toBe(429);
-      expect(limited.headers.get("retry-after")).toBe("30");
-      expect(((await limited.json()) as { error: { code: string } }).error.code).toBe("RATE_LIMITED");
-      expect((await post("9.9.9.9, 8.8.8.8")).status).toBe(400);
       expect((await fetch(url.replace("/transactions/withdraw", "/status"))).status).toBe(200);
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
+  it("trusts the visitor address only from the gateway once a gateway secret is set", async () => {
+    const secret = "s3cr3t-gateway-value-with-enough-length";
+    const { server, post } = await limited({ gatewaySecret: secret });
+    try {
+      expect((await post("1.1.1.1, 9.9.9.9", secret)).status).toBe(400);
+      expect((await post("1.1.1.1, 8.8.8.8", secret)).status).toBe(400);
+      expect((await post("1.1.1.1, 7.7.7.7", secret)).status).toBe(429);
+      expect((await post("5.5.5.5, 6.6.6.6", "wrong")).status).toBe(400);
+      expect((await post("4.4.4.4, 6.6.6.6")).status).toBe(400);
+      expect((await post("3.3.3.3, 6.6.6.6")).status).toBe(429);
     } finally {
       server.closeAllConnections();
       server.close();
