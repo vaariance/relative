@@ -15,5 +15,6 @@ export const TEST_COLLATERAL = { symbol: "tUSDC", name: "test USDC", mint: "5rpG
 export const MIN_GAS_SOL = 0.01;
 
 export function epochsEnabled(): boolean {
+  if (process.env.NODE_ENV === "development") return true;
   return process.env.EPOCHS_ENABLED?.trim().toLowerCase() === "true";
 }
