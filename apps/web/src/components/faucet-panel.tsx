@@ -5,19 +5,48 @@ import { useCallback, useEffect, useState } from "react";
 import { claimTestTokens, faucetClaims } from "@/app/faucet-actions";
 import { CIRCLE_FAUCET_URL, FAUCET_CLAIMS_PER_DAY, FAUCET_GRANT, SOL_FAUCET_URL, TEST_COLLATERAL } from "@/lib/config";
 import type { ClaimAllowance } from "@/lib/faucet";
-import { useSigner } from "./signer";
+import { openLogin, useSigner } from "./signer";
 import { useSnackbar } from "./snackbar";
 
-const card = "rounded-card border border-line bg-surface p-4 shadow-card";
-const link = "flex h-11 items-center justify-center gap-2 rounded-pill bg-accent px-4 text-sm font-medium text-accent-ink transition-opacity duration-150 hover:opacity-90";
-const action = `${link} w-full cursor-pointer disabled:cursor-not-allowed disabled:opacity-50`;
-const outline = "flex h-11 w-full items-center justify-center gap-2 rounded-pill border border-line px-4 text-sm transition-colors duration-150 hover:bg-surface-2";
-const option = "flex flex-col rounded-control bg-surface-2 p-3";
-const quiet = "flex h-9 cursor-pointer items-center gap-1.5 rounded-pill border border-line px-3 text-xs transition-colors duration-150 hover:bg-surface-2";
+type TokenId = "sol" | "tusdc" | "usdc";
+
+interface Token {
+  id: TokenId;
+  symbol: string;
+  caption: string;
+  icon: string;
+  test?: boolean;
+}
+
+const TOKENS: Token[] = [
+  { id: "tusdc", symbol: TEST_COLLATERAL.symbol, caption: "Relative test collateral", icon: "/tokens/usdc.svg", test: true },
+  { id: "usdc", symbol: "USDC", caption: "Circle devnet collateral", icon: "/tokens/usdc.svg" },
+  { id: "sol", symbol: "SOL", caption: "Network fees", icon: "/tokens/sol.svg" },
+];
+
+const label = "mb-2 block text-sm font-medium";
+const box = "flex h-12 w-full items-center gap-3 rounded-control border border-line bg-bg px-3 text-sm";
+const primary = "flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-pill bg-accent px-4 text-sm font-medium text-accent-ink transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+
+function TokenIcon({ token, size }: { token: Token; size: number }) {
+  return (
+    <span className="relative inline-grid shrink-0" style={{ width: size, height: size }}>
+      <img src={token.icon} alt="" className={`h-full w-full rounded-full ${token.test ? "grayscale" : ""}`} />
+      {token.test && (
+        <span className="absolute -bottom-1 -right-2 rounded-pill bg-accent px-1.5 py-0.5 text-[10px] font-semibold leading-none text-accent-ink">TEST</span>
+      )}
+    </span>
+  );
+}
+
+function clock(seconds: number): string {
+  return `${new Date(seconds * 1000).toUTCString().slice(17, 22)} UTC`;
+}
 
 export function FaucetPanel() {
   const { address } = useSigner();
   const [mounted, setMounted] = useState(false);
+  const [picked, setPicked] = useState<TokenId>("tusdc");
   const [claims, setClaims] = useState<ClaimAllowance | null>(null);
   const { fail, show: notify } = useSnackbar();
   const [claiming, setClaiming] = useState(false);
@@ -38,6 +67,19 @@ export function FaucetPanel() {
 
   const spent = claims !== null && claims.left === 0;
 
+  const copy = async () => {
+    if (!owner) return false;
+    try {
+      await navigator.clipboard.writeText(owner);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+      return true;
+    } catch {
+      setCopied(false);
+      return false;
+    }
+  };
+
   const claim = async () => {
     if (!owner || claiming) return;
     setClaiming(true);
@@ -48,69 +90,83 @@ export function FaucetPanel() {
     void refresh();
   };
 
-  const copy = async () => {
-    if (!owner) return;
-    try {
-      await navigator.clipboard.writeText(owner);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      setCopied(false);
-    }
-  };
+  const outside = picked === "sol" ? SOL_FAUCET_URL : picked === "usdc" ? CIRCLE_FAUCET_URL : null;
+  const note =
+    picked === "tusdc"
+      ? owner && claims !== null
+        ? spent
+          ? `No claims left today. Next claim after ${claims.nextAt === null ? "24 hours" : clock(claims.nextAt)}.`
+          : `Sends ${FAUCET_GRANT} ${TEST_COLLATERAL.symbol} to your wallet. ${claims.left} of ${FAUCET_CLAIMS_PER_DAY} claims left today.`
+        : `Sends ${FAUCET_GRANT} ${TEST_COLLATERAL.symbol} to your wallet. ${FAUCET_CLAIMS_PER_DAY} claims a day.`
+      : picked === "usdc"
+        ? "Opens Circle's faucet with your address copied. Choose USDC and Solana Devnet, then paste it."
+        : "Opens Solana's faucet with your address copied. Paste it there. Every trade costs a tiny fee in SOL.";
 
   return (
-    <div className="flex flex-col gap-4">
-      <section className={card}>
-        <h2 className="text-sm font-medium">1. Copy your wallet address</h2>
-        {owner ? (
-          <div className="mt-3 flex items-center gap-2">
-            <code className="num min-w-0 flex-1 truncate rounded-control bg-surface-2 px-3 py-2.5 text-xs">{owner}</code>
-            <button type="button" onClick={copy} className={quiet} aria-label="Copy your wallet address">
-              {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
-              {copied ? "Copied" : "Copy"}
-            </button>
-          </div>
-        ) : (
-          <p className="mt-3 text-sm text-muted">Connect a wallet first, using the button at the top right. Set the wallet to devnet.</p>
-        )}
-      </section>
+    <div className="flex flex-col gap-8">
+      <p className="max-w-xl text-base text-muted">
+        Get test collateral and devnet SOL to try Relative for free. {TEST_COLLATERAL.symbol} and USDC both work as collateral; you also need a little SOL for network fees.
+      </p>
 
-      <section className={card}>
-        <h2 className="text-sm font-medium">2. Get devnet SOL for fees</h2>
-        <p className="mt-1 text-xs text-muted">Every request costs a tiny network fee, paid in devnet SOL. Paste your address on Solana's faucet page.</p>
-        <a href={SOL_FAUCET_URL} target="_blank" rel="noreferrer" className={`${link} mt-3`}>
-          Open the Solana faucet <ExternalLink size={14} aria-hidden="true" />
-        </a>
-      </section>
-
-      <section className={card}>
-        <h2 className="text-sm font-medium">3. Get test collateral</h2>
-        <p className="mt-1 text-xs text-muted">{TEST_COLLATERAL.symbol} and devnet USDC both work as collateral for testing. Get either one.</p>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <div className={option}>
-            <h3 className="text-sm font-medium">{TEST_COLLATERAL.symbol}</h3>
-            <p className="mt-1 flex-1 text-xs text-muted">Relative's own test token, sent straight to your wallet. {FAUCET_CLAIMS_PER_DAY} claims a day.</p>
-            <button type="button" onClick={() => void claim()} disabled={!owner || claiming || spent} className={`${action} mt-3`}>
-              {claiming ? "Sending" : `Get ${FAUCET_GRANT} ${TEST_COLLATERAL.symbol}`}
+      <div role="radiogroup" aria-label="Token" className="grid grid-cols-3 gap-3">
+        {TOKENS.map((token) => {
+          const on = picked === token.id;
+          return (
+            <button
+              key={token.id}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              onClick={() => setPicked(token.id)}
+              className={`flex cursor-pointer flex-col items-center gap-3 rounded-card border bg-surface px-2 py-5 text-center transition-colors duration-150 sm:py-7 ${on ? "border-accent ring-1 ring-accent" : "border-line hover:bg-surface-2"}`}
+            >
+              <TokenIcon token={token} size={48} />
+              <span className="text-base font-semibold">{token.symbol}</span>
+              <span className="hidden text-xs text-muted sm:block">{token.caption}</span>
             </button>
-            {owner && claims !== null && (
-              <p className="num mt-2 text-xs text-muted">
-                {spent
-                  ? `No claims left today. Next claim after ${claims.nextAt === null ? "24 hours" : `${new Date(claims.nextAt * 1000).toUTCString().slice(17, 22)} UTC`}.`
-                  : `${claims.left} of ${FAUCET_CLAIMS_PER_DAY} claims left today.`}
-              </p>
-            )}
-          </div>
-          <div className={option}>
-            <h3 className="text-sm font-medium">Devnet USDC</h3>
-            <p className="mt-1 flex-1 text-xs text-muted">From Circle's faucet: choose USDC and Solana Devnet, then paste your address. Circle limits how often one address can ask.</p>
-            <a href={CIRCLE_FAUCET_URL} target="_blank" rel="noreferrer" className={`${outline} mt-3`}>
-              Circle faucet <ExternalLink size={14} aria-hidden="true" />
-            </a>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-col gap-5">
+        <div>
+          <span className={label}>Network</span>
+          <div className={box}>
+            <img src="/tokens/sol.svg" alt="" className="h-5 w-5 rounded-full" />
+            Solana Devnet
           </div>
         </div>
-      </section>
+
+        <div>
+          <span className={label}>Wallet address</span>
+          {owner ? (
+            <div className={box}>
+              <code className="num min-w-0 flex-1 truncate text-sm">{owner}</code>
+              <button type="button" onClick={() => void copy()} aria-label="Copy your wallet address" className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-pill px-2 text-xs text-muted transition-colors duration-150 hover:bg-surface-2 hover:text-ink">
+                {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+                {copied ? "Copied" : "Copy"}
+              </button>
+            </div>
+          ) : (
+            <div className={`${box} text-muted`}>Connect a wallet to fill this in</div>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-2">
+          {!owner ? (
+            <button type="button" onClick={openLogin} className={primary}>Connect wallet</button>
+          ) : outside ? (
+            <a href={outside} target="_blank" rel="noreferrer" onClick={() => void copy()} className={primary}>
+              {picked === "sol" ? "Open the Solana faucet" : "Open the Circle faucet"} <ExternalLink size={14} aria-hidden="true" />
+            </a>
+          ) : (
+            <button type="button" onClick={() => void claim()} disabled={claiming || spent} className={primary}>
+              {claiming ? "Sending" : `Send ${FAUCET_GRANT} ${TEST_COLLATERAL.symbol}`}
+            </button>
+          )}
+          <p className="num text-center text-xs text-muted">{note}</p>
+        </div>
+      </div>
     </div>
   );
 }
