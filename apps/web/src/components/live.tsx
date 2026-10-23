@@ -1,6 +1,7 @@
 "use client";
 
 import type { PreviewHistory, PreviewPortfolio } from "@eox/app-api";
+import { usePathname } from "next/navigation";
 import { type ReactNode, createContext, useContext, useEffect, useMemo, useState } from "react";
 import { type Estimate, type Freshness, type SeriesKind, type WalletEstimate, HISTORY_LIMIT_SECONDS, HISTORY_SECONDS, ageText, appendHistory, estimateOf, freshnessOf, historyEstimates, historyStep, joinHistory, sampled, seriesOf, trimHistory, walletEstimateOf, withLiveMinute } from "@/lib/estimate";
 import { direction, formatAmount, formatPrice } from "@/lib/format";
@@ -204,6 +205,8 @@ function settledText(cutoff: number, now: number | null): string {
 export function EstimateBar({ settledAt }: { settledAt: number | null }) {
   const { freshness, age } = useLive();
   const now = useNow();
+  const pathname = usePathname();
+  if (pathname.startsWith("/epochs")) return null;
   const label = freshness === "live" ? "Live estimate" : freshness === "stale" ? `Estimate paused · ${age === null ? "" : ageText(age)}` : "Showing settled values";
   const tone = freshness === "stale" ? "text-warn" : "text-ink";
   return (
