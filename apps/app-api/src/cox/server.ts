@@ -7,7 +7,7 @@ import { replay } from "./replay.js";
 import type { CoxSource } from "./source.js";
 import type { EpochSource } from "./epoch-source.js";
 import type { CoxSubmissions } from "./submissions.js";
-import { FeeChangedError, TradingClosedError, TransactionInputError, TransactionRejectedError, type CoxTransactions } from "./transactions.js";
+import { FeeChangedError, NothingToDoError, TradingClosedError, TransactionInputError, TransactionRejectedError, type CoxTransactions } from "./transactions.js";
 
 const DEFAULT_PAGE = 100;
 const MAX_PAGE = 500;
@@ -164,6 +164,7 @@ export function createCoxApiServer(options: CoxApiServerOptions): Server {
       return send(res, await (transactions[QUOTES[b as keyof typeof QUOTES]] as (value: unknown) => ReturnType<CoxTransactions["quoteDeposit"]>).call(transactions, input));
     }
     if (b === "submit") return send(res, await submissions.submit(input.transaction));
+    if (b === "prepare-position") return send(res, await (transactions.preparePosition as (value: unknown) => ReturnType<CoxTransactions["preparePosition"]>).call(transactions, input));
     if (a === "transactions" && Object.hasOwn(EPOCH_BUILDERS, b!)) {
       const source = epochSource();
       const method = EPOCH_BUILDERS[b as keyof typeof EPOCH_BUILDERS];
@@ -310,7 +311,7 @@ export function createCoxApiServer(options: CoxApiServerOptions): Server {
       throw new ApiError(405, "METHOD_NOT_ALLOWED", "method not allowed");
     }
     if (path.length === 3 && a === "transactions") {
-      if (b === "submit" || BUILDERS.some((name) => name === b) || Object.hasOwn(EPOCH_BUILDERS, b!)) {
+      if (b === "submit" || BUILDERS.some((name) => name === b) || Object.hasOwn(EPOCH_BUILDERS, b!) || b === "prepare-position") {
         res.setHeader("allow", "POST");
         throw new ApiError(405, "METHOD_NOT_ALLOWED", "method not allowed");
       }
@@ -339,6 +340,7 @@ export function createCoxApiServer(options: CoxApiServerOptions): Server {
       }
       if (error instanceof FeeChangedError) return write(res, 409, errorBody("FEE_CHANGED", error.message));
       if (error instanceof TradingClosedError) return write(res, 409, errorBody("TRADING_CLOSED", error.message));
+      if (error instanceof NothingToDoError) return write(res, 409, errorBody("NOTHING_TO_DO", error.message));
       if (error instanceof TransactionRejectedError) return write(res, 422, errorBody("TRANSACTION_REJECTED", error.message));
       if (error instanceof URIError) return write(res, 400, errorBody("INVALID_REQUEST", "invalid path encoding"));
       options.onError?.(error);

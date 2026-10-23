@@ -9,11 +9,18 @@ import { FeeChangedError, TransactionInputError, TransactionRejectedError } from
 const ASSOCIATED_TOKEN_PROGRAM = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 const MAX_TRANSACTION_BYTES = 1232;
 const OPERATIONS: readonly TransactionOperation[] = ["deposit", "switch", "redeem", "cancel", "refund", "withdraw"];
+const POSITION_INSTRUCTIONS: readonly { operation: TransactionOperation; name: string }[] = [
+  { operation: "prepare-position", name: "initialize_dynamic_position" },
+  { operation: "prepare-position", name: "grow_dynamic_account" },
+];
 const TRADES = new Set<TransactionOperation>(["deposit", "switch", "redeem"]);
 const FEE_INSTRUCTIONS: readonly { operation: TransactionOperation; name: string; length: number }[] = [
   { operation: "deposit", name: "deposit_with_fee", length: 49 },
   { operation: "switch", name: "switch_with_fee", length: 58 },
   { operation: "redeem", name: "redeem_with_fee", length: 49 },
+  { operation: "deposit", name: "deposit_v2", length: 50 },
+  { operation: "switch", name: "switch_v2", length: 60 },
+  { operation: "redeem", name: "redeem_v2", length: 50 },
 ];
 const EPOCH_INSTRUCTIONS: readonly { operation: TransactionOperation; name: string }[] = [
   { operation: "epoch-entry", name: "queue" },
@@ -52,6 +59,7 @@ export class CoxSubmissions {
     this.kinds = [
       ...OPERATIONS.map((operation) => ({ operation, prefix: discriminator("global", operation), feeLength: null })),
       ...FEE_INSTRUCTIONS.map(({ operation, name, length }) => ({ operation, prefix: discriminator("global", name), feeLength: length })),
+      ...POSITION_INSTRUCTIONS.map(({ operation, name }) => ({ operation, prefix: discriminator("global", name), feeLength: null })),
     ];
     this.epochKinds = EPOCH_INSTRUCTIONS.map(({ operation, name }) => ({ operation, prefix: discriminator("global", name), feeLength: null }));
   }

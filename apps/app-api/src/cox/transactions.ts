@@ -1,6 +1,7 @@
 import type { Program } from "@coral-xyz/anchor";
-import { CoxInstructions, CoxSimulations, decodeAccount, type OwnerKeys, type Pool } from "@cox/client";
+import { CoxInstructions, CoxSimulations, decodeAccount, dynamicPositionSpace, type OwnerKeys, type Pool } from "@cox/client";
 import {
+  ComputeBudgetProgram,
   PublicKey,
   SystemProgram,
   TransactionInstruction,
@@ -12,6 +13,7 @@ import {
   batchFor,
   type DepositInput,
   type DepositQuoteInput,
+  type PreparePositionInput,
   type FeeTerms,
   type RedeemInput,
   type RedeemQuoteInput,
@@ -33,11 +35,17 @@ const INTEGER = /^(0|[1-9][0-9]{0,38})$/;
 const OWNER = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const MAX_EXPIRY_SECONDS = 604_800;
 const NO_CLASS = 255;
+const DYNAMIC_NO_CLASS = 65535;
+const DYNAMIC_HEAP_BYTES = 262144;
+const DYNAMIC_INITIAL_POSITION_BYTES = 4096;
+const DYNAMIC_MAX_GROWTH_BYTES = 8192;
 const FEE_VERSION_CHANGED = /FeeVersionChanged|"Custom":6038\b/;
 
 export class TransactionInputError extends Error {}
 
 export class TradingClosedError extends Error {}
+
+export class NothingToDoError extends Error {}
 
 export class FeeChangedError extends Error {
   constructor() {
@@ -67,6 +75,7 @@ export interface CoxTransactionContext {
   interval?: number;
   acceptanceDeadline?: number;
   classes: readonly string[];
+  dynamic?: boolean;
 }
 
 export interface Built {
@@ -95,7 +104,7 @@ export const feeTerms = (pool: Pool): FeeTerms => ({ version: pool.feeVersion.to
 export const scheduledFees = (pool: Pool): ScheduledFeeTerms | null =>
   pool.feePending ? { version: pool.feePendingVersion.toString(), bps: pool.feePendingBps, cap: pool.feePendingCap.toString(), activationCutoff: Number(pool.feePendingCutoff.toString()) } : null;
 
-const migrated = (pool: Pool): boolean => pool.schemaVersion === 2 || pool.schemaVersion === 4;
+const migrated = (pool: Pool): boolean => pool.schemaVersion === 2 || pool.schemaVersion === 4 || pool.schemaVersion === 5;
 
 export function associatedTokenAddress(wallet: PublicKey, mint: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync([wallet.toBuffer(), TOKEN_PROGRAM.toBuffer(), mint.toBuffer()], ASSOCIATED_TOKEN_PROGRAM)[0];
@@ -192,7 +201,7 @@ export class CoxTransactions {
   private open(pool: Pool): void {
     if (pool.schemaVersion === 3) throw new TradingClosedError("this pool is retired and accepts no new requests");
     if (!pool.initialized) throw new TradingClosedError("this pool has not published its first prices yet");
-    if (pool.schemaVersion === 4) {
+    if (pool.schemaVersion === 4 || pool.schemaVersion === 5) {
       const opensAt = Number(pool.tradingOpensAt.toString());
       if (this.now() < opensAt) throw new TradingClosedError(`trading opens at ${new Date(opensAt * 1000).toISOString()}`);
     }
@@ -245,10 +254,14 @@ export class CoxTransactions {
     const pool = await this.pool();
     const fee = this.expectedFee(pool, input.expectedFeeVersion);
     const { keys, nonce } = this.submission(pool, wallet, mint);
+    await this.positionReady(pool, keys.position, true);
     return this.finish({
       operation: "deposit",
       owner: wallet,
-      instructions: [fee === null ? this.instructions.deposit(keys, to, amount, minimumUnits, expiry) : this.instructions.depositWithFee(keys, to, amount, minimumUnits, expiry, fee)],
+      instructions: [
+        this.context.dynamic ? this.instructions.depositV2(keys, to, amount, minimumUnits, expiry, fee!)
+          : fee === null ? this.instructions.deposit(keys, to, amount, minimumUnits, expiry) : this.instructions.depositWithFee(keys, to, amount, minimumUnits, expiry, fee),
+      ],
       details: { requestId: keys.request.toBase58(), nonce: nonce.toString(), targetBatch: target, expiryBatch: Number(expiry), toClass: this.context.classes[to]!, amount: amount.toString(), minimumUnits: minimumUnits.toString(), feeTerms: feeTerms(pool) },
     });
   }
@@ -264,12 +277,14 @@ export class CoxTransactions {
     const pool = await this.pool();
     const fee = this.expectedFee(pool, input.expectedFeeVersion);
     const { keys, nonce } = this.submission(pool, wallet);
+    await this.positionReady(pool, keys.position, false);
     return this.finish({
       operation: "switch",
       owner: wallet,
       instructions: [
         createTokenAccountIdempotent(wallet, wallet, this.context.mint),
-        fee === null ? this.instructions.switch(keys, from, to, units, minimumUnits, expiry) : this.instructions.switchWithFee(keys, from, to, units, minimumUnits, expiry, fee),
+        this.context.dynamic ? this.instructions.switchV2(keys, from, to, units, minimumUnits, expiry, fee!)
+          : fee === null ? this.instructions.switch(keys, from, to, units, minimumUnits, expiry) : this.instructions.switchWithFee(keys, from, to, units, minimumUnits, expiry, fee),
       ],
       details: { requestId: keys.request.toBase58(), nonce: nonce.toString(), targetBatch: target, expiryBatch: Number(expiry), fromClass: this.context.classes[from]!, toClass: this.context.classes[to]!, units: units.toString(), minimumUnits: minimumUnits.toString(), feeTerms: feeTerms(pool) },
     });
@@ -284,12 +299,14 @@ export class CoxTransactions {
     const pool = await this.pool();
     const fee = this.expectedFee(pool, input.expectedFeeVersion);
     const { keys, nonce } = this.submission(pool, wallet);
+    await this.positionReady(pool, keys.position, false);
     return this.finish({
       operation: "redeem",
       owner: wallet,
       instructions: [
         createTokenAccountIdempotent(wallet, wallet, this.context.mint),
-        fee === null ? this.instructions.redeem(keys, from, units, minimumProceeds, expiry) : this.instructions.redeemWithFee(keys, from, units, minimumProceeds, expiry, fee),
+        this.context.dynamic ? this.instructions.redeemV2(keys, from, units, minimumProceeds, expiry, fee!)
+          : fee === null ? this.instructions.redeem(keys, from, units, minimumProceeds, expiry) : this.instructions.redeemWithFee(keys, from, units, minimumProceeds, expiry, fee),
       ],
       details: { requestId: keys.request.toBase58(), nonce: nonce.toString(), targetBatch: target, expiryBatch: Number(expiry), fromClass: this.context.classes[from]!, units: units.toString(), minimumProceeds: minimumProceeds.toString(), feeTerms: feeTerms(pool) },
     });
@@ -299,7 +316,7 @@ export class CoxTransactions {
     const wallet = owner(input.owner);
     const to = this.classIndex(input.toClass, "toClass");
     const amount = integer(input.amount, "amount", U64_MAX, true);
-    return this.quote(wallet, "deposit", NO_CLASS, to, amount, 0n);
+    return this.quote(wallet, "deposit", this.noClass, to, amount, 0n);
   }
 
   async quoteSwitch(input: SwitchQuoteInput): Promise<TradeQuote> {
@@ -315,7 +332,7 @@ export class CoxTransactions {
     const wallet = owner(input.owner);
     const from = this.classIndex(input.fromClass, "fromClass");
     const units = integer(input.units, "units", U128_MAX, true);
-    return this.quote(wallet, "redeem", from, NO_CLASS, 0n, units);
+    return this.quote(wallet, "redeem", from, this.noClass, 0n, units);
   }
 
   private async quote(wallet: PublicKey, operation: TradeQuote["operation"], from: number, to: number, amount: bigint, units: bigint): Promise<TradeQuote> {
@@ -328,7 +345,8 @@ export class CoxTransactions {
     let fee = 0n;
     try {
       if (migrated(pool)) {
-        const result = await simulations.quoteWithFee(this.context.pool, code, from, to, amount, units, BigInt(pool.feeVersion.toString()));
+        const quoteWithFee = this.context.dynamic ? simulations.quoteV2.bind(simulations) : simulations.quoteWithFee.bind(simulations);
+        const result = await quoteWithFee(this.context.pool, code, from, to, amount, units, BigInt(pool.feeVersion.toString()));
         if (result.feeVersion.toString() !== pool.feeVersion.toString()) throw new FeeChangedError();
         read = result;
         gross = BigInt(result.gross.toString());
@@ -346,8 +364,8 @@ export class CoxTransactions {
     if (read.sequence.toString() !== pool.sequence.toString()) throw new TransactionRejectedError("the pool advanced while quoting; quote again", []);
     return {
       operation,
-      fromClass: from === NO_CLASS ? null : this.context.classes[from]!,
-      toClass: to === NO_CLASS ? null : this.context.classes[to]!,
+      fromClass: from === this.noClass ? null : this.context.classes[from]!,
+      toClass: to === this.noClass ? null : this.context.classes[to]!,
       amount: operation === "deposit" ? amount.toString() : null,
       units: operation === "deposit" ? null : units.toString(),
       gross: gross.toString(),
@@ -422,7 +440,41 @@ export class CoxTransactions {
     });
   }
 
+  private get noClass(): number {
+    return this.context.dynamic ? DYNAMIC_NO_CLASS : NO_CLASS;
+  }
+
+  private async positionReady(pool: Pool, position: PublicKey, creates: boolean): Promise<void> {
+    if (!this.context.dynamic) return;
+    const required = dynamicPositionSpace(pool.classes.length);
+    const info = await this.context.connection.getAccountInfo(position, "confirmed");
+    const bytes = info ? info.data.length : creates ? DYNAMIC_INITIAL_POSITION_BYTES : 0;
+    if (bytes < required) throw new TransactionInputError("the wallet's position must be prepared for the current asset list first: build POST /v1/transactions/prepare-position until it answers NOTHING_TO_DO");
+  }
+
+  async preparePosition(input: PreparePositionInput): Promise<UnsignedTransaction> {
+    const wallet = owner(input.owner);
+    if (!this.context.dynamic) throw new NothingToDoError("this pool's positions need no preparation");
+    const pool = await this.pool();
+    const position = this.instructions.pdas.position(this.context.pool, wallet);
+    const required = dynamicPositionSpace(pool.classes.length);
+    const info = await this.context.connection.getAccountInfo(position, "confirmed");
+    if (info && info.data.length >= required) throw new NothingToDoError("the wallet's position already fits the current asset list");
+    if (info && pool.stage) throw new TradingClosedError("a batch is executing; prepare the position after it finishes");
+    const instruction = info
+      ? this.instructions.growDynamicAccount(wallet, this.context.pool, position, Math.min(DYNAMIC_MAX_GROWTH_BYTES, required - info.data.length))
+      : this.instructions.initializeDynamicPosition(wallet, this.context.pool);
+    const bytes = info ? Math.min(required, info.data.length + DYNAMIC_MAX_GROWTH_BYTES) : DYNAMIC_INITIAL_POSITION_BYTES;
+    return this.finish({
+      operation: "prepare-position",
+      owner: wallet,
+      instructions: [instruction],
+      details: { preparation: { position: position.toBase58(), bytes: String(bytes), requiredBytes: String(required), ready: bytes >= required } },
+    });
+  }
+
   private finish(built: Built): Promise<UnsignedTransaction> {
-    return unsignedTransaction(this.context.connection, built);
+    if (!this.context.dynamic) return unsignedTransaction(this.context.connection, built);
+    return unsignedTransaction(this.context.connection, { ...built, instructions: [ComputeBudgetProgram.requestHeapFrame({ bytes: DYNAMIC_HEAP_BYTES }), ...built.instructions] });
   }
 }
