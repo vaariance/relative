@@ -3,6 +3,7 @@ import type { Server } from "node:http";
 import { createCoxApiClient, type CoxStatus, type CoxStreamEvent, type Portfolio, type Preview } from "@eox/app-api";
 import { afterEach, describe, expect, it } from "vitest";
 import { gcsPreviewStore, parsePreview, PreviewFeed, previewPortfolio, PreviewInvalid, type PreviewIdentity, type PreviewStore } from "../src/cox/preview.js";
+import { HistoryRangeError, PreviewHistory } from "../src/cox/preview-history.js";
 import { createCoxApiServer } from "../src/cox/server.js";
 import type { CoxSource } from "../src/cox/source.js";
 
@@ -52,9 +53,8 @@ class MemoryStore implements PreviewStore {
   put(timestamp: number, value: unknown): void {
     this.files.set(timestamp, typeof value === "string" ? value : JSON.stringify(value));
   }
-  async newest(after: number) {
-    const keys = [...this.files.keys()].filter((key) => key > after);
-    return keys.length === 0 ? null : Math.max(...keys);
+  async list(from: number, to: number | null) {
+    return [...this.files.keys()].filter((key) => key >= from && (to === null || key <= to)).sort((a, b) => a - b);
   }
   async read(timestamp: number) {
     return this.files.get(timestamp) ?? null;
@@ -154,11 +154,85 @@ describe("preview feed", () => {
       return new Response(JSON.stringify({ items: [{ name: `pool-2/preview/${T + 1}.json` }, { name: `pool-2/preview/${T + 2}.json` }, { name: "pool-2/preview/notes.txt" }] }));
     }) as typeof fetch;
     const store = gcsPreviewStore("gs://bucket-a/pool-2/preview/", async () => "token", fake);
-    expect(await store.newest(T)).toBe(T + 2);
+    expect(await store.list(T + 1, null)).toEqual([T + 1, T + 2]);
     expect(decodeURIComponent(calls[0]!)).toContain(`startOffset=pool-2/preview/${T + 1}.json`);
+    expect(decodeURIComponent(calls[0]!)).not.toContain("endOffset");
+    await store.list(T, T + 59);
+    expect(decodeURIComponent(calls.at(-1)!)).toContain(`endOffset=pool-2/preview/${T + 60}.json`);
     expect(await store.read(T + 2)).toContain("relative.preview/v1");
     expect(await store.read(T + 9)).toBeNull();
     expect(() => gcsPreviewStore("gs://bucket-a/pool-2/preview", async () => "token")).toThrow("ending in a slash");
+  });
+});
+
+describe("preview history", () => {
+  const H = 1_792_699_200;
+  const withBenchmark = (timestamp: number) => record(timestamp, { benchmark: String(94_000_000_000_000 + timestamp - H) });
+
+  it("reads every new record in a tick, so seconds are not skipped", async () => {
+    const store = new MemoryStore();
+    const feed = new PreviewFeed({ store, identity: IDENTITY, now: () => H + 3 });
+    const seen: number[] = [];
+    feed.onRecord((r) => seen.push(r.timestamp));
+    for (const t of [H + 1, H + 2, H + 3]) store.put(t, withBenchmark(t));
+    await feed.tick();
+    expect(seen).toEqual([H + 1, H + 2, H + 3]);
+    expect(feed.latest()?.record.timestamp).toBe(H + 3);
+  });
+
+  it("gives the last record at or before each step end and leaves empty steps out", async () => {
+    const now = H + 7_200;
+    const store = new MemoryStore();
+    for (const t of [H + 30, H + 59, H + 61, H + 300, H + 3_605, H + 7_195, H + 7_198, H + 7_199]) store.put(t, withBenchmark(t));
+    const history = new PreviewHistory({ store, identity: IDENTITY, now: () => now });
+    await history.backfill();
+
+    const minutes = history.query(H, H + 360, 60).data;
+    expect(minutes.assets).toEqual(["BTC", "ETH"]);
+    expect(minutes.points.map((p) => [p.end, p.timestamp])).toEqual([[H + 60, H + 59], [H + 120, H + 61], [H + 300, H + 300]]);
+    expect(minutes.points[0]!.benchmark).toBe(String(94_000_000_000_000 + 59));
+    expect(minutes.points[0]!.prices).toEqual(["8117531545582", "237197465112"]);
+
+    expect(history.query(H, H + 7_200, 3_600).data.points.map((p) => [p.end, p.timestamp])).toEqual([[H + 3_600, H + 300], [H + 7_200, H + 7_199]]);
+    expect(history.query(H + 7_190, H + 7_200, 1).data.points.map((p) => p.timestamp)).toEqual([H + 7_195, H + 7_198, H + 7_199]);
+
+    history.add(parsePreview(JSON.stringify(withBenchmark(H + 7_200)), H + 7_200, IDENTITY));
+    expect(history.query(H + 7_140, H + 7_200, 60).data.points.map((p) => p.timestamp)).toEqual([H + 7_200]);
+  });
+
+  it("marks only settled, backfilled ranges as complete and refuses ranges it does not keep", async () => {
+    const now = H + 7_200;
+    const store = new MemoryStore();
+    store.put(H + 7_000, withBenchmark(H + 7_000));
+    const history = new PreviewHistory({ store, identity: IDENTITY, now: () => now });
+    expect(history.query(H + 6_000, H + 7_000, 60).complete).toBe(false);
+    await history.backfill();
+    expect(history.query(H + 6_000, H + 7_000, 60).complete).toBe(true);
+    expect(history.query(H + 6_000, H + 7_198, 60).complete).toBe(false);
+    expect(() => history.query(H, H + 60, 30)).toThrow(HistoryRangeError);
+    expect(() => history.query(H, H + 100_000, 60)).toThrow("at most 1440");
+    expect(() => history.query(H + 3_000, H + 3_060, 1)).toThrow("last hour");
+    expect(() => history.query(H - 8 * 86_400, H - 8 * 86_400 + 60, 60)).toThrow("seven days");
+    expect(() => history.query(H + 100, H + 100, 60)).toThrow("after from");
+  });
+
+  it("serves history with a long cache header only once the range is settled", async () => {
+    const store = new MemoryStore();
+    store.put(T - 120, record(T - 120));
+    const history = new PreviewHistory({ store, identity: IDENTITY, now: () => T + 1 });
+    await history.backfill();
+    const server = createCoxApiServer({ source: new PreviewSource(), previewHistory: history, classes: CLASSES, now: () => T + 1 });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const settled = await fetch(`${base}/v1/preview/history?from=${T - 180}&to=${T - 60}&step=60`);
+    expect(settled.headers.get("cache-control")).toBe("public, max-age=86400, immutable");
+    const body = (await settled.json()) as { status?: unknown; data: { points: { timestamp: number }[] } };
+    expect(body.status).toBeUndefined();
+    expect(body.data.points.map((p) => p.timestamp)).toEqual([T - 120]);
+    expect((await fetch(`${base}/v1/preview/history?from=${T - 60}&to=${T}&step=60`)).headers.get("cache-control")).toBe("no-store");
+    const bad = await fetch(`${base}/v1/preview/history?from=${T - 60}&to=${T}&step=7`);
+    expect(bad.status).toBe(400);
   });
 });
 

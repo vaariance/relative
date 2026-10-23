@@ -9,6 +9,7 @@ import { CoxFixtureSource } from "./cox/fixture-source.js";
 import { LiveCoxSource } from "./cox/live-source.js";
 import { ChainChangeFeed, gcsChainChangeStore } from "./cox/chain-changes.js";
 import { gcsPreviewStore, PreviewFeed } from "./cox/preview.js";
+import { PreviewHistory } from "./cox/preview-history.js";
 import { directorySource, gcsSource, PublicationArchive, type ArchiveSource } from "./cox/publication-archive.js";
 import { directorySegments, gcsSegments } from "./cox/publication-history.js";
 import { FileSubmissionStore, FirestoreSubmissionStore } from "./cox/submission-store.js";
@@ -41,7 +42,7 @@ function required(name: string): string {
   return value;
 }
 
-async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transactions" | "submissions" | "epochs" | "preview" | "classes">> {
+async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transactions" | "submissions" | "epochs" | "preview" | "previewHistory" | "classes">> {
   const network = process.env.COX_NETWORK ?? "solana-devnet";
   const genesis = GENESIS[network];
   if (!genesis) throw new Error(`unsupported COX_NETWORK: ${network}`);
@@ -103,23 +104,28 @@ async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transaction
       });
       const submissions = new CoxSubmissions({ connection, programId: program.programId, epochProgramId: epochs?.programId ?? null, store, feeVersion: () => transactions.feeVersion() });
       const previewGcs = process.env.COX_PREVIEW_GCS;
-      const preview = previewGcs
-        ? new PreviewFeed({
-            store: gcsPreviewStore(previewGcs, token),
-            identity: {
-              networks: [network, genesis],
-              program: program.programId.toBase58(),
-              pools: [source.poolAddress.toBase58(), poolId.toString()],
-              methodologyDigest: source.manifest.digest,
-              assets: source.manifest.assets.map((asset) => asset.assetId),
-              classes: source.classes,
-            },
-            now: () => Math.floor(Date.now() / 1000),
-            onError: (error: unknown) => console.error("cox preview tick failed", error),
-          })
+      const previewStore = previewGcs ? gcsPreviewStore(previewGcs, token) : null;
+      const previewIdentity = {
+        networks: [network, genesis],
+        program: program.programId.toBase58(),
+        pools: [source.poolAddress.toBase58(), poolId.toString()],
+        methodologyDigest: source.manifest.digest,
+        assets: source.manifest.assets.map((asset) => asset.assetId),
+        classes: source.classes,
+      };
+      const nowSeconds = () => Math.floor(Date.now() / 1000);
+      const preview = previewStore
+        ? new PreviewFeed({ store: previewStore, identity: previewIdentity, now: nowSeconds, onError: (error: unknown) => console.error("cox preview tick failed", error) })
         : null;
+      const previewHistory = previewStore
+        ? new PreviewHistory({ store: previewStore, identity: previewIdentity, now: nowSeconds, onError: (error: unknown) => console.error("cox preview history record skipped", error) })
+        : null;
+      if (preview && previewHistory) {
+        preview.onRecord((record) => previewHistory.add(record));
+        void previewHistory.backfill().catch((error: unknown) => console.error("cox preview history backfill failed", error));
+      }
       preview?.start();
-      return { source, transactions, submissions, epochs, preview, classes: source.classes };
+      return { source, transactions, submissions, epochs, preview, previewHistory, classes: source.classes };
     } catch (error) {
       if (!(error instanceof Error) || !["CoxAccountNotFound", "PoolMethodologyNotSealed"].includes(error.message)) throw error;
       console.log(`cox pool ${poolId} is not active on ${network} yet (${error.message}); checking again in ${POOL_WAIT_MS / 1000} s`);

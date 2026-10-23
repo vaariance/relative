@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { COX_APP_API_SCHEMA_VERSION, type CoxErrorCode, type CoxPublicationEvent, type CoxPublicationPage, type Publication } from "@eox/app-api";
 import { CoxLiveStream, StreamLimitError } from "./live-stream.js";
 import { previewPortfolio, type PreviewFeed } from "./preview.js";
+import { HistoryRangeError, type PreviewHistory } from "./preview-history.js";
 import { replay } from "./replay.js";
 import type { CoxSource } from "./source.js";
 import type { EpochSource } from "./epoch-source.js";
@@ -39,6 +40,7 @@ export interface CoxApiServerOptions {
   submissions?: CoxSubmissions | null;
   epochs?: EpochSource | null;
   preview?: PreviewFeed | null;
+  previewHistory?: PreviewHistory | null;
   classes?: readonly string[];
   postLimit?: { perMinute: number; trustForwardedFor: boolean } | null;
   trustForwardedFor?: boolean;
@@ -62,12 +64,12 @@ function cors(res: ServerResponse, origin: string | null): void {
   if (origin !== "*") res.setHeader("vary", "origin");
 }
 
-function write(res: ServerResponse, status: number, body: unknown): void {
+function write(res: ServerResponse, status: number, body: unknown, cacheControl = "no-store"): void {
   const text = JSON.stringify(body);
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(text),
-    "cache-control": "no-store",
+    "cache-control": cacheControl,
     "x-content-type-options": "nosniff",
   });
   res.end(text);
@@ -264,6 +266,24 @@ export function createCoxApiServer(options: CoxApiServerOptions): Server {
     }
     if (path.length === 2 && a === "publications") return page(url, res);
     if (path.length === 2 && a === "preview") return send(res, latestPreview());
+    if (path.length === 3 && a === "preview" && b === "history") {
+      const history = options.previewHistory;
+      if (!history) throw new ApiError(409, "NOT_CONFIGURED", "this deployment serves no preview history");
+      const number = (name: string): number => {
+        const value = url.searchParams.get(name);
+        if (value === null || !/^[0-9]{1,12}$/.test(value)) throw new ApiError(400, "INVALID_REQUEST", `${name} must be a whole number`);
+        return Number(value);
+      };
+      let result: ReturnType<PreviewHistory["query"]>;
+      try {
+        result = history.query(number("from"), number("to"), number("step"));
+      } catch (error) {
+        if (error instanceof HistoryRangeError) throw new ApiError(400, "INVALID_REQUEST", error.message);
+        throw error;
+      }
+      const body = { schemaVersion: COX_APP_API_SCHEMA_VERSION, deployment: await source.deployment(), data: result.data };
+      return write(res, 200, body, result.complete ? "public, max-age=86400, immutable" : "no-store");
+    }
     if (path.length === 3 && a === "preview" && b === "portfolio") {
       const wallet = url.searchParams.get("owner");
       if (wallet === null || !OWNER_PATTERN.test(wallet)) throw new ApiError(400, "INVALID_REQUEST", "owner is required");
