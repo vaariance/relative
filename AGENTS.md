@@ -1483,3 +1483,9 @@ another agent needs to know.
 - **What:** At Godwin's request the Faucet page has three steps. Step 3, "Get test collateral", offers tUSDC (the 20-token claim) and devnet USDC (link to Circle's faucet) side by side, saying both work as collateral for testing. Supersedes the separate steps 3 and 4 in Godwin's 2026-10-23 "Faucet page grants 20 tUSDC" entry.
 - **Open:** The page says tUSDC works for testing, but Buy and Swap still send only USDC. Until they accept tUSDC again, tUSDC can only be used outside the site.
 - **Refs:** commit `8a1a425`.
+
+### 2026-10-23 · Godwin (Claude Code) · Faucet page redesigned as a token picker
+
+- **Area:** `apps/web` (`faucet-panel.tsx`, Faucet page).
+- **What:** At Godwin's request, the Faucet page follows the layout of Circle's faucet. Three token cards (tUSDC, USDC, SOL), then the network (Solana Devnet), the wallet address and one button. tUSDC sends 20 tUSDC; USDC and SOL copy the address and open Circle's or Solana's faucet. Without a wallet the button opens login. Supersedes the numbered steps in Godwin's 2026-10-23 "Faucet test collateral as one step" entry. Checked at desktop and phone widths in the dev server without a wallet.
+- **Refs:** commit `70d2fda`.
