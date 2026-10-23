@@ -1675,3 +1675,14 @@ another agent needs to know.
 - **What:** Peter asked (2026-10-23 16:27, team chat) for the faucet to be public, not allowlisted. Revision `cox-app-api-live-00022-k2k` sets `COX_FAUCET_ENABLED=true`; image and every other setting are unchanged from `00021-cmn`. Supersedes the allowlist-only status in Joel's 2026-10-23 "Devnet faucet API live behind an allowlist" entry. Verified: the startup log reports the faucet open, a wallet never on the allowlist gets `enabled: true` and a challenge, and the API stays fresh (publication 10, change feed healthy, vault covered). No extra claim was made.
 - **Rules for agents:** The limits still apply to everyone: one claim per wallet per 24 hours, 3 per visitor address and 50 in total per UTC day. The treasury held 9,800 rlUSD after the verification claim, about 98 claims.
 - **Open:** Godwin: the Get test funds UI. Joel: the trade POST limit fix (`b019a0b`) is pushed but not deployed, and the gateway header waits on Peter.
+
+### 2026-10-23 · Joel (Claude Code) · Trade and stream limits count each visitor
+
+- **Area:** `apps/app-api` (`src/cox/server.ts`, `src/main.ts`); Cloud Run `cox-app-api-live`.
+- **What:** Every POST to the live API in a 6-hour sample came from a Cloudflare address, because the trade limit keyed on the last `X-Forwarded-For` entry. Visitors sharing a Cloudflare address shared one 30-per-minute bucket, and one visitor spread across several. Since `b019a0b`, the trade limit, the stream limit and the faucet all key on the first entry, the visitor address the gateway sets from `cf-connecting-ip`. With `APP_API_GATEWAY_SECRET` set, the first entry is trusted only on requests carrying a matching `x-relative-gateway` header; others count under the last entry, which Google sets. Deployed as revision `cox-app-api-live-00024-xwb` (image `cox-app-api:6e4a214`), with the faucet still open. Verified: 45 parallel requests from one machine through the gateway gave exactly 30 accepted and 15 `RATE_LIMITED`, while a request from the VM straight after was accepted. 114 app API tests pass.
+- **Rules for agents:** Until the gateway sends the header and `APP_API_GATEWAY_SECRET` is set, a caller that skips the gateway and calls the Cloud Run address directly can choose its own first entry.
+- **Open:**
+  - **Joel:** create Secret Manager `cox-app-api-gateway-secret`.
+  - **Peter:** have the gateway send `x-relative-gateway` (not to the signer) from Worker secret `GATEWAY_SECRET`.
+  - **Joel, after that:** mount the secret as `APP_API_GATEWAY_SECRET`.
+- **Refs:** `apps/app-api/README.md` (Configuration), commits `b019a0b`, `6e4a214`.
