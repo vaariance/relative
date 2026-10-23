@@ -51,6 +51,7 @@ pub struct EpochState {
 }
 pub struct ChainState {
     pub slot: u64,
+    pub confirmed_timestamp_ms: u64,
     pub digest: [u8; 32],
     pub discovery_incomplete: bool,
     pub basic: BasicState,
@@ -235,6 +236,16 @@ fn raw(value: &Value, key: Address) -> Result<Raw, Error> {
             )
             .map_err(|_| Error::InvalidResponse)?,
     })
+}
+fn clock_timestamp_ms(row: &Raw) -> Result<u64, Error> {
+    let address: Address = "SysvarC1ock11111111111111111111111111111111".parse().map_err(|_| Error::InvalidAccount)?;
+    let owner: Address = "Sysvar1111111111111111111111111111111111111".parse().map_err(|_| Error::InvalidAccount)?;
+    if row.address != address || row.owner != owner || row.data.len() != 40 {
+        return Err(Error::InvalidAccount);
+    }
+    let timestamp = i64::from_le_bytes(row.data[32..40].try_into().map_err(|_| Error::InvalidAccount)?);
+    u64::try_from(timestamp).ok().filter(|timestamp| *timestamp > 0)
+        .and_then(|timestamp| timestamp.checked_mul(1000)).ok_or(Error::InvalidAccount)
 }
 impl ChainReader {
     async fn multiple(&self, keys: &[Address], minimum: u64) -> Result<(u64, Vec<Raw>), Error> {
@@ -638,10 +649,12 @@ impl ChainReader {
                 lots,
             });
         }
+        let clock_key = "SysvarC1ock11111111111111111111111111111111".parse().map_err(|_| Error::InvalidAccount)?;
         let (s, verified) = self
-            .multiple(&[registry_key, pool_key, self.epoch_config], slot)
+            .multiple(&[registry_key, pool_key, self.epoch_config, clock_key], slot)
             .await?;
         slot = s;
+        let confirmed_timestamp_ms = clock_timestamp_ms(&verified[3])?;
         let fresh_registry: Registry = decode(&verified[0], self.basic_program)?;
         let fresh_pool: Pool = decode(&verified[1], self.basic_program)?;
         let fresh_config: PoolConfig = decode(&verified[2], self.epoch_program)?;
@@ -666,6 +679,7 @@ impl ChainReader {
         }
         Ok(ChainState {
             slot,
+            confirmed_timestamp_ms,
             digest: hash.finalize().into(),
             discovery_incomplete: discovery.incomplete,
             basic: BasicState {
@@ -1118,6 +1132,29 @@ pub(crate) mod tests {
         data.resize(20_000, 0);
         T::try_deserialize(&mut data.as_slice()).unwrap()
     }
+    #[test]
+    fn confirmed_clock_rejects_wrong_identity_owner_shape_and_timestamp() {
+        let mut row = Raw {
+            address: "SysvarC1ock11111111111111111111111111111111".parse().unwrap(),
+            owner: "Sysvar1111111111111111111111111111111111111".parse().unwrap(),
+            data: vec![0; 40],
+        };
+        row.data[32..40].copy_from_slice(&14_410i64.to_le_bytes());
+        assert_eq!(clock_timestamp_ms(&row), Ok(14_410_000));
+        row.data[32..40].copy_from_slice(&(-1i64).to_le_bytes());
+        assert_eq!(clock_timestamp_ms(&row), Err(Error::InvalidAccount));
+        row.data[32..40].copy_from_slice(&i64::MAX.to_le_bytes());
+        assert_eq!(clock_timestamp_ms(&row), Err(Error::InvalidAccount));
+        row.data[32..40].copy_from_slice(&14_410i64.to_le_bytes());
+        row.owner = key(4);
+        assert_eq!(clock_timestamp_ms(&row), Err(Error::InvalidAccount));
+        row.owner = "Sysvar1111111111111111111111111111111111111".parse().unwrap();
+        row.address = key(5);
+        assert_eq!(clock_timestamp_ms(&row), Err(Error::InvalidAccount));
+        row.address = "SysvarC1ock11111111111111111111111111111111".parse().unwrap();
+        row.data.pop();
+        assert_eq!(clock_timestamp_ms(&row), Err(Error::InvalidAccount));
+    }
     pub(crate) fn state() -> ChainState {
         let mut pool: Pool = zero();
         pool.schema_version = 4;
@@ -1128,6 +1165,7 @@ pub(crate) mod tests {
         registry.runtime = anchor_lang::prelude::Pubkey::new_from_array(key(7).to_bytes());
         ChainState {
             slot: 1,
+            confirmed_timestamp_ms: 14_410_000,
             digest: [0; 32],
             discovery_incomplete: false,
             basic: BasicState {

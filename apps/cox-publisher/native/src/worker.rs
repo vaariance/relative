@@ -31,6 +31,9 @@ pub enum Tick {
 }
 #[allow(async_fn_in_trait)]
 pub trait Chain {
+    fn price_timestamp_ceiling_ms(&self, wall_ms: u64) -> Result<u64, Error> {
+        Ok(wall_ms)
+    }
     fn next_wake_ms(&self) -> Option<u64> {
         None
     }
@@ -184,14 +187,18 @@ impl<C: Chain, P: Snapshots, S: Store> Publisher<C, P, S> {
                 state.next_attempt_ms = next_ms;
                 self.persist(state.clone())?;
                 let selection_ms = self.prices.selection_time_ms(now_ms)?;
-                let Some(snapshot) = self.prices.select(&work, closing_ms, selection_ms)? else {
+                let ceiling_ms = self.chain.price_timestamp_ceiling_ms(selection_ms)?;
+                if closing_ms.is_some_and(|close| close > ceiling_ms) {
+                    return Ok(Tick::Waiting(next_ms));
+                }
+                let Some(snapshot) = self.prices.select(&work, closing_ms, ceiling_ms)? else {
                     return Ok(Tick::Waiting(next_ms));
                 };
                 if snapshot.timestamp_us % 1000 != 0 {
                     return Err(Error::Snapshot);
                 }
                 let timestamp = snapshot.timestamp_us / 1000;
-                if snapshot.benchmark <= 0 || snapshot.signed_payload.is_empty() || timestamp > selection_ms
+                if snapshot.benchmark <= 0 || snapshot.signed_payload.is_empty() || timestamp > selection_ms || timestamp > ceiling_ms
                     || closing_ms.is_some_and(|close| timestamp != close)
                     || (closing_ms.is_none() && (selection_ms - timestamp > self.max_price_age_ms || work.iter().any(|item| matches!(item, Work::Entry { eligible_after_ms, .. } if timestamp <= *eligible_after_ms)))) { return Err(Error::Snapshot); }
                 let draft = self.chain.prepare(&work, Some(&snapshot)).await?;

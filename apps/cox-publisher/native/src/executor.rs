@@ -1108,6 +1108,14 @@ fn pending_valid(operator: solana_address::Address, pending: &PendingTransaction
             .is_ok()
 }
 impl<S: DraftSigner> worker::Chain for Executor<S> {
+    fn price_timestamp_ceiling_ms(&self, wall_ms: u64) -> Result<u64, worker::Error> {
+        let timestamp = self.last_state.as_ref().ok_or(worker::Error::Chain)?.confirmed_timestamp_ms;
+        if timestamp == 0 || timestamp > wall_ms || wall_ms - timestamp > self.max_price_age_ms {
+            return Err(worker::Error::Clock);
+        }
+        Ok(timestamp)
+    }
+
     fn needs_reconciliation(&self) -> bool {
         self.discovery.incomplete
     }
@@ -1410,6 +1418,7 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
                     .pointer("/value/err")
                     .is_some_and(|value| value.is_null())
             {
+                eprintln!("Publisher simulation rejected: {}", result.pointer("/value/err").unwrap_or(&serde_json::Value::Null));
                 return Err(worker::Error::Simulation);
             }
             break transaction;
@@ -1617,6 +1626,19 @@ mod tests {
         async fn sign(&self, _: &DraftTransaction) -> Result<PendingTransaction, worker::Error> {
             Err(worker::Error::Signer)
         }
+    }
+    #[test]
+    fn price_ceiling_requires_recent_confirmed_clock_without_wall_time_extrapolation() {
+        use crate::worker::Chain;
+        let mut executor = executor();
+        assert_eq!(executor.price_timestamp_ceiling_ms(14_411_000), Err(worker::Error::Chain));
+        executor.last_state = Some(state());
+        assert_eq!(executor.price_timestamp_ceiling_ms(14_411_000), Ok(14_410_000));
+        assert_eq!(executor.price_timestamp_ceiling_ms(14_415_000), Ok(14_410_000));
+        assert_eq!(executor.price_timestamp_ceiling_ms(14_415_001), Err(worker::Error::Clock));
+        assert_eq!(executor.price_timestamp_ceiling_ms(14_409_999), Err(worker::Error::Clock));
+        executor.last_state.as_mut().unwrap().confirmed_timestamp_ms = 0;
+        assert_eq!(executor.price_timestamp_ceiling_ms(14_411_000), Err(worker::Error::Clock));
     }
     fn executor() -> Executor<NeverSigner> {
         let operator = solana_address::Address::new_from_array([7; 32]);

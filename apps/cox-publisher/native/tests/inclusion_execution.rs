@@ -234,6 +234,7 @@ async fn deterministic_successor_failure_records_reschedule_and_unblocks_current
         .unwrap();
     let state = ChainState {
         slot: 1,
+        confirmed_timestamp_ms: 14_410_000,
         digest: [0; 32],
         discovery_incomplete: false,
         basic: BasicState {

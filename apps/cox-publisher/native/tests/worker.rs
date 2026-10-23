@@ -13,6 +13,8 @@ struct State {
     work: bool,
     stale_sign: bool,
     maintenance: bool,
+    ceiling: Option<u64>,
+    close: Option<u64>,
 }
 struct Disk(Arc<Mutex<State>>);
 impl Store for Disk {
@@ -37,10 +39,15 @@ impl Store for Disk {
 }
 struct Accounts(Arc<Mutex<State>>);
 impl Chain for Accounts {
+    fn price_timestamp_ceiling_ms(&self, wall_ms: u64) -> Result<u64, Error> {
+        Ok(self.0.lock().unwrap().ceiling.unwrap_or(wall_ms))
+    }
     async fn authoritative_work(&mut self, _: u64) -> Result<Vec<Work>, Error> {
         let mut s = self.0.lock().unwrap();
         s.trace.push("read");
-        Ok(if s.maintenance {
+        Ok(if let Some(timestamp_ms) = s.close {
+            vec![Work::Close { id: "epoch:close".into(), timestamp_ms }]
+        } else if s.maintenance {
             vec![Work::Maintenance {
                 id: "refund".into(),
                 pool: Pool::Epoch,
@@ -268,4 +275,40 @@ async fn price_selection_uses_clock_after_authoritative_reads() {
     .unwrap();
     assert_eq!(publisher.tick(10_000).await, Ok(Tick::Submitted(11_000)));
     assert!(state.lock().unwrap().saved.pending.is_some());
+}
+
+struct ConfirmedPrices;
+impl Snapshots for ConfirmedPrices {
+    fn select(&self, _: &[Work], close: Option<u64>, ceiling: u64) -> Result<Option<Observation>, Error> {
+        assert!(close.is_none_or(|close| close == ceiling));
+        Ok(Some(Observation { universe_digest: [1;32], timestamp_us: ceiling * 1000, benchmark: 100, prices_e8: vec![100], signed_payload: vec![1] }))
+    }
+}
+#[tokio::test]
+async fn current_second_prices_are_capped_at_confirmed_clock() {
+    let state = Arc::new(Mutex::new(State { work: true, ceiling: Some(10_000), ..State::default() }));
+    let mut publisher = Publisher::new(Accounts(state.clone()), ConfirmedPrices, Disk(state.clone()), 2, 2000).unwrap();
+    assert_eq!(publisher.tick(11_000).await, Ok(Tick::Submitted(12_000)));
+}
+#[tokio::test]
+async fn confirmed_price_ceiling_does_not_relax_wall_clock_freshness() {
+    let state = Arc::new(Mutex::new(State { work: true, ceiling: Some(10_000), ..State::default() }));
+    let mut publisher = Publisher::new(Accounts(state.clone()), ConfirmedPrices, Disk(state.clone()), 2, 2000).unwrap();
+    assert_eq!(publisher.tick(13_000).await, Err(Error::Snapshot));
+    assert!(!state.lock().unwrap().trace.contains(&"prepare"));
+}
+#[tokio::test]
+async fn exact_epoch_close_waits_for_confirmed_clock_without_substitution() {
+    let state = Arc::new(Mutex::new(State { close: Some(11_000), ceiling: Some(10_000), ..State::default() }));
+    let mut publisher = Publisher::new(Accounts(state.clone()), ConfirmedPrices, Disk(state.clone()), 2, 2000).unwrap();
+    assert_eq!(publisher.tick(11_000).await, Ok(Tick::Waiting(12_000)));
+    assert!(!state.lock().unwrap().trace.contains(&"prepare"));
+    state.lock().unwrap().ceiling = Some(11_000);
+    assert_eq!(publisher.tick(12_000).await, Ok(Tick::Submitted(13_000)));
+}
+#[tokio::test]
+async fn snapshot_provider_cannot_ignore_confirmed_clock_ceiling() {
+    let state = Arc::new(Mutex::new(State { work: true, ceiling: Some(9_000), ..State::default() }));
+    assert_eq!(create(state.clone()).tick(10_000).await, Err(Error::Snapshot));
+    assert!(!state.lock().unwrap().trace.contains(&"prepare"));
 }
