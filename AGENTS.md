@@ -1686,3 +1686,13 @@ another agent needs to know.
   - **Peter:** have the gateway send `x-relative-gateway` (not to the signer) from Worker secret `GATEWAY_SECRET`.
   - **Joel, after that:** mount the secret as `APP_API_GATEWAY_SECRET`.
 - **Refs:** `apps/app-api/README.md` (Configuration), commits `b019a0b`, `6e4a214`.
+
+### 2026-10-23 · Joel (Claude Code) · Gateway header verifies the visitor address
+
+- **Area:** `deploy/domains/gateway.mjs`; Cloudflare Worker `relative-service-gateway`; Cloud Run `cox-app-api-live`; Secret Manager `cox-app-api-gateway-secret`.
+- **What:** Closes the open items in Joel's 2026-10-23 "Trade and stream limits count each visitor" entry. Peter asked Joel to make the gateway change himself (2026-10-23 17:41, team chat).
+  - **Gateway:** strips any incoming `x-relative-gateway` header and sets it from Worker secret `GATEWAY_SECRET` for the API and fixture API, not the signer (`636dd3f`). Deployed as Worker version `bc8d02be-6562-40e4-a434-c49c92ee9903`; the secret was copied from Secret Manager without being shown.
+  - **API:** revision `cox-app-api-live-00025-5jj` mounts `cox-app-api-gateway-secret:1` as `APP_API_GATEWAY_SECRET`. The image is unchanged (`6e4a214`) and the faucet is still open.
+  - **Verified:** 45 parallel requests straight to the Cloud Run address, each with a different faked first `X-Forwarded-For` entry, gave 30 accepted and 15 `RATE_LIMITED`. 45 through the gateway a minute later gave the same split. All three domains answer as before (the signer still refuses calls without a token), and the API is fresh with the change feed healthy.
+- **Rules for agents:** Rotate by adding a new secret version, putting it in the Worker first and then pointing Cloud Run at it; while the two differ, gateway visitors count under Cloudflare's address. Never log or commit the value.
+- **Refs:** commits `b019a0b`, `636dd3f`; `apps/app-api/README.md` (Configuration).
