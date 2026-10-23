@@ -1,0 +1,531 @@
+{
+  "environment": "dev",
+  "directoryVersion": 2,
+  "keys": {
+    "oracle-operator": {
+      "keyVersion": "projects/colosseum-eox/locations/us-central1/keyRings/eox-signing-dev/cryptoKeys/oracle-operator/cryptoKeyVersions/1",
+      "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+      "validFrom": 0
+    }
+  },
+  "retired": [
+    {
+      "role": "uma-asserter",
+      "environment": "dev",
+      "chain": "evm",
+      "network": "eip155:11155111",
+      "algorithm": "secp256k1",
+      "publicKey": "0x04b0d86b809c74c9f0e5935ad47709a545e247d1135ca7e26a76d29a8bbadd293a7a8d4bdd3d7ce4790f8105c7601beccf16e91f67dd5882a155210dd4a47740d0",
+      "address": "0x70bA88a9f3c35aa2E07aBFa74A487A2410553634",
+      "keyVersion": "projects/colosseum-eox/locations/us-central1/keyRings/eox-signing-dev/cryptoKeys/uma-asserter/cryptoKeyVersions/1",
+      "state": "retired",
+      "validFrom": 0,
+      "validUntil": 1791688452
+    },
+    {
+      "role": "uma-challenger",
+      "environment": "dev",
+      "chain": "evm",
+      "network": "eip155:11155111",
+      "algorithm": "secp256k1",
+      "publicKey": "0x042ec3215b5f6b0b49fdc9a3a96f06c64b9ef20ac10f66eb55d7901395a87c2d8fd97df67a9615dc491809b7e53da58e46949d0e1fcea0dc189f40591ab929e71f",
+      "address": "0x312903fA37c855D9A7477753B370a788Ded69Ac6",
+      "keyVersion": "projects/colosseum-eox/locations/us-central1/keyRings/eox-signing-dev/cryptoKeys/uma-challenger/cryptoKeyVersions/1",
+      "state": "retired",
+      "validFrom": 0,
+      "validUntil": 1791688452
+    },
+    {
+      "role": "oracle-checker",
+      "environment": "dev",
+      "chain": "evm",
+      "network": "eip155:11155111",
+      "algorithm": "secp256k1",
+      "publicKey": "0x04705006d30daaf304b2e76d7110a0cd8a6792ff79cc72d3f7d5ae7f3abcee67a305a4b93f9edfaea784629aa33cb38917567bc21d0eeb625cc8aa81baa94019ca",
+      "address": "0x2997D24bC3373187f2116A12B73DCBf6aD2C1347",
+      "keyVersion": "projects/colosseum-eox/locations/us-central1/keyRings/eox-signing-dev/cryptoKeys/oracle-checker/cryptoKeyVersions/1",
+      "state": "retired",
+      "validFrom": 0,
+      "validUntil": 1791688452
+    },
+    {
+      "role": "evm-relayer",
+      "environment": "dev",
+      "chain": "evm",
+      "network": "eip155:11155111",
+      "algorithm": "secp256k1",
+      "publicKey": "0x0487ada6e426228f730142294e9e2047d8e83dfd7f4a1583888ee68ff417af53457c0f066ed6ef392bfe565e16fb4d0cd11077ca871c44f6c1d441c58d14ee1f39",
+      "address": "0xE7658466b6C947B925B5B24D723EFB5cFedff0A1",
+      "keyVersion": "projects/colosseum-eox/locations/us-central1/keyRings/eox-signing-dev/cryptoKeys/evm-relayer/cryptoKeyVersions/1",
+      "state": "retired",
+      "validFrom": 0,
+      "validUntil": 1791688452
+    },
+    {
+      "role": "solana-relayer",
+      "environment": "dev",
+      "chain": "solana",
+      "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+      "algorithm": "ed25519",
+      "publicKey": "5Pq4qnSpqiskNNPfVobwGr6Y7tTQETvQuPE9UVvz9AQx",
+      "address": "5Pq4qnSpqiskNNPfVobwGr6Y7tTQETvQuPE9UVvz9AQx",
+      "keyVersion": "projects/colosseum-eox/locations/us-central1/keyRings/eox-signing-dev/cryptoKeys/solana-relayer/cryptoKeyVersions/1",
+      "state": "retired",
+      "validFrom": 0,
+      "validUntil": 1791688452
+    }
+  ],
+  "callers": {
+    "cox-publisher@colosseum-eox.iam.gserviceaccount.com": [
+      "oracle-operator"
+    ]
+  },
+  "bindings": {
+    "oracle-operator": {
+      "solana": {
+        "maxComputeUnitPriceMicroLamports": "1000",
+        "maxComputeUnitLimit": "1400000",
+        "maxHeapBytes": 262144,
+        "programs": [
+          {
+            "programId": "G6iQGoupNSfduw1QJxQ9vcVi9FnCC6cbippXsi4QQzJF",
+            "enabled": false,
+            "allowTransactionV1": true,
+            "discriminators": [
+              "8ffbe191766f819b",
+              "45b3a143b2f735f7",
+              "dc3189c2ed6f87bc",
+              "4c8b6e4f972af398",
+              "99b683391dc33ec7",
+              "9d05a0e69ae74808",
+              "096e87d5ef19d848",
+              "506886405e18e8b7",
+              "14f1075f7fbed80d",
+              "d09c3411edfce9df",
+              "5ed5ab41b717a82d",
+              "b3d38eb76c6814d6",
+              "00980e338855a9cd",
+              "82ddf29a0dc1bd1d",
+              "b0a00549cafec750",
+              "ab3dda387f730cd9"
+            ],
+            "instructions": [
+              {
+                "discriminator": "8ffbe191766f819b",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4"
+                },
+                "v1WritableAccounts": [
+                  4
+                ]
+              },
+              {
+                "discriminator": "45b3a143b2f735f7",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+                  "6": "11111111111111111111111111111111"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  5
+                ]
+              },
+              {
+                "discriminator": "dc3189c2ed6f87bc",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4"
+                },
+                "v1WritableAccounts": [
+                  5
+                ]
+              },
+              {
+                "discriminator": "4c8b6e4f972af398",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4"
+                },
+                "v1WritableAccounts": [
+                  5
+                ]
+              },
+              {
+                "discriminator": "99b683391dc33ec7",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+                  "5": "2zUiyJ5MqYaXMGf5VXn4BBqHijDRKzPdeBhL6Qzm5ugW",
+                  "7": "3fenKNEvu9EyZhbSrntkVRPBP9PY2RjphuHuqMEztGAs"
+                },
+                "v1WritableAccounts": [
+                  2,
+                  6
+                ]
+              },
+              {
+                "discriminator": "9d05a0e69ae74808",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+                  "4": "11111111111111111111111111111111"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  2,
+                  3
+                ]
+              },
+              {
+                "discriminator": "096e87d5ef19d848",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "$signer",
+                  "2": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "3": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+                  "5": "EfTufvuaHEUiEPsYVUGfaivJUcAXHgodzLArLgRs5ws2",
+                  "6": "2zUiyJ5MqYaXMGf5VXn4BBqHijDRKzPdeBhL6Qzm5ugW",
+                  "7": "11111111111111111111111111111111",
+                  "8": "3fenKNEvu9EyZhbSrntkVRPBP9PY2RjphuHuqMEztGAs"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  2,
+                  3,
+                  5
+                ]
+              },
+              {
+                "discriminator": "506886405e18e8b7",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+                  "4": "EfTufvuaHEUiEPsYVUGfaivJUcAXHgodzLArLgRs5ws2"
+                },
+                "v1WritableAccounts": [
+                  1,
+                  2,
+                  4
+                ]
+              },
+              {
+                "discriminator": "14f1075f7fbed80d",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+                  "4": "EfTufvuaHEUiEPsYVUGfaivJUcAXHgodzLArLgRs5ws2"
+                },
+                "v1WritableAccounts": [
+                  1,
+                  2,
+                  4
+                ]
+              },
+              {
+                "discriminator": "d09c3411edfce9df",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+                  "4": "EfTufvuaHEUiEPsYVUGfaivJUcAXHgodzLArLgRs5ws2"
+                },
+                "v1WritableAccounts": [
+                  4
+                ]
+              },
+              {
+                "discriminator": "5ed5ab41b717a82d",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+                  "4": "EfTufvuaHEUiEPsYVUGfaivJUcAXHgodzLArLgRs5ws2"
+                },
+                "v1WritableAccounts": [
+                  4
+                ]
+              },
+              {
+                "discriminator": "b3d38eb76c6814d6",
+                "accounts": {
+                  "0": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "1": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+                  "2": "EfTufvuaHEUiEPsYVUGfaivJUcAXHgodzLArLgRs5ws2",
+                  "5": "2zUiyJ5MqYaXMGf5VXn4BBqHijDRKzPdeBhL6Qzm5ugW",
+                  "6": "3fenKNEvu9EyZhbSrntkVRPBP9PY2RjphuHuqMEztGAs"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ]
+              },
+              {
+                "discriminator": "00980e338855a9cd",
+                "accounts": {
+                  "0": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "1": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+                  "2": "EfTufvuaHEUiEPsYVUGfaivJUcAXHgodzLArLgRs5ws2",
+                  "5": "2zUiyJ5MqYaXMGf5VXn4BBqHijDRKzPdeBhL6Qzm5ugW",
+                  "6": "3fenKNEvu9EyZhbSrntkVRPBP9PY2RjphuHuqMEztGAs"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ]
+              },
+              {
+                "discriminator": "82ddf29a0dc1bd1d",
+                "accounts": {
+                  "0": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "1": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+                  "2": "EfTufvuaHEUiEPsYVUGfaivJUcAXHgodzLArLgRs5ws2",
+                  "5": "2zUiyJ5MqYaXMGf5VXn4BBqHijDRKzPdeBhL6Qzm5ugW",
+                  "6": "3fenKNEvu9EyZhbSrntkVRPBP9PY2RjphuHuqMEztGAs"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ]
+              },
+              {
+                "discriminator": "b0a00549cafec750",
+                "accounts": {
+                  "0": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "1": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+                  "2": "EfTufvuaHEUiEPsYVUGfaivJUcAXHgodzLArLgRs5ws2",
+                  "3": "2zUiyJ5MqYaXMGf5VXn4BBqHijDRKzPdeBhL6Qzm5ugW",
+                  "4": "3fenKNEvu9EyZhbSrntkVRPBP9PY2RjphuHuqMEztGAs"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  1,
+                  2
+                ]
+              },
+              {
+                "discriminator": "ab3dda387f730cd9",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+                  "3": "EfTufvuaHEUiEPsYVUGfaivJUcAXHgodzLArLgRs5ws2",
+                  "5": "HGwDZLLiCKvrbeRmCgJeZZo91mtXeJY73gaxTr1YK2f",
+                  "6": "2zUiyJ5MqYaXMGf5VXn4BBqHijDRKzPdeBhL6Qzm5ugW",
+                  "7": "11111111111111111111111111111111",
+                  "8": "3fenKNEvu9EyZhbSrntkVRPBP9PY2RjphuHuqMEztGAs"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  5
+                ]
+              }
+            ],
+            "linkage": {
+              "kind": "cox-dynamic-v1",
+              "poolId": "2",
+              "pool": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+              "operator": "GNmM11ZMFqEu3FYewGNDunpSSJBw8KnkDxzCGpSbpGj6",
+              "sourceMethodologyDigest": "2b8360bed080095ebd1a0a8ca81479010580d24d771881b59b6b86557964bdba",
+              "testCollateralMint": "5rpGrekfBLHdF8PD8eKLzXQPPmhyF7FCKeE1VA5CwV3X"
+            }
+          },
+          {
+            "programId": "4RRBbmzExtPDMYNUgCaetfz3wNYkF2mrAYKZVY4iXz2w",
+            "enabled": false,
+            "allowTransactionV1": true,
+            "discriminators": [
+              "782f329d2d28ecc7",
+              "adc170b08cc5d6c9",
+              "0df00b5ff45d5430",
+              "532bf43755150cb5",
+              "ddd1e2577d4840a3",
+              "0a878d38017ba2ba",
+              "82ddf29a0dc1bd1d",
+              "2a02cccf5b597cfc",
+              "8e437f70db450de1",
+              "4026bd81189d5288",
+              "0260b7fb3fd02e2e",
+              "5cb709d32eab131d",
+              "5449e5c9e02429cb"
+            ],
+            "instructions": [
+              {
+                "discriminator": "782f329d2d28ecc7",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9",
+                  "3": "11111111111111111111111111111111"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  2
+                ]
+              },
+              {
+                "discriminator": "adc170b08cc5d6c9",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9",
+                  "3": "11111111111111111111111111111111"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  2
+                ]
+              },
+              {
+                "discriminator": "0df00b5ff45d5430",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9",
+                  "3": "11111111111111111111111111111111"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  2
+                ]
+              },
+              {
+                "discriminator": "532bf43755150cb5",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9",
+                  "3": "11111111111111111111111111111111"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  2
+                ]
+              },
+              {
+                "discriminator": "ddd1e2577d4840a3",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9",
+                  "3": "11111111111111111111111111111111"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  2
+                ]
+              },
+              {
+                "discriminator": "0a878d38017ba2ba",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  2
+                ]
+              },
+              {
+                "discriminator": "82ddf29a0dc1bd1d",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9"
+                },
+                "v1WritableAccounts": [
+                  2,
+                  3,
+                  6
+                ]
+              },
+              {
+                "discriminator": "2a02cccf5b597cfc",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9"
+                },
+                "v1WritableAccounts": [
+                  2,
+                  5
+                ]
+              },
+              {
+                "discriminator": "8e437f70db450de1",
+                "accounts": {
+                  "0": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9"
+                },
+                "v1WritableAccounts": [
+                  1,
+                  2
+                ]
+              },
+              {
+                "discriminator": "4026bd81189d5288",
+                "accounts": {
+                  "0": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9"
+                },
+                "v1WritableAccounts": [
+                  1,
+                  2
+                ]
+              },
+              {
+                "discriminator": "0260b7fb3fd02e2e",
+                "accounts": {
+                  "0": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9"
+                },
+                "v1WritableAccounts": [
+                  1,
+                  2
+                ]
+              },
+              {
+                "discriminator": "5cb709d32eab131d",
+                "accounts": {
+                  "0": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9"
+                },
+                "v1WritableAccounts": [
+                  1
+                ]
+              },
+              {
+                "discriminator": "5449e5c9e02429cb",
+                "accounts": {
+                  "0": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9"
+                },
+                "v1WritableAccounts": [
+                  1
+                ]
+              }
+            ],
+            "linkage": {
+              "kind": "epoch-v1",
+              "configId": "2",
+              "config": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9",
+              "admin": "4rCo36GY63kyZpCae2ccfhJEk3TLqKMybhT42YhCPp9N",
+              "operator": "GNmM11ZMFqEu3FYewGNDunpSSJBw8KnkDxzCGpSbpGj6",
+              "methodologyDigest": "2b8360bed080095ebd1a0a8ca81479010580d24d771881b59b6b86557964bdba",
+              "allowStagedSnapshots": true
+            }
+          }
+        ]
+      }
+    }
+  }
+}
