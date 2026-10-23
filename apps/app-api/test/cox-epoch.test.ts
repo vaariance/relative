@@ -100,7 +100,7 @@ async function setup(now: number) {
   const sealed = pdas.epoch({ config, opensAt: BigInt(OPEN) });
   const draft = pdas.epoch({ config, opensAt: BigInt(DRAFT) });
   const encodeEpoch = async (address: PublicKey, opensAt: number, value: object | null) => {
-    connection.set(address, encodeLarge(coder, "epochAccount", { config, opensAt: bn(opensAt), vault: pdas.vault(address), testVault: pdas.testVault(address), bump: 250, universe, state: value }));
+    connection.set(address, encodeLarge(coder, "epochAccount", { config, opensAt: bn(opensAt), vault: pdas.vault(address), testVault: pdas.testVault(address), bump: 250, universe: value ? [] : universe, state: value }));
   };
   return { connection, program, coder, sealed, draft, encodeEpoch, state, configValue, now, universe };
 }

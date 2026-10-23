@@ -54,6 +54,7 @@ interface UniverseAsset {
 interface EpochState {
   opensAt: Integer;
   closesAt: Integer;
+  universe: UniverseAsset[];
   phase: Variant;
   nextNonce: Integer;
   executedLots: number;
@@ -103,6 +104,7 @@ export interface EpochSourceOptions {
 }
 
 const text = (value: Integer): string => value.toString();
+const members = (account: EpochAccount): UniverseAsset[] => (account.state ? account.state.universe : account.universe);
 const seconds = (value: Integer): number => {
   const parsed = Number(value.toString());
   if (!Number.isSafeInteger(parsed)) throw new Error("EpochTimeOutOfRange");
@@ -245,7 +247,7 @@ export class EpochSource {
   private view(address: PublicKey, opensAt: number, account: EpochAccount, vault: bigint | null): Epoch {
     const state = account.state;
     const closesAt = opensAt + EPOCH_SECONDS;
-    const universe = account.universe.map((asset) => ({ id: asset.id, assetId: this.ticker(asset.id), originPrice: text(asset.originPrice) }));
+    const universe = members(account).map((asset) => ({ id: asset.id, assetId: this.ticker(asset.id), originPrice: text(asset.originPrice) }));
     if (!state || vault === null) {
       return { address: address.toBase58(), opensAt, closesAt, phase: "draft", sealed: false, entriesOpen: false, universe, nextNonce: null, lots: null, totalWeight: null, settlementPot: null, allZero: null, closingReferences: [], ledger: null };
     }
@@ -364,7 +366,7 @@ export class EpochSource {
     if (!Array.isArray(input.basket) || input.basket.length !== EPOCH_BASKET_SIZE) throw new TransactionInputError(`basket must list ${EPOCH_BASKET_SIZE} assets`);
     const mint = this.collateral(input.collateralMint);
     const { address, account } = await this.state(selection);
-    const ids = new Map(account.universe.map((asset) => [this.ticker(asset.id), asset.id]));
+    const ids = new Map(members(account).map((asset) => [this.ticker(asset.id), asset.id]));
     const basket = input.basket.map((asset) => {
       const id = typeof asset === "string" ? ids.get(asset) : undefined;
       if (id === undefined) throw new TransactionInputError(`basket asset ${String(asset)} is not in this Epoch's universe`);
