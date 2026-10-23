@@ -6,6 +6,7 @@ import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react
 import { clusterApiUrl } from "@solana/web3.js";
 import type { FeeTerms, Portfolio } from "@eox/app-api";
 import type { ReactNode } from "react";
+import type { Market } from "@/lib/market";
 import { AccountProvider } from "./account";
 import { LogoProvider } from "./coin-icon";
 import { AdapterSigner, PrivySigner } from "./signer";
@@ -32,13 +33,13 @@ function Signing({ children }: { children: ReactNode }) {
   );
 }
 
-export function Providers({ live, demo, apiUrl, sequence, fee, logos, children }: { live: boolean; demo: Portfolio | null; apiUrl: string; sequence: number | null; fee: FeeTerms | null; logos: Record<string, string>; children: ReactNode }) {
+export function Providers({ live, demo, apiUrl, sequence, fee, market, logos, children }: { live: boolean; demo: Portfolio | null; apiUrl: string; sequence: number | null; fee: FeeTerms | null; market: Market; logos: Record<string, string>; children: ReactNode }) {
   return (
     <ConnectionProvider endpoint={endpoint}>
       <WalletProvider wallets={wallets} autoConnect={!privyAppId}>
         <Signing>
           <SnackbarProvider>
-            <AccountProvider live={live} demo={demo} apiUrl={apiUrl} sequence={sequence} fee={fee}>
+            <AccountProvider live={live} demo={demo} apiUrl={apiUrl} sequence={sequence} fee={fee} market={market}>
               <LogoProvider logos={logos}>{children}</LogoProvider>
             </AccountProvider>
           </SnackbarProvider>

@@ -71,6 +71,26 @@ sale and a swap. The CRYPTO page has no form; it links to Swap. The app does
 not use `@cox/client/swap`, whose `CRYPTO_CLASS` is 0 while the program and
 `packages/cox/SPEC.md` §3 put CRYPTO last.
 
+### Trading gate, expiry and collateral
+
+`status.trading` decides whether trades can be sent. While it is closed
+(`paused`, `before-opening`, `not-initialized` or `retired`), Buy, Sell, Swap
+and Cash out show the reason or the opening time instead of sending, no quotes
+are requested, and the status banner explains it. Withdrawals, cancellations
+and refunds stay available. The API's `TRADING_CLOSED` error has its own
+message in `src/lib/errors.ts`.
+
+Every trade stays valid for about three minutes (`VALID_SECONDS` in
+`src/lib/market.ts`), converted to batches with
+`deployment.publicationIntervalSeconds`: 3 batches on a minute pool, 180 on a
+one-second pool such as pool 2.
+
+When the pool has `deployment.secondaryCollateralMint`, buying with collateral
+and withdrawing offer both mints: USDC (Circle's devnet USDC) and tUSDC (the
+test mint). The choice is sent as `collateralMint`. Payables are one balance
+across both mints, and a withdrawal needs liquidity in the chosen mint's
+vault. Refunds use the primary mint.
+
 Units are shown at 10^(12 + collateral decimals) quanta per displayed unit, so
 with USDC one displayed unit is 10^18 quanta. An empty class mints one unit of
 10^12 quanta per collateral base unit, so 10 USDC reads as 10 CRYPTO and a

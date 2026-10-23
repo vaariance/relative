@@ -26,6 +26,7 @@ const CODES: Record<string, string> = {
   UNAVAILABLE: "We could not reach the service. Check your connection and try again.",
   RATE_LIMITED: "Too many requests in a short time. Please wait a moment and try again.",
   UNKNOWN_WALLET: "This wallet has no activity here yet.",
+  TRADING_CLOSED: "Trading is not open right now, so nothing was sent.",
   NO_PUBLICATION: "The market has not published yet. Please try again shortly.",
   INTERNAL_ERROR: "Something went wrong on our side. Nothing was sent. Please try again.",
 };

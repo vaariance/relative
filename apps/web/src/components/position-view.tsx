@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { costBasis, paidFor } from "@/lib/basis";
 import { COLLATERAL } from "@/lib/config";
 import { direction, formatAmount, formatPrice, formatSigned, formatUtcTime } from "@/lib/format";
+import { expiryAfter } from "@/lib/market";
 import { tradesOf } from "@/lib/trades";
 import { CRYPTO_CLASS, type ClassView, type Point, type ValuePoint, holdingsOf, nameOf, positionName, positionNote } from "@/lib/view";
 import { useAccount } from "./account";
@@ -42,7 +43,7 @@ function Stat({ label, children, tone = "" }: { label: string; children: ReactNo
 }
 
 export function PositionView({ classId, claim, crypto, values, reference, price, cutoffs, status, decimals }: PositionProps) {
-  const { portfolio, owner, live, loading } = useAccount();
+  const { portfolio, owner, live, loading, market } = useAccount();
   const open = useOpenBatch(status.currentBatch);
   const holding = holdingsOf(portfolio, decimals)?.find((item) => item.classId === classId) ?? null;
   const position = portfolio?.positions.find((item) => item.classId === classId) ?? null;
@@ -60,7 +61,7 @@ export function PositionView({ classId, claim, crypto, values, reference, price,
   const lastExit = trades.find((trade) => trade.side !== "bought") ?? null;
   const since = lastBuy === null ? values : values.filter((point) => point.sequence >= lastBuy.sequence);
   const free = position ? BigInt(position.units) - BigInt(position.locked) : 0n;
-  const expiryBatch = open.batch ? open.batch.batch + 2 : null;
+  const expiryBatch = open.batch ? expiryAfter(open.batch.batch, market.interval) : null;
   const when = (sequence: number) => (cutoffs[sequence] === undefined ? "—" : formatUtcTime(cutoffs[sequence]));
   const marks: ChartMark[] = trades.flatMap((trade) =>
     cutoffs[trade.sequence] === undefined ? [] : [{ cutoff: cutoffs[trade.sequence], side: trade.side === "bought" ? ("buy" as const) : ("sell" as const), label: `${sides[trade.side]} ${trade.price === null ? "n/a" : formatAmount(trade.price, 6)}` }],
@@ -105,6 +106,7 @@ export function PositionView({ classId, claim, crypto, values, reference, price,
           {holding && classId === CRYPTO_CLASS && (
             <span className="flex flex-col items-end gap-1">
               <SendButton
+                trading
                 intent={free > 0n && expiryBatch !== null ? { operation: "redeem", fromClass: classId, units: free.toString(), minimumProceeds: "0", expiryBatch } : null}
                 describe={`Cash out your ${nameOf(classId)} position to ${COLLATERAL.symbol}`}
                 label="Cash out position"

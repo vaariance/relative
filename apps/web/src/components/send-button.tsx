@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { buildTransaction, submissionState, submitSigned } from "@/app/actions";
 import { COLLATERAL } from "@/lib/config";
 import { humanError, walletError } from "@/lib/errors";
+import { closedLabel, tradingClosed } from "@/lib/market";
 import type { Intent } from "@/lib/requests";
 import { useAccount } from "./account";
 import { openLogin, useSigner } from "./signer";
@@ -38,10 +39,11 @@ interface SendButtonProps {
   quiet?: boolean;
   hideSuccess?: boolean;
   describe?: string;
+  trading?: boolean;
 }
 
-export function SendButton({ intent, label, connectLabel, problem = null, className, quiet = false, describe }: SendButtonProps) {
-  const { live, owner, refresh } = useAccount();
+export function SendButton({ intent, label, connectLabel, problem = null, className, quiet = false, describe, trading = false }: SendButtonProps) {
+  const { live, owner, market, refresh } = useAccount();
   const { sign } = useSigner();
   const { show, fail } = useSnackbar();
   const [mounted, setMounted] = useState(false);
@@ -57,7 +59,9 @@ export function SendButton({ intent, label, connectLabel, problem = null, classN
   }, []);
 
   const wallet = mounted ? owner : null;
-  const ready = live && wallet !== null && intent !== null && problem === null && working === null;
+  const trade = trading || (intent !== null && (intent.operation === "deposit" || intent.operation === "switch" || intent.operation === "redeem"));
+  const closed = live && trade && tradingClosed(market.trading) && working === null;
+  const ready = live && wallet !== null && intent !== null && problem === null && working === null && !closed;
   const clickable = ready || (mounted && wallet === null);
 
   const track = async (first: Submission) => {
@@ -99,14 +103,15 @@ export function SendButton({ intent, label, connectLabel, problem = null, classN
     }
   };
 
-  const text = !wallet ? connectLabel : !live ? "Not available on demo data" : (working ?? label);
+  const shut = closed && mounted ? closedLabel(market.trading, Math.floor(Date.now() / 1000)) : null;
+  const text = !wallet ? connectLabel : !live ? "Not available on demo data" : (shut ?? working ?? label);
 
   return (
     <>
       <button type="button" disabled={!clickable} onClick={wallet === null ? openLogin : send} className={`${className} transition-opacity duration-150 ${clickable ? "cursor-pointer hover:opacity-90" : "opacity-50"}`}>
         {text}
       </button>
-      {wallet && live && problem && working === null && !quiet && <p className="text-xs text-muted">{problem}</p>}
+      {wallet && live && problem && working === null && !closed && !quiet && <p className="text-xs text-muted">{problem}</p>}
     </>
   );
 }

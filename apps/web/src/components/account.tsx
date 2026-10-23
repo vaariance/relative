@@ -4,6 +4,7 @@ import type { CoxStatus, FeeTerms, Portfolio, WalletPortfolioEvent } from "@eox/
 import { useRouter } from "next/navigation";
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { walletPortfolio } from "@/app/actions";
+import { type Market, NO_MARKET } from "@/lib/market";
 import { useSigner } from "./signer";
 
 const PORTFOLIO_MS = 15000;
@@ -18,10 +19,11 @@ interface Account {
   fee: FeeTerms | null;
   apiUrl: string;
   sequence: number | null;
+  market: Market;
   refresh: () => Promise<void>;
 }
 
-const AccountContext = createContext<Account>({ live: false, owner: null, portfolio: null, loading: false, fee: null, apiUrl: "", sequence: null, refresh: async () => undefined });
+const AccountContext = createContext<Account>({ live: false, owner: null, portfolio: null, loading: false, fee: null, apiUrl: "", sequence: null, market: NO_MARKET, refresh: async () => undefined });
 
 function parse<T>(event: Event): T | null {
   try {
@@ -37,6 +39,7 @@ export function AccountProvider({
   apiUrl,
   sequence,
   fee,
+  market,
   children,
 }: {
   live: boolean;
@@ -44,6 +47,7 @@ export function AccountProvider({
   apiUrl: string;
   sequence: number | null;
   fee: FeeTerms | null;
+  market: Market;
   children: ReactNode;
 }) {
   const { address } = useSigner();
@@ -118,10 +122,10 @@ export function AccountProvider({
   }, [streaming, router, refresh]);
 
   const value = useMemo<Account>(() => {
-    if (!live) return { live, owner, portfolio: demo, loading: false, fee, apiUrl, sequence, refresh };
+    if (!live) return { live, owner, portfolio: demo, loading: false, fee, apiUrl, sequence, market, refresh };
     const loaded = own !== null && own.owner === owner;
-    return { live, owner, portfolio: loaded ? own.portfolio : null, loading: owner !== null && !loaded, fee, apiUrl, sequence, refresh };
-  }, [live, owner, demo, own, fee, apiUrl, sequence, refresh]);
+    return { live, owner, portfolio: loaded ? own.portfolio : null, loading: owner !== null && !loaded, fee, apiUrl, sequence, market, refresh };
+  }, [live, owner, demo, own, fee, apiUrl, sequence, market, refresh]);
 
   return <AccountContext.Provider value={value}>{children}</AccountContext.Provider>;
 }

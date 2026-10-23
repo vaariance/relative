@@ -4,10 +4,12 @@ import type { CoxStatus } from "@eox/app-api";
 import { ArrowDownToLine, Clock, Undo2, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { shortAddress } from "@/lib/address";
 import { COLLATERAL } from "@/lib/config";
 import { costBasis, paidFor } from "@/lib/basis";
 import { direction, formatAmount, formatSigned } from "@/lib/format";
+import { expiryAfter } from "@/lib/market";
 import { CRYPTO_CLASS, type ClassView, nameOf, positionName, toNumber, unitDigits } from "@/lib/view";
 import { useAccount } from "./account";
 import { useOpenBatch } from "./open-batch";
@@ -16,10 +18,12 @@ import { SendButton } from "./send-button";
 import { Figure, StatCard } from "./stat-card";
 
 export function PortfolioView({ classes, status, decimals }: { classes: ClassView[]; status: CoxStatus; decimals: number }) {
-  const { portfolio, owner, live, loading } = useAccount();
+  const { portfolio, owner, live, loading, market } = useAccount();
+  const [receive, setReceive] = useState<string | null>(null);
+  const receiveIn = market.collaterals.find((item) => item.mint === receive) ?? market.collaterals.find((item) => item.primary) ?? null;
   const router = useRouter();
   const open = useOpenBatch(status.currentBatch);
-  const expiryBatch = open.batch ? open.batch.batch + 2 : null;
+  const expiryBatch = open.batch ? expiryAfter(open.batch.batch, market.interval) : null;
   const book = costBasis(portfolio?.requests ?? [], decimals);
   const rows = (portfolio?.positions ?? []).map((position) => {
     const units = toNumber(position.units, unitDigits(decimals));
@@ -62,8 +66,20 @@ export function PortfolioView({ classes, status, decimals }: { classes: ClassVie
         ))}
         <StatCard icon={ArrowDownToLine} title="Ready to withdraw" value={<Figure text={formatAmount(toNumber(payable, decimals))} unit={COLLATERAL.symbol} />}>
           <div className="mt-3 flex flex-col gap-2">
+            {market.collaterals.length > 1 && (
+              <label className="flex items-center justify-between gap-2 text-xs text-muted">
+                Receive as
+                <select value={receiveIn?.mint ?? ""} onChange={(event) => setReceive(event.target.value)} className="h-8 cursor-pointer rounded-control border border-line bg-bg px-2 text-xs text-ink">
+                  {market.collaterals.map((item) => (
+                    <option key={item.mint} value={item.mint}>
+                      {item.symbol}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <SendButton
-              intent={BigInt(payable) > 0n ? { operation: "withdraw", amount: payable } : null}
+              intent={BigInt(payable) > 0n ? { operation: "withdraw", amount: payable, ...(market.collaterals.length > 1 && receiveIn ? { collateralMint: receiveIn.mint } : {}) } : null}
               label={BigInt(payable) > 0n ? "Withdraw all" : "Nothing to withdraw"}
               connectLabel="Login to withdraw"
               className="h-10 w-full rounded-pill bg-accent text-sm font-medium text-accent-ink"
@@ -108,6 +124,7 @@ export function PortfolioView({ classes, status, decimals }: { classes: ClassVie
                     {row.classId === CRYPTO_CLASS && (
                     <span className="inline-flex flex-col items-end gap-1">
                       <SendButton
+                        trading
                         intent={row.free !== null && expiryBatch !== null ? { operation: "redeem", fromClass: row.classId, units: row.free, minimumProceeds: "0", expiryBatch } : null}
                         describe={`Cash out your ${nameOf(row.classId)} position to ${COLLATERAL.symbol}`}
                         label="Cash out"

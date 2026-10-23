@@ -2,6 +2,7 @@
 
 import type { TradeQuote } from "@eox/app-api";
 import { useEffect, useState } from "react";
+import { tradingClosed } from "@/lib/market";
 import type { Intent } from "@/lib/requests";
 import { useAccount } from "./account";
 
@@ -24,9 +25,9 @@ export const QUOTE_MESSAGES: Record<QuoteProblem, string> = {
 };
 
 export function useQuote(intent: Intent | null): { quote: TradeQuote | null; pending: boolean; problem: QuoteProblem | null } {
-  const { live, owner, apiUrl, sequence } = useAccount();
+  const { live, owner, apiUrl, sequence, market } = useAccount();
   const [held, setHeld] = useState<{ key: string; quote: TradeQuote | null; problem: QuoteProblem | null } | null>(null);
-  const wanted = live && owner && intent ? request(owner, intent) : null;
+  const wanted = live && owner && intent && !tradingClosed(market.trading) ? request(owner, intent) : null;
   const key = wanted ? `${wanted.route}:${JSON.stringify(wanted.body)}` : null;
 
   useEffect(() => {

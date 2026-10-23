@@ -2,18 +2,18 @@ import type { Batch } from "@eox/app-api";
 import { parseScaled } from "./amounts";
 
 const QUANTA_DIGITS = 12;
-const BATCH_SECONDS = 60;
 const U64_MAX = (1n << 64n) - 1n;
 const U128_MAX = (1n << 128n) - 1n;
 
 export type Operation = "deposit" | "switch" | "redeem";
 
 export type Intent =
-  | { operation: "deposit"; toClass: string; amount: string; minimumUnits: string; expiryBatch: number }
+  | { operation: "deposit"; toClass: string; amount: string; minimumUnits: string; expiryBatch: number; collateralMint?: string }
   | { operation: "switch"; fromClass: string; toClass: string; units: string; minimumUnits: string; expiryBatch: number }
   | { operation: "redeem"; fromClass: string; units: string; minimumProceeds: string; expiryBatch: number }
-  | { operation: "cancel" | "refund"; requestId: string }
-  | { operation: "withdraw"; amount: string };
+  | { operation: "cancel"; requestId: string }
+  | { operation: "refund"; requestId: string; collateralMint?: string }
+  | { operation: "withdraw"; amount: string; collateralMint?: string };
 
 export type Outcome<T> = { ok: true; value: T } | { ok: false; code: string; message: string };
 
@@ -26,6 +26,7 @@ export interface PlanInput {
   validForBatches: number;
   targetBatch: number | null;
   collateralDecimals: number;
+  collateralMint?: string;
 }
 
 export type Planned = { intent: Intent; problem: null } | { intent: null; problem: string };
@@ -38,10 +39,11 @@ function minimumOf(text: string, digits: number, max: bigint): bigint | null {
   return value === null || value > max ? null : value;
 }
 
-export function openBatch(known: Batch, now: number): Batch {
+export function openBatch(known: Batch, now: number, interval = 60): Batch {
   if (now < known.cutoff) return known;
-  const ahead = Math.floor((now - known.cutoff) / BATCH_SECONDS) + 1;
-  return { batch: known.batch + ahead, cutoff: known.cutoff + ahead * BATCH_SECONDS, acceptanceDeadline: known.acceptanceDeadline + ahead * BATCH_SECONDS };
+  const step = Number.isSafeInteger(interval) && interval > 0 ? interval : 60;
+  const ahead = Math.floor((now - known.cutoff) / step) + 1;
+  return { batch: known.batch + ahead, cutoff: known.cutoff + ahead * step, acceptanceDeadline: known.acceptanceDeadline + ahead * step };
 }
 
 export function planRequest(input: PlanInput): Planned {
@@ -58,7 +60,8 @@ export function planRequest(input: PlanInput): Planned {
     if (amount <= 0n || amount > U64_MAX) return refuse("Enter an amount above zero.");
     const minimumUnits = minimumOf(input.minimum, unitDigits, U128_MAX);
     if (minimumUnits === null) return refuse("The minimum units is not a valid number.");
-    return { intent: { operation, toClass, amount: amount.toString(), minimumUnits: minimumUnits.toString(), expiryBatch }, problem: null };
+    const collateral = input.collateralMint ? { collateralMint: input.collateralMint } : {};
+    return { intent: { operation, toClass, amount: amount.toString(), minimumUnits: minimumUnits.toString(), expiryBatch, ...collateral }, problem: null };
   }
 
   if (fromClass === null) return refuse("Choose the class to take units from.");

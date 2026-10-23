@@ -5,6 +5,7 @@ import { ArrowDownUp } from "lucide-react";
 import { useState } from "react";
 import { COLLATERAL } from "@/lib/config";
 import { formatAmount } from "@/lib/format";
+import { batchesFor } from "@/lib/market";
 import { planRequest } from "@/lib/requests";
 import { CRYPTO_CLASS, type ClassView, holdingsOf, toNumber, unitDigits, unlockedProblem } from "@/lib/view";
 import { useAccount } from "./account";
@@ -13,16 +14,19 @@ import { useOpenBatch } from "./open-batch";
 import { SendButton } from "./send-button";
 import { QUOTE_MESSAGES, useQuote } from "./use-quote";
 
-const VALID_FOR_BATCHES = 3;
 const field = "num h-11 w-full rounded-control border border-line bg-bg px-3 text-sm text-ink placeholder:text-muted";
 const fixed = "flex h-11 w-full items-center rounded-control border border-line bg-bg px-3 text-sm text-ink";
 
 export function SwapForm({ crypto, nextBatch, decimals }: { crypto: ClassView; nextBatch: Batch | null; decimals: number }) {
-  const { portfolio } = useAccount();
+  const { portfolio, market } = useAccount();
   const holdings = holdingsOf(portfolio, decimals);
   const open = useOpenBatch(nextBatch);
   const [buying, setBuying] = useState(true);
   const [amount, setAmount] = useState("");
+  const [mint, setMint] = useState<string | null>(null);
+  const options = market.collaterals;
+  const chosen = options.find((item) => item.mint === mint) ?? options.find((item) => item.primary) ?? null;
+  const collateralMint = buying && options.length > 1 && chosen ? chosen.mint : undefined;
 
   const parsed = Number(amount);
   const empty = amount.trim() === "";
@@ -35,14 +39,16 @@ export function SwapForm({ crypto, nextBatch, decimals }: { crypto: ClassView; n
     toClass: buying ? CRYPTO_CLASS : null,
     amount,
     minimum: "",
-    validForBatches: VALID_FOR_BATCHES,
+    validForBatches: batchesFor(market.interval),
     targetBatch: open.batch?.batch ?? null,
     collateralDecimals: decimals,
+    collateralMint,
   });
   const { quote, pending, problem } = useQuote(planned.intent);
   const quoted = quote === null ? null : buying ? (quote.mintedUnits === null ? null : toNumber(quote.mintedUnits, unitDigits(decimals))) : toNumber(quote.proceeds ?? quote.net, decimals);
   const blocked = unitsProblem ? QUOTE_MESSAGES.balance : problem ? QUOTE_MESSAGES[problem] : null;
-  const give = buying ? COLLATERAL.symbol : "$CRYPTO";
+  const symbol = chosen?.symbol ?? COLLATERAL.symbol;
+  const give = buying ? symbol : "$CRYPTO";
   const get = buying ? "$CRYPTO" : COLLATERAL.symbol;
 
   return (
@@ -55,7 +61,17 @@ export function SwapForm({ crypto, nextBatch, decimals }: { crypto: ClassView; n
           </div>
           <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
             <input id="swap-amount" inputMode="decimal" placeholder="0" value={amount} onChange={(event) => setAmount(event.target.value)} className={field} />
-            <span className={fixed}>{give}</span>
+            {buying && options.length > 1 ? (
+              <select aria-label="Pay with" value={chosen?.mint ?? ""} onChange={(event) => setMint(event.target.value)} className={`${fixed} cursor-pointer`}>
+                {options.map((item) => (
+                  <option key={item.mint} value={item.mint}>
+                    {item.symbol} · {item.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className={fixed}>{give}</span>
+            )}
           </div>
         </div>
 
@@ -79,7 +95,7 @@ export function SwapForm({ crypto, nextBatch, decimals }: { crypto: ClassView; n
 
 
         <div className="mt-auto flex flex-col gap-2">
-          <SendButton describe={`Swap ${amount} ${give} for ${get}`} intent={planned.intent} label={empty ? "Enter an amount" : pending ? "Calculating" : "Swap"} connectLabel="Connect wallet to swap" problem={empty ? "" : (planned.problem ?? blocked ?? (pending ? "" : null))} className="h-11 rounded-pill bg-accent text-sm font-medium text-accent-ink" />
+          <SendButton trading describe={`Swap ${amount} ${give} for ${get}`} intent={planned.intent} label={empty ? "Enter an amount" : pending ? "Calculating" : "Swap"} connectLabel="Connect wallet to swap" problem={empty ? "" : (planned.problem ?? blocked ?? (pending ? "" : null))} className="h-11 rounded-pill bg-accent text-sm font-medium text-accent-ink" />
         </div>
       </form>
     </section>
