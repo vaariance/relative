@@ -29,6 +29,10 @@ import { PublicationArchiveMissing, type PublicationArchive } from "./publicatio
 
 const RETIRED_POOL_SCHEMA = 3;
 const ADAPTIVE_POOL_SCHEMA = 4;
+const DYNAMIC_POOL_SCHEMA = 5;
+const DYNAMIC_REQUEST_SCHEMA = 3;
+const DYNAMIC_NO_CLASS = 65535;
+export const adaptivePool = (pool: Pool): boolean => pool.schemaVersion === ADAPTIVE_POOL_SCHEMA || pool.schemaVersion === DYNAMIC_POOL_SCHEMA;
 import { PublicationHistory, type SegmentStore } from "./publication-history.js";
 import type { CoxSource } from "./source.js";
 
@@ -80,10 +84,16 @@ function tokenAmount(info: AccountInfo<Buffer> | null, mint: PublicKey): bigint 
   return info.data.readBigUInt64LE(TOKEN_AMOUNT_OFFSET);
 }
 
-export const feesMigrated = (pool: Pool): boolean => pool.schemaVersion === 2 || pool.schemaVersion === ADAPTIVE_POOL_SCHEMA;
+export const feesMigrated = (pool: Pool): boolean => pool.schemaVersion === 2 || adaptivePool(pool);
+
+export class PoolMethodologyChanged extends Error {
+  constructor() {
+    super("PoolMethodologyChanged");
+  }
+}
 
 export function tradingStatus(pool: Pool, registry: Registry, now: number): TradingStatus {
-  const opensAt = pool.schemaVersion === ADAPTIVE_POOL_SCHEMA ? Number(pool.tradingOpensAt.toString()) : null;
+  const opensAt = adaptivePool(pool) ? Number(pool.tradingOpensAt.toString()) : null;
   const gate = pool.schemaVersion === RETIRED_POOL_SCHEMA ? "retired"
     : registry.paused ? "paused"
     : !pool.initialized ? "not-initialized"
@@ -103,6 +113,7 @@ export class LiveCoxSource implements CoxSource {
   private stopped = false;
   private readonly refreshListeners = new Set<() => void>();
   private readonly portfolios = new Map<string, Promise<Portfolio | null>>();
+  private readonly manifests = new Map<string, Manifest>();
   private refreshing: Promise<void> | null = null;
   private pending = false;
   private pendingSlot: number | null = null;
@@ -117,6 +128,7 @@ export class LiveCoxSource implements CoxSource {
     readonly secondaryMint: PublicKey | null,
     readonly tradingOpensAt: number | null,
     private readonly log: PublicationHistory,
+    private readonly methodologyKey: PublicKey,
   ) {
     this.reader = new CoxReader(options.program);
     this.poolKey = this.reader.pdas.pool(options.poolId);
@@ -140,10 +152,22 @@ export class LiveCoxSource implements CoxSource {
     const mint = await options.connection.getAccountInfo(pool.collateralMint, "finalized");
     if (!mint || mint.data.length <= MINT_DECIMALS_OFFSET) throw new Error("CollateralMintMissing");
     const log = await PublicationHistory.open({ ...options.history, identity: { program: options.program.programId.toBase58(), pool: reader.pdas.pool(options.poolId).toBase58() } });
-    const adaptive = pool.schemaVersion === ADAPTIVE_POOL_SCHEMA;
+    const adaptive = adaptivePool(pool);
     if (adaptive !== (manifest.mode === "adaptive")) throw new Error("PoolManifestMismatch");
     const opensAt = adaptive ? Number(pool.tradingOpensAt.toString()) : null;
-    return new LiveCoxSource(options, manifest, pool.collateralMint, mint.data[MINT_DECIMALS_OFFSET]!, adaptive ? pool.testCollateralMint : null, opensAt, log);
+    return new LiveCoxSource(options, manifest, pool.collateralMint, mint.data[MINT_DECIMALS_OFFSET]!, adaptive ? pool.testCollateralMint : null, opensAt, log, pool.methodology);
+  }
+
+  private async manifestFor(digest: string): Promise<Manifest> {
+    if (digest === this.manifest.digest) return this.manifest;
+    const known = this.manifests.get(digest);
+    if (known) return known;
+    const methodology = await this.reader.methodology(this.reader.pdas.methodology(Buffer.from(digest, "hex")));
+    if (!methodology.sealed) throw new Error("PublicationMethodologyNotSealed");
+    const manifest = parseManifest(methodology);
+    if (manifest.digest !== digest) throw new Error("PublicationManifestMismatch");
+    this.manifests.set(digest, manifest);
+    return manifest;
   }
 
   get poolAddress(): PublicKey {
@@ -261,7 +285,8 @@ export class LiveCoxSource implements CoxSource {
     if (pool.poolId.toString() !== this.options.poolId.toString() || !pool.registry.equals(registryKey) || !pool.vault.equals(this.vaultKey) || !pool.collateralMint.equals(this.collateralMint)) {
       throw new Error("PoolIdentityMismatch");
     }
-    if (pool.schemaVersion === ADAPTIVE_POOL_SCHEMA && (pool.testCollateralMint?.toBase58() ?? null) !== (this.secondaryMint?.toBase58() ?? null)) throw new Error("PoolCollateralMismatch");
+    if (!pool.methodology.equals(this.methodologyKey)) throw new PoolMethodologyChanged();
+    if (adaptivePool(pool) && (pool.testCollateralMint?.toBase58() ?? null) !== (this.secondaryMint?.toBase58() ?? null)) throw new Error("PoolCollateralMismatch");
     const vault = tokenAmount(vaultInfo ?? null, this.collateralMint) + (this.secondaryMint ? tokenAmount(testVaultInfo ?? null, this.secondaryMint) : 0n);
     const publication = publicationInfo ? checkedPublication(program.programId, this.poolKey, decodeAccount(program, "publication", publicationInfo)) : null;
     const batch = batchInfo ? decodeAccount(program, "batch", batchInfo) : null;
@@ -284,11 +309,11 @@ export class LiveCoxSource implements CoxSource {
     const previous = this.log.latest();
     const previousDigest = previous ? Buffer.from(previous.identity.stateDigest!, "hex") : Buffer.alloc(32);
     if (!Buffer.from(publication.state.previousState).equals(previousDigest)) throw new Error("PublicationPredecessorMismatch");
-    if (!Buffer.from(publication.manifestDigest).equals(Buffer.from(this.manifest.digest, "hex"))) throw new Error("PublicationManifestMismatch");
+    const manifest = await this.manifestFor(Buffer.from(publication.manifestDigest).toString("hex"));
     const value = toPublication(publication, batch, {
       program: this.options.program.programId.toBase58(),
       poolId: this.options.poolId.toString(),
-      manifest: this.manifest,
+      manifest,
       predecessorBatch: previous?.identity.batch ?? null,
       finalization: { transaction: null, slot, finalized },
     });
@@ -460,8 +485,9 @@ export class LiveCoxSource implements CoxSource {
     const operation = OPERATIONS[request.operation];
     const state = REQUEST_STATES[request.status];
     if (!operation || !state) throw new Error("RequestCodeInvalid");
+    const dynamic = request.schemaVersion === DYNAMIC_REQUEST_SCHEMA;
     const cls = (index: number): string | null => {
-      if (index === NO_CLASS) return null;
+      if (index === (dynamic ? DYNAMIC_NO_CLASS : NO_CLASS)) return null;
       const id = ids[index];
       if (!id) throw new Error("RequestClassInvalid");
       return id;
@@ -475,8 +501,8 @@ export class LiveCoxSource implements CoxSource {
       requestId,
       owner: request.owner.toBase58(),
       operation,
-      fromClass: cls(request.from),
-      toClass: cls(request.to),
+      fromClass: cls(dynamic ? request.fromId : request.from),
+      toClass: cls(dynamic ? request.toId : request.to),
       amount: operation === "deposit" ? request.amount.toString() : null,
       units: operation === "deposit" ? null : request.units.toString(),
       minimumUnits: operation === "redeem" ? null : request.minimumUnits.toString(),

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { loadProgram } from "./cox/chain.js";
 import { EpochSource } from "./cox/epoch-source.js";
 import { CoxFixtureSource } from "./cox/fixture-source.js";
-import { LiveCoxSource } from "./cox/live-source.js";
+import { LiveCoxSource, PoolMethodologyChanged } from "./cox/live-source.js";
 import { ChainChangeFeed, gcsChainChangeStore } from "./cox/chain-changes.js";
 import { gcsPreviewStore, PreviewFeed } from "./cox/preview.js";
 import { PreviewHistory } from "./cox/preview-history.js";
@@ -91,16 +91,24 @@ async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transaction
       })
     : null;
   if (changes) epochs?.cacheUntilInvalidated();
-  const options = { connection, program, poolId, network, history: { path: join(stateDir, `publications-${poolId}.jsonl`), store: segments }, pollMs, archive, changes, onError: (error: unknown) => console.error("cox indexer tick failed", error) };
+  const options = { connection, program, poolId, network, history: { path: join(stateDir, `publications-${poolId}.jsonl`), store: segments }, pollMs, archive, changes, onError: (error: unknown) => {
+    if (error instanceof PoolMethodologyChanged) {
+      console.error("cox pool methodology changed; restarting to load the new roster");
+      process.exit(1);
+    }
+    console.error("cox indexer tick failed", error);
+  } };
   for (;;) {
     try {
       const source = await LiveCoxSource.open(options);
+      const epochAssets = new Map(source.manifest.assets.flatMap((asset) => (asset.epochId === null ? [] : [[asset.epochId, asset.assetId] as const])));
+      if (epochAssets.size > 0) epochs?.nameAssets(epochAssets);
       source.onChainRefresh?.(() => epochs?.invalidate());
       source.start();
       changes?.start();
       const transactions = new CoxTransactions({
         connection, program, poolId, pool: source.poolAddress, vault: source.vaultAddress, mint: source.collateralMint, testVault: source.testVaultAddress, testMint: source.secondaryMint,
-        origin: source.manifest.origin, interval: source.interval, acceptanceDeadline: source.acceptanceDeadline, classes: source.classes,
+        origin: source.manifest.origin, interval: source.interval, acceptanceDeadline: source.acceptanceDeadline, classes: source.classes, dynamic: source.manifest.dynamic,
       });
       const submissions = new CoxSubmissions({ connection, programId: program.programId, epochProgramId: epochs?.programId ?? null, store, feeVersion: () => transactions.feeVersion() });
       const previewGcs = process.env.COX_PREVIEW_GCS;

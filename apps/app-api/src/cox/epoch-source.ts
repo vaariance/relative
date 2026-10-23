@@ -127,6 +127,7 @@ export class EpochSource {
   private readonly now: () => number;
   private readonly cache = new Map<string, Promise<unknown>>();
   private caching = false;
+  private assetIds: ReadonlyMap<number, string>;
 
   private constructor(
     private readonly options: EpochSourceOptions,
@@ -135,6 +136,12 @@ export class EpochSource {
     this.pdas = epochAddresses(options.program.programId);
     this.instructions = new EpochInstructions(options.program);
     this.now = options.now ?? (() => Math.floor(Date.now() / 1000));
+    this.assetIds = options.assetIds ?? DEFAULT_ASSET_IDS;
+  }
+
+  nameAssets(assetIds: ReadonlyMap<number, string>): void {
+    this.assetIds = assetIds;
+    this.cache.clear();
   }
 
   static async open(options: EpochSourceOptions): Promise<EpochSource> {
@@ -189,7 +196,7 @@ export class EpochSource {
   }
 
   private ticker(id: number): string {
-    const value = (this.options.assetIds ?? DEFAULT_ASSET_IDS).get(id);
+    const value = this.assetIds.get(id);
     if (!value) throw new Error("EpochAssetUnknown");
     return value;
   }
