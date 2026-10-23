@@ -109,8 +109,9 @@ fresh class has a unit value of 1. Requests are still sent in exact quanta.
 
 ## Faucet page
 
-The Faucet page shows the connected wallet's address, links to Solana's devnet
-SOL faucet, grants test tokens and links to Circle's devnet USDC faucet. The
+The Faucet page has three steps: copy the wallet address, get devnet SOL for
+fees, and get test collateral. The last step offers either tUSDC from Relative's
+own faucet or devnet USDC from Circle's faucet, since both are collateral. The
 wallet's devnet SOL, USDC and tUSDC balances are in the wallet menu, read in
 one call each time it opens.
 
