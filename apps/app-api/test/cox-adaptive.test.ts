@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import anchor from "@coral-xyz/anchor";
-import type { Methodology, Pool, Registry } from "@cox/client";
+import { dynamicClassForAsset, dynamicManifestBytes, type DynamicInstrument, type Methodology, type Pool, type Registry } from "@cox/client";
+import { PublicKey } from "@solana/web3.js";
 import type { ChainPublication } from "../src/cox/chain.js";
 import { describe, expect, it } from "vitest";
-import { classIds, classTable, parseManifest, toPublication, type Manifest } from "../src/cox/chain.js";
+import { classIds, classTable, parseManifest, PROTOCOL_ASSET_IDS, toPublication, type Manifest } from "../src/cox/chain.js";
 import { feesMigrated, tradingStatus } from "../src/cox/live-source.js";
 
 const ORIGIN = 1_792_623_921n;
@@ -130,7 +131,7 @@ describe("class table", () => {
 
   it("reads each asset's reference from its own class", () => {
     const assets = [asset("BTC", 0), asset("ETH", 1), asset("LIT", 3)];
-    const manifest: Manifest = { digest: "00".repeat(32), version: "v", sealed: true, assets, classes: classTable(assets, 2), cryptoClass: 2, origin: Number(ORIGIN), mode: "adaptive" };
+    const manifest: Manifest = { digest: "00".repeat(32), version: "v", sealed: true, assets, classes: classTable(assets, 2), cryptoClass: 2, origin: Number(ORIGIN), mode: "adaptive", dynamic: false };
     const n = (value: number | bigint) => new anchor.BN(value.toString());
     const side = { preBacking: n(0), preUnits: n(0), postBacking: n(0), postUnits: n(0) };
     const publication = {
@@ -146,5 +147,54 @@ describe("class table", () => {
     const result = toPublication(publication, null, { program: "p", poolId: "2", manifest, predecessorBatch: 0, finalization: { transaction: null, slot: 1, finalized: false } });
     expect(result.references.map((r) => [r.assetId, r.reference])).toEqual([["BTC", "10"], ["ETH", "11"], ["LIT", "13"]]);
     expect(result.classes.map((c) => c.classId)).toEqual(["BTC", "ETH", "CRYPTO", "LIT"]);
+  });
+});
+
+describe("dynamic methodology", () => {
+  const fill = (byte: number) => new Uint8Array(32).fill(byte);
+  const symbols = [...PROTOCOL_ASSET_IDS, "LIT"];
+  const instruments: DynamicInstrument[] = symbols.map((symbol, index) => ({
+    stableId: `pyth:${symbol.toLowerCase()}`,
+    symbol,
+    classId: dynamicClassForAsset(index),
+    epochId: index,
+    pythProFeedId: index === 30 ? 2921 : index + 1,
+    pythCoreFeedId: fill(index + 1),
+    tokenMint: null,
+    originalPriceE8: 100_000_000n + BigInt(index),
+    originalBenchmark: 100_000_000_000_000n,
+    originalTimestamp: ORIGIN,
+  }));
+  const bytes = dynamicManifestBytes({
+    schemaVersion: 1,
+    pool: new PublicKey("HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4"),
+    operator: new PublicKey("GNmM11ZMFqEu3FYewGNDunpSSJBw8KnkDxzCGpSbpGj6"),
+    sourceMethodology: fill(9),
+    version: 1n,
+    predecessorDigest: new Uint8Array(32),
+    expectedInstruments: instruments.length,
+    capture: {
+      priceUniverseDigest: fill(3), timestamp: ORIGIN, benchmark: 100_000_000_000_000n, pricesE8: instruments.map((i) => i.originalPriceE8),
+      signedPayloadDigest: fill(4), trustedStorageDigest: fill(5), predecessorSequence: 6n, predecessorStateDigest: fill(7),
+    },
+    instruments,
+  });
+  const account = {
+    ...methodology(bytes, instruments.map((_, i) => i)),
+    schemaVersion: 3,
+  } as Methodology;
+
+  it("keeps CRYPTO at class 30 and places an added asset after it, with its Epoch id and Pyth feed", () => {
+    const manifest = parseManifest(account);
+    expect(manifest).toMatchObject({ mode: "adaptive", dynamic: true, cryptoClass: 30, origin: Number(ORIGIN), version: "1" });
+    expect(manifest.classes).toHaveLength(32);
+    expect(manifest.classes[29]).toBe("W");
+    expect(manifest.classes[30]).toBe("CRYPTO");
+    expect(manifest.classes[31]).toBe("LIT");
+    expect(manifest.assets.at(-1)).toMatchObject({ assetId: "LIT", classIndex: 31, epochId: 30, pythFeedId: 2921, weightDenominator: "31" });
+  });
+
+  it("refuses a dynamic manifest whose bytes do not match its digest", () => {
+    expect(() => parseManifest({ ...account, digest: [...fill(1)] })).toThrow("InvalidDynamicManifest");
   });
 });

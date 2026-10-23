@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import anchor, { type Idl, type Program } from "@coral-xyz/anchor";
-import type { Batch as BatchAccount, checkedPublication, Methodology as MethodologyAccount } from "@cox/client";
+import { DYNAMIC_CRYPTO_CLASS, readDynamicManifest, type Batch as BatchAccount, type checkedPublication, type Methodology as MethodologyAccount } from "@cox/client";
 import type { Connection } from "@solana/web3.js";
 import { COX_FEE_POLICY, CRYPTO_CLASS, type ClassState, type FallbackStep, type FeeConfiguration, type PoolMode, type PriceVenue, type Publication, type VenueSymbols } from "@eox/app-api";
 
@@ -36,6 +36,7 @@ export interface Manifest {
   cryptoClass: number;
   origin: number;
   mode: PoolMode;
+  dynamic: boolean;
 }
 
 export function classTable(assets: readonly ManifestAsset[], cryptoClass: number): string[] {
@@ -137,10 +138,38 @@ function parseAdaptiveManifest(account: MethodologyAccount): Manifest {
     classIndex: i,
     epochId: id,
   }));
-  return { digest: hex(account.digest), version, sealed: account.sealed, assets, classes: classTable(assets, assets.length), cryptoClass: assets.length, origin: originSeconds, mode: "adaptive" };
+  return { digest: hex(account.digest), version, sealed: account.sealed, assets, classes: classTable(assets, assets.length), cryptoClass: assets.length, origin: originSeconds, mode: "adaptive", dynamic: false };
+}
+
+function parseDynamicManifest(account: MethodologyAccount): Manifest {
+  const manifest = readDynamicManifest(account);
+  const count = String(manifest.instruments.length);
+  const assets = manifest.instruments.map((instrument): ManifestAsset => ({
+    assetId: instrument.symbol,
+    venues: NO_VENUES,
+    weightNumerator: "1",
+    weightDenominator: count,
+    pythFeedId: instrument.pythProFeedId,
+    classIndex: instrument.classId,
+    epochId: instrument.epochId,
+  }));
+  const origin = Number(account.origin.toString());
+  if (!Number.isSafeInteger(origin) || origin <= 0) throw new Error("ManifestOriginInvalid");
+  return {
+    digest: hex(account.digest),
+    version: manifest.version.toString(),
+    sealed: account.sealed,
+    assets,
+    classes: classTable(assets, DYNAMIC_CRYPTO_CLASS),
+    cryptoClass: DYNAMIC_CRYPTO_CLASS,
+    origin,
+    mode: "adaptive",
+    dynamic: true,
+  };
 }
 
 export function parseManifest(account: MethodologyAccount): Manifest {
+  if (account.schemaVersion === 3) return parseDynamicManifest(account);
   if (account.schemaVersion === 2) return parseAdaptiveManifest(account);
   const canonical = JSON.parse(Buffer.from(account.canonical).toString("utf8")) as unknown;
   if (!Array.isArray(canonical) || canonical[0] !== "COX/METHODOLOGY/V1" || typeof canonical[1] !== "string") throw new Error("ManifestDomainInvalid");
@@ -156,7 +185,7 @@ export function parseManifest(account: MethodologyAccount): Manifest {
   if (new Set(assets.map((a) => a.assetId)).size !== assets.length) throw new Error("ManifestAssetDuplicate");
   const origin = Number(account.origin.toString());
   if (!Number.isSafeInteger(origin) || origin % 60 !== 0) throw new Error("ManifestOriginInvalid");
-  return { digest: hex(account.digest), version: canonical[1], sealed: account.sealed, assets, classes: classTable(assets, assets.length), cryptoClass: assets.length, origin, mode: "minute" };
+  return { digest: hex(account.digest), version: canonical[1], sealed: account.sealed, assets, classes: classTable(assets, assets.length), cryptoClass: assets.length, origin, mode: "minute", dynamic: false };
 }
 
 export function classIds(manifest: Manifest): string[] {
