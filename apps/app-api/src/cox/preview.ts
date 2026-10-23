@@ -1,4 +1,4 @@
-import { parseChainChange } from "./chain-changes.js";
+import { ChainChangeInvalid, parseChainChange } from "./chain-changes.js";
 import { PREVIEW_SCHEMA, type Portfolio, type Preview, type PreviewPortfolio, type PreviewProjection, type PreviewRecord } from "@eox/app-api";
 
 const STORAGE = "https://storage.googleapis.com/storage/v1";
@@ -9,6 +9,7 @@ const DIGEST = /^[0-9a-f]{64}$/;
 const SECONDS = /^[0-9]{10}$/;
 const SCALES = { price: "100000000", reference: "1000000000000", collateral: "1000000" } as const;
 const LOOKBACK_SECONDS = 300;
+const MAX_READS_PER_TICK = 30;
 
 export interface PreviewIdentity {
   networks: readonly string[];
@@ -20,7 +21,7 @@ export interface PreviewIdentity {
 }
 
 export interface PreviewStore {
-  newest(after: number): Promise<number | null>;
+  list(from: number, to: number | null): Promise<number[]>;
   read(timestamp: number): Promise<string | null>;
 }
 
@@ -105,11 +106,12 @@ export function gcsPreviewStore(url: string, accessToken: () => Promise<string>,
     return response;
   };
   return {
-    async newest(after) {
-      let newest: number | null = null;
+    async list(from, to) {
+      const found: number[] = [];
       let token: string | undefined;
       do {
-        const query = new URLSearchParams({ prefix, startOffset: `${prefix}${after + 1}.json`, fields: "items(name),nextPageToken", maxResults: "1000" });
+        const query = new URLSearchParams({ prefix, startOffset: `${prefix}${from}.json`, fields: "items(name),nextPageToken", maxResults: "1000" });
+        if (to !== null) query.set("endOffset", `${prefix}${to + 1}.json`);
         if (token) query.set("pageToken", token);
         const response = await get(`${base}?${query}`);
         if (response.status === 404) throw new Error("preview bucket not found");
@@ -118,11 +120,11 @@ export function gcsPreviewStore(url: string, accessToken: () => Promise<string>,
           const stem = name.slice(prefix.length).replace(/\.json$/, "");
           if (name !== `${prefix}${stem}.json` || !SECONDS.test(stem)) continue;
           const seconds = Number(stem);
-          if (seconds > after && (newest === null || seconds > newest)) newest = seconds;
+          if (seconds >= from && (to === null || seconds <= to)) found.push(seconds);
         }
         token = listing.nextPageToken;
       } while (token);
-      return newest;
+      return found.sort((a, b) => a - b);
     },
     async read(timestamp) {
       const response = await get(`${base}/${encodeURIComponent(`${prefix}${timestamp}.json`)}?alt=media`);
@@ -148,8 +150,14 @@ export class PreviewFeed {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
   private readonly listeners = new Set<(preview: Preview) => void>();
+  private readonly recordListeners = new Set<(record: PreviewRecord) => void>();
 
   constructor(private readonly options: PreviewFeedOptions) {}
+
+  onRecord(listener: (record: PreviewRecord) => void): () => void {
+    this.recordListeners.add(listener);
+    return () => this.recordListeners.delete(listener);
+  }
 
   start(): void {
     if (this.timer) return;
@@ -180,15 +188,24 @@ export class PreviewFeed {
     try {
       const now = this.options.now();
       const after = this.cursor ?? now - LOOKBACK_SECONDS;
-      const newest = await this.options.store.newest(after);
-      if (newest !== null) {
-        this.cursor = newest;
-        const text = await this.options.store.read(newest);
-        if (text !== null) {
-          this.record = parsePreview(text, newest, this.options.identity);
-          this.stale = null;
+      const listed = await this.options.store.list(after + 1, null);
+      for (const timestamp of listed.slice(-MAX_READS_PER_TICK)) {
+        const text = await this.options.store.read(timestamp);
+        this.cursor = timestamp;
+        if (text === null) continue;
+        let record: PreviewRecord;
+        try {
+          record = parsePreview(text, timestamp, this.options.identity);
+        } catch (error) {
+          if (!(error instanceof PreviewInvalid) && !(error instanceof ChainChangeInvalid)) throw error;
+          this.options.onError?.(error);
+          continue;
         }
+        this.record = record;
+        this.stale = null;
+        for (const listener of this.recordListeners) listener(record);
       }
+      if (listed.length > 0) this.cursor = listed.at(-1)!;
       const preview = this.latest(now);
       if (preview && preview.stale !== this.stale) {
         this.stale = preview.stale;
