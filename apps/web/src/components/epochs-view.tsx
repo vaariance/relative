@@ -278,7 +278,7 @@ function PotCard({ epoch, now, decimals }: { epoch: Epoch; now: number; decimals
           <dd className="num text-sm font-semibold">{net === null ? "—" : formatAmount(net, 2)} <span className="text-xs font-normal text-muted">{COLLATERAL.symbol}</span></dd>
         </div>
         <div>
-          <dt className="text-[11px] text-muted">Queued, not executed</dt>
+          <dt className="text-[11px] text-muted">Queued</dt>
           <dd className="num text-sm">{queued === null ? "—" : formatAmount(queued, 2)}</dd>
         </div>
         <div>
