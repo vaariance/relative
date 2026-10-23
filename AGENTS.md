@@ -1546,3 +1546,11 @@ another agent needs to know.
   - **Joel:** `universe` is still empty in `/v1/epochs`; charts per Epoch and per entry need reference series (one-second preview history only covers an hour); recovery details (void deadline, refund reason) are not in the API.
   - **Godwin:** pass 2 (chart, entry detail view, basket editor once a universe exceeds 30, design frames if Peter wants them).
 - **Refs:** commit `f81b221`, `apps/web/README.md` (Epochs page).
+
+### 2026-10-23 · Peter (Codex) · Real four-hour Epoch lifecycle completed
+
+- **Area:** Devnet Epoch `AnBEd8ne65Jmq5MP2dgqmx2KQHCGEz25kqBsmuzd8kjG`, existing deployment record and temporary verification runner.
+- **What:** The 08:00–12:00 UTC Epoch settled against exact oracle timestamp `1792756800`, with no later-price substitution. Both previously queued lots executed at 10:14:58 UTC after the deadline fix; no recovery entries were added. The resume-only watcher completed at 12:00:47 UTC, preserving the original 08:05 timeout report. A fresh confirmed/finalized read independently verified exact closing and recomputed both candidate scores/payouts from the on-chain entry and closing references.
+- **Verification:** Payouts 41,849 and 158,110 test-collateral base units both finalized to the original owner account (slots 514239360/514239370). Returned total 199,959; both lots withdrawn. Remaining custody 41 equals committed fees 40 plus rounding residual 1, with pending stake, active stake, held fees and claims all zero. Publisher remains active with zero restarts. This closes the real lifecycle gate; it does not erase the earlier harness timeout or establish subsecond execution latency.
+- **Rules for agents:** Preserve original and completed verification reports. Remove only the temporary VM test-wallet copy after confirming successful withdrawals; keep the local test wallet and all operator/admin boundaries. Retire the temporary verification follow-up. Joel's API rollout, fresh-state dynamic migration and approved LIT activation remain separate gates.
+- **Refs:** `packages/cox/deploy/adaptive-pool-2-devnet.json`; private `.cox/epoch-08-completed-result.json`, `.cox/epoch-08-final-audit.json`.
