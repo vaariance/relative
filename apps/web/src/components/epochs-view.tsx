@@ -295,9 +295,9 @@ function PotCard({ epoch, now, decimals }: { epoch: Epoch; now: number; decimals
             const current = index === step;
             return (
               <li key={label} className={`flex items-center gap-2 text-xs ${current ? "font-medium text-ink" : done ? "text-muted" : "text-muted/60"}`}>
-                <span className={`grid size-4 shrink-0 place-items-center rounded-full border ${done ? "border-up bg-up/15 text-up" : current ? "border-accent text-accent" : "border-dashed border-line"}`}>
-                  {done && <Check size={10} aria-hidden="true" />}
-                  {current && <span className="size-1.5 rounded-full bg-accent" />}
+                <span className={`grid size-5 shrink-0 place-items-center rounded-full ${done ? "bg-accent text-accent-ink" : current ? "bg-accent/20" : "bg-surface-2"}`}>
+                  {done && <Check size={12} strokeWidth={3.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" />}
+                  {current && <span className="size-2 rounded-full bg-accent" />}
                 </span>
                 {label}
                 {current && label === "Closing reference" && <span className="num text-muted">· {utcTime(epoch.closesAt, true)} UTC</span>}
