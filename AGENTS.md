@@ -1495,3 +1495,13 @@ another agent needs to know.
 - **Area:** `apps/web` (`faucet-panel.tsx`, `src/app/faucet-actions.ts`, `MIN_GAS_SOL` in `src/lib/config.ts`).
 - **What:** At Godwin's request, a wallet must hold at least 0.01 devnet SOL before the Faucet page lets it claim tUSDC or open the Circle USDC faucet. Below that, the page selects the SOL card, marks it "Start here", and locks the other two buttons ("Get SOL first"). `claimTestTokens` also refuses below the minimum with code `NO_GAS`. `faucetStatus` (replacing `faucetClaims`) returns the SOL balance and claims left, and is read again whenever the tab gets focus. The Circle link is only gated in the page, since Circle's site cannot be controlled. Not checked with a connected wallet.
 - **Refs:** commit `f2b3238`.
+
+### 2026-10-23 · Godwin (Claude Code) · Epochs page in the web app
+
+- **Area:** `apps/web` (`src/app/(app)/epochs`, `src/components/epochs-view.tsx`, `src/lib/epoch.ts`, Epoch intents in `src/lib/requests.ts` and `src/app/actions.ts`).
+- **What:** At Peter's request, `/epochs` (in the menu as Epochs) shows the four-hour Epoch rounds from Joel's `/v1/epochs` routes. A row of round cards, a board of each coin's move against $CRYPTO since the open and its share of the gains (the program's score formula, from the open rather than per entry), an entry box (`epoch-entry`, basket = all 30 tickers) and the wallet's entries with score, payout and withdraw (`epoch-withdraw`). 64 web tests pass. Checked against the live API at desktop and phone width without a wallet; the settled 08:00–12:00 round's board shows ZEC first with 16.9%.
+- **Rules for agents:** Epoch references are on a base of 1 at scale 10^12; preview references are on a base of 100. The page multiplies Epoch closing references by 100 before comparing them.
+- **Open:**
+  - **Joel:** `GET /v1/epochs` and `/v1/epochs/:opensAt` return an empty `universe` for both current rounds. The page falls back to the closing references, then to `/v1/assets`, so an entry's basket comes from the market roster.
+  - **Peter:** no round is taking entries now. Entry and withdraw have not been tried; a sealed upcoming round is needed to test them.
+- **Refs:** commit `909d1e0`, `apps/web/README.md` (Epochs page).
