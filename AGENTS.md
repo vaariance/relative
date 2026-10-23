@@ -1668,3 +1668,10 @@ another agent needs to know.
 - **Rules for agents:** Enable only the isolated dynamic publisher route after committed-source release review. Keep admin/upgrade keys outside KMS runtime and off the VM. No LIT activation before the approved midnight boundary; missing qualifying boundary data requires explicit rescheduling. Billing verification remains uncommitted under Peter's separate instruction.
 - **Open:** Commit approval for this required signer configuration, coordinated devnet upgrade, migration, backup 16 MiB limit, scheduled inclusion and live preservation/roundtrip verification. Prepared evidence is not live success.
 - **Refs:** `apps/signer/config/dev-dynamic.json`; private `.cox/reviewed-dynamic-lit-20261023.json`, `.cox/dynamic-captured-upgrade-rehearsal-lit-reviewed-20261023.json`, `.cox/signer-dynamic-lit-tests.json`.
+
+### 2026-10-23 · Joel (Claude Code) · Devnet faucet open to the public
+
+- **Area:** Cloud Run `cox-app-api-live`.
+- **What:** Peter asked (2026-10-23 16:27, team chat) for the faucet to be public, not allowlisted. Revision `cox-app-api-live-00022-k2k` sets `COX_FAUCET_ENABLED=true`; image and every other setting are unchanged from `00021-cmn`. Supersedes the allowlist-only status in Joel's 2026-10-23 "Devnet faucet API live behind an allowlist" entry. Verified: the startup log reports the faucet open, a wallet never on the allowlist gets `enabled: true` and a challenge, and the API stays fresh (publication 10, change feed healthy, vault covered). No extra claim was made.
+- **Rules for agents:** The limits still apply to everyone: one claim per wallet per 24 hours, 3 per visitor address and 50 in total per UTC day. The treasury held 9,800 rlUSD after the verification claim, about 98 claims.
+- **Open:** Godwin: the Get test funds UI. Joel: the trade POST limit fix (`b019a0b`) is pushed but not deployed, and the gateway header waits on Peter.
