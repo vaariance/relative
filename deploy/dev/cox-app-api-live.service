@@ -20,6 +20,7 @@ Environment=COX_PREVIEW_GCS=gs://colosseum-cox-publication-archives-dev/pool-2/p
 Environment=COX_CHAIN_CHANGES_GCS=gs://colosseum-cox-publication-archives-dev/pool-2/chain-changes/
 Environment=COX_RPC_URLS=https://api.devnet.solana.com
 Environment=APP_API_STATE_DIR=/opt/eox/state/cox-app-api-live
+Environment=COX_FAUCET_FORWARD_URL=https://api.getrelative.trade
 EnvironmentFile=-/opt/eox/cox-app-api-live.env
 ExecStart=/opt/eox/runtime/node-v24.21.0-linux-x64/bin/node --import /opt/eox/app/apps/app-api/node_modules/tsx/dist/loader.mjs src/main.ts
 Restart=on-failure
