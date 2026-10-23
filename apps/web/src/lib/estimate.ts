@@ -1,4 +1,4 @@
-import type { Preview, PreviewPortfolio } from "@eox/app-api";
+import type { Preview, PreviewHistory, PreviewPortfolio } from "@eox/app-api";
 import { CRYPTO_CLASS, unitDigits } from "./view";
 
 export const STALE_SECONDS = 10;
@@ -138,4 +138,58 @@ export function perMinute(points: readonly SeriesPoint[]): SeriesPoint[] {
     else out.push(point);
   }
   return out;
+}
+
+export const PREVIEW_SCALES = { price: "100000000", reference: "1000000000000" };
+
+export function historyEstimates(history: PreviewHistory, scales: { price: string; reference: string } = PREVIEW_SCALES): Estimate[] {
+  const price = digitsOf(scales.price);
+  const reference = digitsOf(scales.reference);
+  const count = history.assets.length;
+  const out: Estimate[] = [];
+  const points = [...history.points].sort((a, b) => a.timestamp - b.timestamp);
+  for (const point of points) {
+    if (point.prices.length !== count || point.references.length !== count) continue;
+    const last = out[out.length - 1];
+    if (last && point.timestamp <= last.at) continue;
+    const prices: Record<string, number> = {};
+    const references: Record<string, number> = {};
+    history.assets.forEach((id, index) => {
+      prices[id] = scaled(point.prices[index], price);
+      references[id] = scaled(point.references[index], reference);
+    });
+    out.push({ at: point.timestamp, benchmark: scaled(point.benchmark, reference), prices, references, unitValues: null, basis: null });
+  }
+  return out;
+}
+
+export function joinHistory(older: readonly Estimate[], recent: readonly Estimate[]): Estimate[] {
+  const first = recent[0]?.at ?? Number.POSITIVE_INFINITY;
+  const head: Estimate[] = [];
+  for (const estimate of older) {
+    const last = head[head.length - 1];
+    if (estimate.at < first && (!last || estimate.at > last.at)) head.push(estimate);
+  }
+  return head.length === 0 ? (recent as Estimate[]) : [...head, ...recent];
+}
+
+export function trimHistory(history: readonly Estimate[], keepSeconds = HISTORY_SECONDS): Estimate[] {
+  const last = history[history.length - 1];
+  if (!last) return [];
+  const start = last.at - keepSeconds;
+  let first = 0;
+  while (first < history.length && history[first].at <= start) first += 1;
+  return first === 0 ? (history as Estimate[]) : history.slice(first);
+}
+
+export function historyStep(rangeSeconds: number): 60 | 300 | 3600 {
+  if (rangeSeconds <= HISTORY_SECONDS) return 60;
+  return rangeSeconds <= 86400 ? 300 : 3600;
+}
+
+export const HISTORY_LIMIT_SECONDS = 7 * 86400 - 3600;
+
+export function preferEstimates(estimates: readonly SeriesPoint[], settled: readonly SeriesPoint[]): boolean {
+  if (estimates.length < 2) return false;
+  return spanOf(estimates) >= spanOf(settled) || estimates.length > settled.length;
 }

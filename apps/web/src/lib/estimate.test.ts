@@ -1,6 +1,6 @@
-import type { Preview, PreviewPortfolio } from "@eox/app-api";
+import type { Preview, PreviewHistory, PreviewPortfolio } from "@eox/app-api";
 import { describe, expect, it } from "vitest";
-import { ageText, appendHistory, estimateOf, freshnessOf, perMinute, sampled, seriesOf, spanOf, walletEstimateOf } from "./estimate";
+import { ageText, appendHistory, estimateOf, freshnessOf, historyEstimates, historyStep, joinHistory, preferEstimates, perMinute, sampled, seriesOf, spanOf, trimHistory, walletEstimateOf } from "./estimate";
 
 const preview: Preview = {
   ageSeconds: 1,
@@ -133,5 +133,67 @@ describe("minute points", () => {
     const points = [59, 60, 90, 119, 120, 150, 185].map((cutoff) => ({ cutoff, value: cutoff }));
     expect(perMinute(points).map((point) => point.cutoff)).toEqual([59, 119, 150]);
     expect(perMinute([])).toEqual([]);
+  });
+});
+
+describe("preview history", () => {
+  const at = (seconds: number) => ({ ...estimateOf(preview, 6), at: seconds });
+  const history: PreviewHistory = {
+    assets: ["BTC", "ETH"],
+    step: 60,
+    from: 1792738440,
+    to: 1792738680,
+    points: [
+      { end: 1792738620, timestamp: 1792738619, benchmark: "95000000000000", prices: ["8100000000000", "300000000000"], references: ["101000000000000", "99500000000000"] },
+      { end: 1792738500, timestamp: 1792738500, benchmark: "95901037991028", prices: ["8179816644724", "240603676191"], references: ["101200126709690", "101221951975233"] },
+      { end: 1792738680, timestamp: 1792738660, benchmark: "96000000000000", prices: ["8200000000000"], references: ["102000000000000"] },
+    ],
+  };
+
+  it("reads each point at the preview scales in roster order, oldest first", () => {
+    const estimates = historyEstimates(history);
+    expect(estimates.map((item) => item.at)).toEqual([1792738500, 1792738619]);
+    expect(estimates[0].prices.BTC).toBeCloseTo(81798.16644724, 6);
+    expect(estimates[0].references.ETH).toBeCloseTo(101.221951975233, 9);
+    expect(estimates[1].benchmark).toBe(95);
+    expect(estimates[1].unitValues).toBeNull();
+    expect(estimates[1].basis).toBeNull();
+  });
+
+  it("leaves a malformed point out instead of filling it", () => {
+    expect(historyEstimates(history).some((item) => item.at === 1792738660)).toBe(false);
+  });
+
+  it("keeps a missing step as a gap", () => {
+    const series = seriesOf(historyEstimates(history), "level");
+    expect(series.map((point) => point.cutoff)).toEqual([1792738500, 1792738619]);
+  });
+
+  it("puts older history before live previews and never repeats a time", () => {
+    const older = historyEstimates(history);
+    const recent = [at(1792738619), at(1792738620)];
+    expect(joinHistory(older, recent).map((item) => item.at)).toEqual([1792738500, 1792738619, 1792738620]);
+    expect(joinHistory(older, []).map((item) => item.at)).toEqual([1792738500, 1792738619]);
+    expect(joinHistory([], recent)).toBe(recent);
+  });
+
+  it("trims to the kept window", () => {
+    expect(trimHistory([at(1), at(50), at(100)], 60).map((item) => item.at)).toEqual([50, 100]);
+    expect(trimHistory([])).toEqual([]);
+  });
+
+  it("asks for wider steps on longer ranges", () => {
+    expect(historyStep(3600)).toBe(60);
+    expect(historyStep(4 * 3600)).toBe(60);
+    expect(historyStep(86400)).toBe(300);
+    expect(historyStep(7 * 86400)).toBe(3600);
+  });
+
+  it("prefers estimates when they cover more time or hold more points than settled values", () => {
+    const points = (...cutoffs: number[]) => cutoffs.map((cutoff) => ({ cutoff, value: 1 }));
+    expect(preferEstimates(points(10, 20, 30, 40), points(0, 100))).toBe(true);
+    expect(preferEstimates(points(0, 100), points(10, 20, 30))).toBe(true);
+    expect(preferEstimates(points(50, 60), points(0, 30, 100))).toBe(false);
+    expect(preferEstimates(points(50), points())).toBe(false);
   });
 });
