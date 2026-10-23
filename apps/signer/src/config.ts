@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { PublicKey } from "@solana/web3.js";
+import type { DevnetFaucetBinding } from "./faucet-policy.js";
 import { SIGNING_ROLES, type Environment, type KeyDirectoryEntry, type SigningRole } from "@eox/signing";
 import { assertKeyVersion } from "./kms.js";
 
@@ -54,6 +56,7 @@ export interface SolanaProgramBinding {
 export const SIGNER_ACCOUNT = "$signer";
 
 export interface RoleBindings {
+  faucet?: DevnetFaucetBinding;
   solana?: { maxComputeUnitPriceMicroLamports: string; maxComputeUnitLimit?: string; maxHeapBytes?: number; programs: SolanaProgramBinding[] };
 }
 
@@ -66,7 +69,7 @@ export interface RoleKey {
 export interface SignerConfig {
   environment: Environment;
   audience: string;
-  keys: Record<SigningRole, RoleKey>;
+  keys: { "oracle-operator": RoleKey; "devnet-faucet"?: RoleKey };
   callers: Record<string, SigningRole[]>;
   bindings: Partial<Record<SigningRole, RoleBindings>>;
   directoryVersion: number;
@@ -88,9 +91,18 @@ export function loadSignerConfig(path: string): SignerConfig {
   if (typeof config.audience !== "string") fail("audience");
   for (const role of SIGNING_ROLES) {
     const key = config.keys?.[role];
-    if (!key) fail(`missing key for ${role}`);
+    if (!key) {
+      if (role === "oracle-operator") fail(`missing key for ${role}`);
+      continue;
+    }
     assertKeyVersion(key.keyVersion);
-    if (!key.network.startsWith("solana:")) fail(`${role} network ${key.network} is not a Solana network`);
+    if (typeof key.network !== "string" || !key.network.startsWith("solana:")) fail(`${role} network ${key.network} is not a Solana network`);
+  }
+  const faucetKey = config.keys["devnet-faucet"];
+  if (faucetKey) {
+    if (config.environment !== "dev" || faucetKey.network !== "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1" || config.keys["oracle-operator"].network !== faucetKey.network) fail("faucet is devnet-only on the signer's devnet RPC");
+    if (!Number.isSafeInteger(faucetKey.validFrom) || faucetKey.validFrom < 0) fail("faucet validFrom");
+    if (faucetKey.keyVersion.split("/cryptoKeyVersions/")[0] === config.keys["oracle-operator"].keyVersion.split("/cryptoKeyVersions/")[0]) fail("faucet must use a dedicated KMS key");
   }
   if (!Number.isSafeInteger(config.directoryVersion) || config.directoryVersion < 1) fail("directoryVersion");
   for (const entry of config.retired ?? []) {
@@ -101,10 +113,29 @@ export function loadSignerConfig(path: string): SignerConfig {
   }
   for (const [email, roles] of Object.entries(config.callers ?? {})) {
     if (!EMAIL_PATTERN.test(email)) fail(`caller ${email} is not a service account`);
-    for (const role of roles) if (!SIGNING_ROLES.includes(role)) fail(`caller ${email} has unknown role ${role}`);
+    for (const role of roles) {
+      if (!SIGNING_ROLES.includes(role)) fail(`caller ${email} has unknown role ${role}`);
+      if (!config.keys[role]) fail(`caller ${email} has no key for ${role}`);
+    }
   }
   for (const [role, bindings] of Object.entries(config.bindings ?? {})) {
     if (!SIGNING_ROLES.includes(role as SigningRole)) fail(`bindings for unknown role ${role}`);
+    if (!config.keys[role as SigningRole]) fail(`bindings for ${role} have no key`);
+    if (role === "devnet-faucet") {
+      if (Object.keys(bindings ?? {}).some((k) => k !== "faucet")) fail("faucet may bind only its transfer policy");
+      if (!bindings?.faucet) fail("faucet transfer binding required");
+      const faucet = bindings.faucet;
+      if (Object.keys(faucet).some((key) => !["mint", "sourceTokenAccount", "decimals", "maxTokenAmount", "maxSolLamports"].includes(key))) fail("unknown faucet binding field");
+      for (const address of [faucet.mint, faucet.sourceTokenAccount]) {
+        try {
+          if (typeof address !== "string" || new PublicKey(address).toBase58() !== address) fail("faucet public key");
+        } catch { fail("faucet public key"); }
+      }
+      if (faucet.mint !== "5rpGrekfBLHdF8PD8eKLzXQPPmhyF7FCKeE1VA5CwV3X" || faucet.decimals !== 6) fail("faucet test mint and decimals");
+      if (typeof faucet.maxTokenAmount !== "string" || !INTEGER_PATTERN.test(faucet.maxTokenAmount) || BigInt(faucet.maxTokenAmount) < 1n || BigInt(faucet.maxTokenAmount) > 100_000_000n) fail("faucet token limit");
+      if (typeof faucet.maxSolLamports !== "string" || !INTEGER_PATTERN.test(faucet.maxSolLamports) || BigInt(faucet.maxSolLamports) > 10_000_000n) fail("faucet SOL limit");
+      continue;
+    }
     if (Object.keys(bindings ?? {}).some((k) => k !== "solana")) fail(`${role} may bind only Solana programs`);
     if (bindings?.solana) {
       if (!INTEGER_PATTERN.test(bindings.solana.maxComputeUnitPriceMicroLamports)) fail(`${role} compute price limit`);

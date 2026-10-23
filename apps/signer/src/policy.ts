@@ -2,15 +2,9 @@ import type { PolicyTransaction } from "./solana.js";
 import { ComputeBudgetProgram, PublicKey } from "@solana/web3.js";
 import type { RejectionCode, SigningRole } from "@eox/signing";
 import { SIGNER_ACCOUNT, type RoleBindings } from "./config.js";
-
-export class PolicyRejection extends Error {
-  constructor(
-    readonly code: RejectionCode,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+import { PolicyRejection } from "./policy-errors.js";
+import { checkFaucetPolicy } from "./faucet-policy.js";
+export { PolicyRejection } from "./policy-errors.js";
 
 const deny = (code: RejectionCode, message: string): never => {
   throw new PolicyRejection(code, message);
@@ -27,6 +21,11 @@ export function checkSolanaPolicy(
   transaction: PolicyTransaction,
   signer: PublicKey,
 ): void {
+  if (role === "devnet-faucet") {
+    if (!bindings?.faucet || bindings.solana) deny("TARGET_NOT_BOUND", "faucet requires its dedicated transfer policy");
+    checkFaucetPolicy(bindings!.faucet!, transaction, signer);
+    return;
+  }
   const message = transaction.message;
   if (message.addressTableLookups.length > 0) deny("OPERATION_NOT_PERMITTED", "address lookup tables are not permitted");
   if (!message.staticAccountKeys[0]?.equals(signer)) deny("OPERATION_NOT_PERMITTED", "the signing key must be the fee payer");

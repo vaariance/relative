@@ -1,6 +1,6 @@
 export const SIGNING_SCHEMA_VERSION = "eox.signing/v1";
 
-export const SIGNING_ROLES = ["oracle-operator"] as const;
+export const SIGNING_ROLES = ["oracle-operator", "devnet-faucet"] as const;
 export type SigningRole = (typeof SIGNING_ROLES)[number];
 
 export type SigningChain = "solana";
@@ -12,6 +12,7 @@ export type UnixSeconds = number;
 
 export const ROLE_CHAINS: Readonly<Record<SigningRole, SigningChain>> = {
   "oracle-operator": "solana",
+  "devnet-faucet": "solana",
 };
 
 export const CHAIN_ALGORITHMS: Readonly<Record<Chain, KeyAlgorithm>> = {

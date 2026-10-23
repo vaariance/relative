@@ -1,0 +1,100 @@
+{
+  "environment": "dev",
+  "audience": "",
+  "directoryVersion": 3,
+  "keys": {
+    "oracle-operator": {
+      "keyVersion": "projects/colosseum-eox/locations/us-central1/keyRings/eox-signing-dev/cryptoKeys/oracle-operator/cryptoKeyVersions/1",
+      "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+      "validFrom": 0
+    },
+    "devnet-faucet": {
+      "keyVersion": "projects/colosseum-eox/locations/us-central1/keyRings/eox-signing-dev/cryptoKeys/devnet-faucet/cryptoKeyVersions/1",
+      "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+      "validFrom": 1792757849
+    }
+  },
+  "retired": [
+    {
+      "role": "uma-asserter",
+      "environment": "dev",
+      "chain": "evm",
+      "network": "eip155:11155111",
+      "algorithm": "secp256k1",
+      "publicKey": "0x04b0d86b809c74c9f0e5935ad47709a545e247d1135ca7e26a76d29a8bbadd293a7a8d4bdd3d7ce4790f8105c7601beccf16e91f67dd5882a155210dd4a47740d0",
+      "address": "0x70bA88a9f3c35aa2E07aBFa74A487A2410553634",
+      "keyVersion": "projects/colosseum-eox/locations/us-central1/keyRings/eox-signing-dev/cryptoKeys/uma-asserter/cryptoKeyVersions/1",
+      "state": "retired",
+      "validFrom": 0,
+      "validUntil": 1791688452
+    },
+    {
+      "role": "uma-challenger",
+      "environment": "dev",
+      "chain": "evm",
+      "network": "eip155:11155111",
+      "algorithm": "secp256k1",
+      "publicKey": "0x042ec3215b5f6b0b49fdc9a3a96f06c64b9ef20ac10f66eb55d7901395a87c2d8fd97df67a9615dc491809b7e53da58e46949d0e1fcea0dc189f40591ab929e71f",
+      "address": "0x312903fA37c855D9A7477753B370a788Ded69Ac6",
+      "keyVersion": "projects/colosseum-eox/locations/us-central1/keyRings/eox-signing-dev/cryptoKeys/uma-challenger/cryptoKeyVersions/1",
+      "state": "retired",
+      "validFrom": 0,
+      "validUntil": 1791688452
+    },
+    {
+      "role": "oracle-checker",
+      "environment": "dev",
+      "chain": "evm",
+      "network": "eip155:11155111",
+      "algorithm": "secp256k1",
+      "publicKey": "0x04705006d30daaf304b2e76d7110a0cd8a6792ff79cc72d3f7d5ae7f3abcee67a305a4b93f9edfaea784629aa33cb38917567bc21d0eeb625cc8aa81baa94019ca",
+      "address": "0x2997D24bC3373187f2116A12B73DCBf6aD2C1347",
+      "keyVersion": "projects/colosseum-eox/locations/us-central1/keyRings/eox-signing-dev/cryptoKeys/oracle-checker/cryptoKeyVersions/1",
+      "state": "retired",
+      "validFrom": 0,
+      "validUntil": 1791688452
+    },
+    {
+      "role": "evm-relayer",
+      "environment": "dev",
+      "chain": "evm",
+      "network": "eip155:11155111",
+      "algorithm": "secp256k1",
+      "publicKey": "0x0487ada6e426228f730142294e9e2047d8e83dfd7f4a1583888ee68ff417af53457c0f066ed6ef392bfe565e16fb4d0cd11077ca871c44f6c1d441c58d14ee1f39",
+      "address": "0xE7658466b6C947B925B5B24D723EFB5cFedff0A1",
+      "keyVersion": "projects/colosseum-eox/locations/us-central1/keyRings/eox-signing-dev/cryptoKeys/evm-relayer/cryptoKeyVersions/1",
+      "state": "retired",
+      "validFrom": 0,
+      "validUntil": 1791688452
+    },
+    {
+      "role": "solana-relayer",
+      "environment": "dev",
+      "chain": "solana",
+      "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+      "algorithm": "ed25519",
+      "publicKey": "5Pq4qnSpqiskNNPfVobwGr6Y7tTQETvQuPE9UVvz9AQx",
+      "address": "5Pq4qnSpqiskNNPfVobwGr6Y7tTQETvQuPE9UVvz9AQx",
+      "keyVersion": "projects/colosseum-eox/locations/us-central1/keyRings/eox-signing-dev/cryptoKeys/solana-relayer/cryptoKeyVersions/1",
+      "state": "retired",
+      "validFrom": 0,
+      "validUntil": 1791688452
+    }
+  ],
+  "callers": {
+    "cox-app-api-live@colosseum-eox.iam.gserviceaccount.com": [
+      "devnet-faucet"
+    ]
+  },
+  "bindings": {
+    "devnet-faucet": {
+      "faucet": {
+        "mint": "5rpGrekfBLHdF8PD8eKLzXQPPmhyF7FCKeE1VA5CwV3X",
+        "sourceTokenAccount": "A6DGt726ydBHKZB1Jcrrz6u2quphDxwJD37irPkLYHNo",
+        "maxTokenAmount": "100000000",
+        "maxSolLamports": "10000000",
+        "decimals": 6
+      }
+    }
+  }
+}

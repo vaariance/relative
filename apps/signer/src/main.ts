@@ -26,7 +26,7 @@ const token = async () => {
 };
 const now = () => Math.floor(Date.now() / 1000);
 
-const needsSolanaReads = Object.values(config.bindings).some((b) => b?.solana?.programs.some((p) => p.linkage));
+const needsSolanaReads = Object.values(config.bindings).some((b) => b?.faucet || b?.solana?.programs.some((p) => p.linkage));
 let solanaAccounts;
 if (needsSolanaReads) {
   const urls = parseRpcUrls(process.env.SIGNER_SOLANA_RPC_URLS, "SIGNER_SOLANA_RPC_URLS");

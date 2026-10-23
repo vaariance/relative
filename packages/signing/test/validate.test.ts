@@ -33,3 +33,7 @@ test("rejects expired requests, unknown roles and malformed fields", () => {
   assert.throws(() => validateSignRequest({ ...solana, transactionBase64: "not base64!" }, now), /invalid Solana transaction bytes/);
   assert.throws(() => validateSignRequest({ ...solana, operation: { operationId: "", kind: "publish" } }, now), /missing operation identity/);
 });
+
+test("accepts a dedicated devnet faucet signing role", () => {
+  validateSignRequest({ ...solana, role: "devnet-faucet", operation: { operationId: "claim-0001", kind: "devnet-faucet-claim" } }, now);
+});

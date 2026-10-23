@@ -14,6 +14,7 @@ import { type AccountFetcher } from "./cox-linkage.js";
 import { checkProtocolLinkage } from "./protocol-linkage.js";
 import { checkSolanaPolicy, PolicyRejection } from "./policy.js";
 import { parseSolanaTransaction, requiredSignerIndex } from "./solana.js";
+import { checkFaucetAccounts } from "./faucet-accounts.js";
 import type { DecisionStore } from "./store.js";
 
 export const MAX_EXPIRY_SECONDS = 600;
@@ -85,12 +86,24 @@ export function createSigningService(deps: SigningServiceDeps) {
       const signer = new PublicKey(key.derived.rawPublicKey);
       requiredSignerIndex(transaction, signer);
       checkSolanaPolicy(request.role, bindings, transaction, signer);
+      if (request.role === "devnet-faucet") {
+        if (config.environment !== "dev" || key.entry.network !== "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1" || request.operation.kind !== "devnet-faucet-claim") {
+          throw new PolicyRejection("OPERATION_NOT_PERMITTED", "faucet claims are devnet-only with an explicit claim operation");
+        }
+        if (!deps.solanaAccounts || !bindings?.faucet) throw new PolicyRejection("TARGET_NOT_BOUND", "faucet needs confirmed account validation");
+        if (request.expiresAt > now() + 60) throw new PolicyRejection("INVALID_REQUEST", "faucet signing requests expire within 60 seconds");
+        await checkFaucetAccounts(bindings.faucet, transaction, signer, async addresses => {
+          try { return await deps.solanaAccounts!(addresses); }
+          catch { throw new SignerUnavailable("confirmed faucet accounts are temporarily unavailable"); }
+        });
+      }
       for (const program of bindings?.solana?.programs ?? []) {
         if (!program.linkage) continue;
         if (!deps.solanaAccounts) throw new PolicyRejection("TARGET_NOT_BOUND", "COX linkage needs a Solana RPC to verify accounts");
         await checkProtocolLinkage(program, program.linkage, transaction, deps.solanaAccounts);
       }
     } catch (error) {
+      if (error instanceof SignerUnavailable) throw error;
       if (error instanceof PolicyRejection) return rejection(request.requestId, payloadSha256, error.code, error.message);
       return rejection(request.requestId, payloadSha256, "INVALID_REQUEST", error instanceof Error ? error.message : "invalid transaction");
     }

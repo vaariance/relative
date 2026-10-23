@@ -22,6 +22,7 @@ export async function resolveKeys(config: SignerConfig, token: AccessToken): Pro
   const resolved = new Map<SigningRole, ResolvedKey>();
   for (const role of SIGNING_ROLES) {
     const key = config.keys[role];
+    if (!key) continue;
     const chain = ROLE_CHAINS[role];
     const kms = await getPublicKey(token, key.keyVersion);
     if (kms.algorithm !== EXPECTED_ALGORITHMS[chain]) {
@@ -54,6 +55,14 @@ export function keyDirectory(config: SignerConfig, keys: Map<SigningRole, Resolv
     environment: config.environment,
     version: config.directoryVersion,
     generatedAt,
-    entries: [...SIGNING_ROLES.map((role) => keys.get(role)!.entry), ...config.retired],
+    entries: [...SIGNING_ROLES.flatMap((role) => {
+      const key = keys.get(role);
+      if (!key) {
+        if (config.keys[role]) throw new Error(`missing resolved key for ${role}`);
+        return [];
+      }
+      if (!config.keys[role]) throw new Error(`unconfigured resolved key for ${role}`);
+      return [key.entry];
+    }), ...config.retired],
   };
 }
