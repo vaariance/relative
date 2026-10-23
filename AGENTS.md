@@ -1470,3 +1470,9 @@ another agent needs to know.
 - **Rules for agents:** The faucet key must never be the registry admin key (`4rCo36GY…Pp9N`, tUSDC's mint authority today) and must never get a `NEXT_PUBLIC_` name. A claim refuses to send unless the key is tUSDC's mint authority.
 - **Open:** Peter: a faucet-only key that holds tUSDC's mint authority, funded with devnet SOL; Godwin sets it on Vercel before deploying. No claim has been sent yet. The site still trades only USDC, so tUSDC from the faucet cannot be used on Buy or Swap until that changes.
 - **Refs:** commit `39f94cf`, `apps/web/README.md` (Faucet page, Secrets).
+
+### 2026-10-23 · Godwin (Claude Code) · Faucet balances moved to the wallet menu
+
+- **Area:** `apps/web` (`faucet-panel.tsx`, `wallet-button.tsx`, `src/app/faucet-actions.ts`).
+- **What:** At Godwin's request the Faucet page no longer has a balances card. The wallet menu (connected state) shows devnet SOL, USDC and tUSDC, read in one `getMultipleAccountsInfo` call whenever the menu opens. The server action `faucetBalances` is replaced by `faucetClaims`, which returns only the claims left. Qualifies the balances part of Godwin's 2026-10-23 "Faucet page grants 20 tUSDC" entry. 58 web tests and the type check pass; the wallet menu was not checked with a connected wallet.
+- **Refs:** commit `946a6cb`.
