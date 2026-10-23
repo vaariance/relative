@@ -1505,3 +1505,9 @@ another agent needs to know.
   - **Joel:** `GET /v1/epochs` and `/v1/epochs/:opensAt` return an empty `universe` for both current rounds. The page falls back to the closing references, then to `/v1/assets`, so an entry's basket comes from the market roster.
   - **Peter:** no round is taking entries now. Entry and withdraw have not been tried; a sealed upcoming round is needed to test them.
 - **Refs:** commit `909d1e0`, `apps/web/README.md` (Epochs page).
+
+### 2026-10-23 · Godwin (Claude Code) · Epochs page redesigned as a round carousel
+
+- **Area:** `apps/web` (`epochs-view.tsx`, Epochs page).
+- **What:** At Godwin's request, the Epochs page follows PancakeSwap Prediction's layout. Rounds are large swipeable cards centred on the live round, the live card has a countdown ring, pot, entries and Enter round, which turns the card into the entry form. Leaders show as tiles (top 10, toggle for all 30), and the rules sit behind a How it works button. Your entries appear only when the wallet has any. The server passes its clock to the page to avoid a hydration mismatch in the countdown. Supersedes the layout in Godwin's 2026-10-23 "Epochs page in the web app" entry. The live card and entry form were checked with a temporary fake live round (removed before commit); no real entry has been sent.
+- **Refs:** commit `2ff8189`.
