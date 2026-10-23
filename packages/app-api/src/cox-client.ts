@@ -11,6 +11,7 @@ import type {
   CryptoComposition,
   DepositInput,
   Preview,
+  PreviewHistory,
   PreviewPortfolio,
   DepositQuoteInput,
   Epoch,
@@ -127,6 +128,7 @@ export function createCoxApiClient(options: CoxApiClientOptions) {
     buildEpochEntry: (input: EpochEntryInput) => post<UnsignedTransaction>("transactions/epoch-entry", input),
     buildEpochWithdraw: (input: EpochWithdrawInput) => post<UnsignedTransaction>("transactions/epoch-withdraw", input),
     preview: () => get<Preview>("preview"),
+    previewHistory: (from: number, to: number, step: 1 | 60 | 300 | 3600) => get<PreviewHistory>(`preview/history?from=${from}&to=${to}&step=${step}`),
     previewPortfolio: (owner: string) => {
       if (!OWNER_PATTERN.test(owner)) throw new CoxApiError("INVALID_REQUEST", "invalid owner", 0);
       return get<PreviewPortfolio>(`preview/portfolio?owner=${owner}`);

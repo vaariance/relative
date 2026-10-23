@@ -337,6 +337,22 @@ export interface Preview {
   stale: boolean;
 }
 
+export interface PreviewHistoryPoint {
+  end: UnixSeconds;
+  timestamp: UnixSeconds;
+  benchmark: string;
+  prices: string[];
+  references: string[];
+}
+
+export interface PreviewHistory {
+  assets: string[];
+  step: number;
+  from: UnixSeconds;
+  to: UnixSeconds;
+  points: PreviewHistoryPoint[];
+}
+
 export interface PreviewPosition {
   classId: ClassId;
   units: UnitQuanta;
