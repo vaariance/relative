@@ -113,7 +113,7 @@ class LocalSigner implements Pick<RemoteSigner, "signSolanaTransaction"> {
       decision: "signed",
       payloadSha256: "",
       signer: { role: "devnet-faucet", address: this.key.publicKey.toBase58(), keyVersion: request.keyVersion },
-      signature: anchor.utils.bytes.bs58.encode(transaction.signatures[0]!),
+      signature: Buffer.from(transaction.signatures[0]!).toString("base64"),
       signedTransaction: Buffer.from(transaction.serialize()).toString("base64"),
       decidedAt: 0,
     };

@@ -388,7 +388,7 @@ export class CoxFaucet {
         throw new Error(`faucet signer returned a transaction that does not match ${requestId}`);
       }
       signature = anchor.utils.bytes.bs58.encode(first);
-      if (signature !== result.signature) throw new Error(`faucet signer reported a different signature for ${requestId}`);
+      if (!Buffer.from(result.signature, "base64").equals(Buffer.from(first))) throw new Error(`faucet signer reported a different signature for ${requestId}`);
     } catch (error) {
       if (error instanceof FaucetError) throw error;
       await this.release(reserved, "the grant was not approved");
