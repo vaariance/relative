@@ -1627,3 +1627,10 @@ another agent needs to know.
   - **Peter:** approval to open claims (`COX_FAUCET_ENABLED=true`).
   - **Joel:** set `COX_FAUCET_FORWARD_URL` on the VM API. Secret version 1 of `cox-faucet-ip-key` holds a stray carriage return and is unused; version 2 is live.
 - **Refs:** `apps/app-api/README.md` (Devnet faucet), commits `25ee894`..`67670d1`.
+
+### 2026-10-23 · Joel (Claude Code) · VM API forwards faucet routes
+
+- **Area:** `deploy/dev/cox-app-api-live.service`, dev VM `cox-app-api-live`.
+- **What:** Closes the VM forwarding item in Joel's 2026-10-23 "Devnet faucet API live behind an allowlist" entry. The VM API runs `30be7ac` with `COX_FAUCET_FORWARD_URL=https://api.getrelative.trade`. It holds no faucet signer settings and passes every `/v1/faucet/*` request to the public live API. Verified on the VM: status returns the test wallet's confirmed claim from Cloud Run, and a challenge for a wallet off the allowlist returns `FAUCET_DISABLED`. All publications and the change feed are served as before.
+- **Rules for agents:** Calls through the VM reach Cloud Run through the gateway, which counts them under the VM's own address for the per-IP limit. That is acceptable because the VM API is reachable only through SSH tunnels.
+- **Refs:** commit `30be7ac`.
