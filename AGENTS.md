@@ -1579,3 +1579,11 @@ another agent needs to know.
 - **Rules for agents:** This replaces the stale sequence-4 rehearsal as the latest captured-state evidence, not as a permanent approval for any later predecessor. No live transaction was submitted, local signature verification was disabled and no live KMS or deployment proof is claimed. Recheck the predecessor immediately before live migration.
 - **Open:** Joel's dynamic API deployment, coordinated protocol/signer/runtime rollout and explicitly approved LIT activation timestamp. Existing balances must remain intact.
 - **Refs:** `packages/cox/deploy/adaptive-pool-2-devnet.json`; private `.cox/dynamic-fresh-rehearsal-evidence-20261023.json` and `.cox/dynamic-captured-upgrade-rehearsal-fresh-20261023.json`.
+
+### 2026-10-23 · Peter (Codex) · Publisher quiet-hour and active-window HTTP audit
+
+- **Area:** Read-only archived process counters and current publisher diagnostics.
+- **What:** Existing backup snapshots from 14:01:43 to 15:01:54 UTC increased HTTP attempts by 15, all `getMultipleAccounts` and all safety-triggered. Adjacent quiet windows also increased by 15. The existing 10:23:44–12:07:25 UTC active/Epoch-closing window added 160 calls: active 88, event 5, safety 24, scheduled 21 and stream recovery 22. The audit generated no Solana calls or trades. Current stream is healthy and publisher has zero restarts.
+- **Rules for agents:** Scope is this publisher process only, using archive timestamps as approximate capture boundaries. Do not present these as total account billing, sustained-load benchmarks, gRPC byte measurements or an Alchemy dashboard comparison. Preserve the 20-minute safety policy; no new monitor or polling was introduced.
+- **Open:** Authenticated dashboard comparison and separate gRPC billing are not verified. No authenticated Alchemy browser session was available; native browser inspection was unavailable while the Mac was locked. API/signer/wallet/operator usage must be counted separately before reconciling dashboard totals.
+- **Refs:** `packages/cox/deploy/adaptive-pool-2-devnet.json`; private `.cox/publisher-usage-audit-2026-10-23.json`.
