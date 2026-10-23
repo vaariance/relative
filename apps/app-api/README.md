@@ -175,6 +175,23 @@ Every preview is an estimate. The API computes no reference or redistribution: b
 
 With `COX_EPOCH_CONFIG`, the API reads the Epoch configuration, its Epoch accounts and lots. An Epoch is a `draft` until the admin seals it, then `open`, `scoring`, `allocating`, `settled` or `voided`. `entriesOpen` is true only for an open Epoch between `opensAt` and `closesAt` with lot capacity left. Its ledger lists pending gross stakes, active net stakes, held fees, claimable amounts, committed fees and residual, compared with both vault balances. Entry fees are 2 bps capped at 200,000 base units and are charged by the program. An entry uses the Epoch's next lot nonce, so simultaneous entries can conflict and must be rebuilt.
 
+## Devnet faucet
+
+The faucet gives a wallet 100 rlUSD, the devnet test token `5rpGrekfBLHdF8PD8eKLzXQPPmhyF7FCKeE1VA5CwV3X` with six decimals. A wallet holding less than 0.005 devnet SOL also gets 0.01 devnet SOL. rlUSD is not Circle's devnet USDC, and neither has real value. Only the Cloud Run live API grants; other deployments forward the faucet routes to it with `COX_FAUCET_FORWARD_URL`.
+
+1. `POST /v1/faucet/challenge` with `{ owner }` returns `{ challengeId, owner, message, expiresAt }`. The challenge is valid for 5 minutes and can be used once.
+2. The wallet signs `message` exactly as returned, as UTF-8 bytes with `signMessage`. It signs no transaction.
+3. `POST /v1/faucet/claim` with `{ owner, challengeId, signature }`, where `signature` is the 64-byte ed25519 signature in base64, returns a `FaucetClaim`. The call waits up to about 30 seconds for the grant to confirm.
+4. `GET /v1/faucet/status?owner=` returns `{ enabled, token, sol, cooldownSeconds, nextClaimAt, claim }`. Call it after a claim that comes back unconfirmed, not on a timer.
+
+A claim's `state` is `reserved`, `signed`, `submitted`, `confirmed` or `failed`; `signature` links to the grant on an explorer. A failed claim moved nothing and does not count against the wallet.
+
+- **Limits:** one claim per wallet every 24 hours, 3 per visitor network address and 50 in total per UTC day (`COX_FAUCET_COOLDOWN_SECONDS`, `COX_FAUCET_IP_DAILY`, `COX_FAUCET_GLOBAL_DAILY`). The address is the first `X-Forwarded-For` entry, which the gateway sets to the visitor's address.
+- **Errors:** `FAUCET_DISABLED` (409), `CHALLENGE_INVALID` (401), `FAUCET_COOLDOWN` and `FAUCET_LIMITED` (429, with `retry-after`), `FAUCET_BUSY` (409, an earlier claim is still confirming), `FAUCET_EMPTY` and `FAUCET_UNAVAILABLE` (503), `NOT_CONFIGURED` (409, no faucet on this deployment).
+- **Shared ledger:** challenges, wallet cooldowns, daily budgets and claims live in Firestore (`APP_API_SUBMISSIONS_FIRESTORE_PROJECT` and `_DATABASE`, collections `coxFaucetChallenges`, `coxFaucetWallets`, `coxFaucetBudgets`, `coxFaucetClaims`). One transaction uses the challenge, starts the cooldown and counts the budgets, so two instances cannot both grant to one wallet.
+- **Signing:** the grant comes from `devnetFaucetInstructions` in `@cox/client/faucet`, is simulated, then signed by the `devnet-faucet` signer role (`COX_FAUCET_SIGNER_URL`, `COX_FAUCET_SIGNER_AUDIENCE`, `COX_FAUCET_ADDRESS`) with an expiry of 60 seconds. The signed bytes are saved before they are sent. If sending or confirming is unclear, the claim stays open until the chain shows the grant landed, failed or can no longer land; only then can the wallet claim again. Nothing checks wallets on a timer.
+- **Opening:** claims are refused unless `COX_FAUCET_ENABLED=true`, except for wallets in `COX_FAUCET_ALLOWLIST`. `COX_FAUCET_IP_KEY` (hex, from Secret Manager) hides visitor addresses in the ledger.
+
 ## Live state and history
 
 The source reads finalized program accounts through [the COX client](../../packages/cox-client/README.md). Staged position and request changes remain hidden until commitment. Vault reconciliation compares token balance with active + pending + payable + residual + committed fees; a surplus remains covered until a financial instruction records it as residual. Fees staged by an unfinished batch are not counted.
