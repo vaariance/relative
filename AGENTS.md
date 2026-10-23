@@ -1517,3 +1517,11 @@ another agent needs to know.
 - **Area:** `apps/web` (`epochs-view.tsx`, Epochs page).
 - **What:** At Godwin's request, the Epochs page follows Polymarket's Combos layout. Rounds in a left column (tabs on narrow screens), the selected round's coins in the middle grouped into "Ahead of $CRYPTO" and "Behind $CRYPTO" with a Back button each and a coin search, and a sticky entry slip on the right ("Pick 1 coin", stake, fee, enter) above the wallet's entries. On phones the slip is a bottom sheet once a coin is picked. Supersedes the carousel in Godwin's 2026-10-23 "Epochs page redesigned as a round carousel" entry. Checked at 1600px and phone width with a temporary fake live round, removed before commit; no real entry has been sent.
 - **Refs:** commit `cf9bfd8`.
+
+### 2026-10-23 · Godwin (Claude Code) · Web faucet minting removed; tUSDC waits for the faucet service
+
+- **Area:** `apps/web` (`src/app/faucet-actions.ts`, `faucet-panel.tsx`, `src/lib/config.ts`; `src/lib/faucet.ts` deleted).
+- **What:** Following Peter's 2026-10-23 faucet emails (mint authority stays with the admin; claims come from faucet wallet `EXdRi1ko…A9e1` through a `devnet-faucet` signer role that only Joel's Cloud Run API may call, after a signed ownership challenge), the web app no longer mints tUSDC. `claimTestTokens`, `TUSDC_FAUCET_SECRET_KEY` and the memo-based claim count are removed. The tUSDC card stays on the Faucet page with a disabled "tUSDC claims not open yet" button; the page opens on USDC; the 0.01 SOL requirement now applies only to the Circle USDC button. Supersedes the claim parts of Godwin's 2026-10-23 "Faucet page grants 20 tUSDC" and "Faucet requires SOL before collateral" entries.
+- **Rules for agents:** The web app must hold no faucet or mint key. tUSDC claims go through Joel's API once Peter verifies the faucet signer.
+- **Open:** Joel: the typed faucet API contract (challenge, eligibility, claim, status). Godwin: Get test funds UI against it, and a tUSDC option on Buy and Swap.
+- **Refs:** commit `ad94e33`.
