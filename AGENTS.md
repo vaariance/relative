@@ -1330,3 +1330,19 @@ another agent needs to know.
   - **Verified:** both checked Peter's real notification and preview files, served publications 0 to 4, previews 1 second old, vault covered and feed `healthy`. On each, `status.chain.readAt` stayed unchanged over 60 seconds, so no chain reads happened while idle. 86 app API tests pass.
 - **Rules for agents:** Do not add timers, polls, websockets or per-instance subscriptions that call Solana or Alchemy; react to the change feed instead. `COX_POLL_MS` applies only when `COX_CHAIN_CHANGES_GCS` is unset.
 - **Refs:** `apps/app-api/README.md` (Reading the chain only after a change), commits `9fc0832`..`7d297d1`.
+
+### 2026-10-23 · Joel (Claude Code) · Preview history route and class table deployed
+
+- **Area:** `apps/app-api`, `packages/app-api`; Cloud Run `cox-app-api-live`, dev VM.
+- **What:**
+  - **Preview history:** at Godwin's request (2026-10-23 email), `GET /v1/preview/history?from=&to=&step=` returns `{ assets, step, from, to, points }`. Each point is `{ end, timestamp, benchmark, prices, references }`: the last preview record at or before the end of its step. Empty steps are left out. `step` is 1, 60, 300 or 3600 seconds, with at most 1,440 steps per response; one-second steps cover the last hour, longer steps seven days.
+  - **History store:** each process keeps it in memory from the previews it reads, and fills seven days from the bucket once at start in the background (about 66 seconds from a laptop on real data). It makes no Solana calls.
+  - **Preview feed:** it now reads every new preview file each tick, not just the newest.
+  - **Caching:** settled ranges are sent with `Cache-Control: public, max-age=86400, immutable` and without the `status` block. Peter's gateway at `api.getrelative.trade` currently rewrites every response to `no-store` (`deploy/domains/gateway.mjs` lines 28 to 31).
+  - **Dynamic inclusion, first part:** classes now go through the methodology's class table, with `CRYPTO` at a fixed class instead of last, for publications, references, `/v1/assets`, previews and portfolio estimates. Epoch tickers come from an injectable map. Reading Peter's `readDynamicManifest`, publication encoding v4 and `committedPosition` waits for his SDK commit.
+  - **Deployed:** Cloud Run `cox-app-api-live-00014-zjw` (image `cox-app-api:1723a85`) and the VM at `1723a85`.
+  - **Verified:** publications 0 to 5 and the change feed `healthy`. History serves 641 one-minute points for the last day, 1,353 one-second points and 9 hourly points. 95 app API tests pass.
+- **Rules for agents:**
+  - Do not compute or average history points; a missing step stays a gap.
+  - The first VM deploy attempt lost its SSH connection after `setup.sh` had replaced `/opt/eox/app` but before `pnpm install`. Running services kept working from memory, but any restart would have failed. If a VM deploy drops, check `/opt/eox/app/node_modules` and rerun `deploy/dev/deploy.sh` at once.
+- **Refs:** `apps/app-api/README.md` (Live previews), commits `4abc5f0`..`1723a85`.
