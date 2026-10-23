@@ -150,7 +150,15 @@ The publisher evaluates the methodology every second but writes to the chain onl
 | Route | Data |
 |---|---|
 | `GET /v1/preview` | `{ record, ageSeconds, stale }`; `stale` after 10 seconds without a newer record. 404 `NO_PREVIEW` before the first record, 409 `NOT_CONFIGURED` without `COX_PREVIEW_GCS` |
+| `GET /v1/preview/history?from=&to=&step=` | Points from the per-second previews; see below |
 | `GET /v1/preview/portfolio?owner=` | Each position's `estimatedValue` in collateral base units: its units times the projected class backing divided by the projected class units, rounded down |
+
+`GET /v1/preview/history` returns `{ assets, step, from, to, points }`, where each point is `{ end, timestamp, benchmark, prices, references }` with values in roster order at the record's scales. A point is the last record at or before the end of its step, and a step without a record is left out, never filled. `step` is 1, 60, 300 or 3600 seconds, with at most 1,440 steps per response; one-second steps cover the last hour and longer steps the last seven days.
+
+- **Where the history comes from:** each process keeps its own history in memory, every second for an hour and the last record of each minute for seven days, from the records it already reads.
+- **After a restart:** it fills the past seven days from the bucket once, in the background.
+- **Caching:** a range that ended more than five seconds ago, once that fill is done, is sent with `Cache-Control: public, max-age=86400, immutable` and without the live `status` block. Other ranges are `no-store`.
+- **Solana:** history makes no Solana calls.
 
 Every preview is an estimate. The API computes no reference or redistribution: benchmark, references and `basicProjection` come from the publisher. A wallet estimate is given only when `basicProjection` starts from the pool's latest publication; otherwise `unavailable` is `no-projection` or `basis-mismatch` and every value is `null`. A later publication does not confirm a preview; read the publication itself for committed values.
 
