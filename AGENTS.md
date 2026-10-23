@@ -1643,3 +1643,12 @@ another agent needs to know.
 - **Open:** Scoped source and separate log commits require approval before building and redeploying the publisher. Live hourly verification remains required; this source is not deployed. Dynamic inclusion activation remains separately gated.
 - **Refs:** `apps/cox-publisher/native/src/chain.rs`, `apps/cox-publisher/README.md`; offline native tests pass.
 - **Verification:** All 176 native tests pass, including UTC alignment from a nonaligned origin, idle wakeup, missed-hour coalescing, pause/stage preservation and exact Epoch closing priority when an hourly refresh is also due. Final diff whitespace check passes.
+
+### 2026-10-23 · Peter (Codex) · Confirmed clock bounds hourly publication prices
+
+- **Area:** Native chain reader, price-selection guard and focused publisher regressions.
+- **What:** Approved hourly source/log commits `c874eeb`/`cf2ecf8` were pushed and built, but live unsigned simulation rejected the latest Pyth observation with `TooEarly` (6011). Rolled back to healthy `90d4def` before any signing or broadcast. A read-only reproduction used observation/wall timestamp 1792788568 while confirmed Solana Clock was 1792788567; the contract rejection was correct. Prepared a price-selection ceiling from the confirmed Clock sysvar, appended to an existing account batch with no additional RPC call or loop.
+- **Rules for agents:** Keep the five-second wall-time price limit and final signing/nonce/fee guards. Use actual archived signed observations at or before the confirmed clock; never restamp a price. Exact Epoch closing waits for the clock and retains its predefined price timestamp. Missing, malformed, future or stale clock data fails closed. Clock bytes stay outside the financial change digest, avoiding price-only cache invalidations. The failed hourly build is not the active release and is not verified-success evidence.
+- **Open:** Corrected committed build, guarded rollout and real publication/idle verification remain required under Peter's approved hourly rollout. No contract, signer permission, API, UI or inclusion activation changed.
+- **Refs:** `apps/cox-publisher/native/src/chain.rs`, `worker.rs`, `executor.rs`; private `.cox/hourly-vm-input-simulation.txt`, `.cox/hourly-rollout-failure.json`.
+- **Verification:** Final native suite passes all 182 tests, including malformed/stale/future Clock, ceiling violations, unchanged wall-time freshness and exact closing wait. Diff whitespace check passes.
