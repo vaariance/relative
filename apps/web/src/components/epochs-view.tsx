@@ -522,7 +522,7 @@ function EntryCard({ lot, epoch, decimals, onSent }: { lot: EpochLot; epoch: Epo
         <span className={`rounded-pill border px-2 py-0.5 text-[11px] ${tag}`}>{view.label}</span>
         <span className="num ml-auto text-xs text-muted">Entry #{lot.nonce}</span>
       </div>
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-4">
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
         <div><dt className="text-muted">Gross / net stake</dt><dd className="num">{formatAmount(gross, 2)} / {formatAmount(net, 2)} {COLLATERAL.symbol}</dd></div>
         <div>
           <dt className="text-muted">Performance basis</dt>
@@ -540,7 +540,7 @@ function EntryCard({ lot, epoch, decimals, onSent }: { lot: EpochLot; epoch: Epo
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" onClick={() => setOpen(!open)} className="cursor-pointer text-xs text-accent underline-offset-4 hover:underline">{open ? "Hide basket" : "View basket"}</button>
         {owed && epoch && (
-          <span className="ml-auto w-full sm:w-56">
+          <span className="w-full">
             <SendButton
               intent={{ operation: "epoch-withdraw", opensAt: epoch.opensAt, nonce: lot.nonce }}
               label={`${view.refund ? "Withdraw refund" : "Withdraw payout"} · ${formatAmount(claimable ?? 0, 4)}`}
@@ -567,32 +567,41 @@ function MyEntries({ epochs, lots, decimals, onSent }: { epochs: Epoch[]; lots: 
   const [filter, setFilter] = useState<LotGroup | "all">("all");
   const byOpen = new Map(epochs.map((epoch) => [epoch.opensAt, epoch]));
   const views = lots.map((lot) => ({ lot, epoch: byOpen.get(lot.epochOpensAt) ?? null })).map((item) => ({ ...item, view: lotView(item.lot, item.epoch) }));
-  const counts = Object.fromEntries(GROUPS.map((group) => [group.id, views.filter((item) => item.view.group === group.id).length])) as Record<LotGroup, number>;
   const shown = views.filter((item) => filter === "all" || item.view.group === filter);
   const grouped = [...new Set(shown.map((item) => item.lot.epochOpensAt))].sort((a, b) => b - a);
-  const tab = (on: boolean) => `num h-8 cursor-pointer rounded-pill px-3 text-xs transition-colors duration-150 ${on ? "bg-surface-2 text-ink" : "text-muted hover:text-ink"}`;
+  const tabs: { id: LotGroup | "all"; label: string }[] = [{ id: "all", label: "All" }, ...GROUPS];
 
   return (
-    <section className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold">My entries</h2>
-        <div role="tablist" aria-label="Filter entries" className="flex flex-wrap gap-1">
-          <button type="button" role="tab" aria-selected={filter === "all"} onClick={() => setFilter("all")} className={tab(filter === "all")}>All {lots.length}</button>
-          {GROUPS.map((group) => (
-            <button key={group.id} type="button" role="tab" aria-selected={filter === group.id} onClick={() => setFilter(group.id)} className={tab(filter === group.id)}>{group.label} {counts[group.id]}</button>
-          ))}
-        </div>
+    <section className={`${panel} flex min-w-0 flex-col`}>
+      <h2 className="px-4 pt-4 text-sm font-semibold">My entries</h2>
+      <div role="tablist" aria-label="Filter entries" className="flex gap-1 overflow-x-auto px-3 pb-3 pt-3 [mask-image:linear-gradient(to_right,black_85%,transparent)] [scrollbar-width:none]">
+        {tabs.map((item) => {
+          const on = filter === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              aria-selected={on}
+              onClick={() => setFilter(item.id)}
+              className={`h-9 shrink-0 cursor-pointer rounded-xl px-3.5 text-sm font-medium transition-colors duration-150 ${on ? "bg-surface-2 text-ink" : "text-muted hover:text-ink"}`}
+            >
+              {item.label}
+            </button>
+          );
+        })}
       </div>
+      <div className="border-t border-dashed border-line" />
       {!owner ? (
-        <p className={`${panel} p-6 text-sm text-muted`}>Connect a wallet to see your entries.</p>
+        <p className="p-4 text-sm text-muted">Connect a wallet to see your entries.</p>
       ) : shown.length === 0 ? (
-        <p className={`${panel} p-6 text-sm text-muted`}>{lots.length === 0 ? "No entries yet. Create one while an Epoch is open." : "No entries in this group."}</p>
+        <p className="p-4 text-sm text-muted">{lots.length === 0 ? "No entries yet. Create one while an Epoch is open." : "No entries in this group."}</p>
       ) : (
         grouped.map((opensAt) => {
           const epoch = byOpen.get(opensAt) ?? null;
           return (
-            <div key={opensAt} className={panel}>
-              <div className="num border-b border-line px-4 py-2.5 text-xs text-muted">{epoch ? windowText(epoch) : `Epoch ${utcTime(opensAt)} UTC`}</div>
+            <div key={opensAt}>
+              <div className="num px-4 pt-3 text-[11px] uppercase tracking-wider text-muted">{epoch ? windowText(epoch) : `Epoch ${utcTime(opensAt)} UTC`}</div>
               <ul className="divide-y divide-line">
                 {shown.filter((item) => item.lot.epochOpensAt === opensAt).map((item) => (
                   <EntryCard key={item.lot.address} lot={item.lot} epoch={item.epoch} decimals={decimals} onSent={onSent} />
@@ -672,15 +681,14 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
           <Comparison epoch={epoch} coins={coins} now={now} backed={backed} canPick={open} onPick={(id) => setBacked(id)} />
           <PayoutExplainer />
         </div>
-        <div className="flex flex-col gap-6 lg:sticky lg:top-6 lg:self-start">
+        <div className="flex min-w-0 flex-col gap-6">
           <div className="hidden lg:block">
             <EntryPanel {...entryProps} />
           </div>
           <PotCard epoch={epoch} now={now} decimals={decimals} />
+          <MyEntries epochs={epochs} lots={lots} decimals={decimals} onSent={() => void loadLots()} />
         </div>
       </div>
-
-      <MyEntries epochs={epochs} lots={lots} decimals={decimals} onSent={() => void loadLots()} />
 
       {open && !sheet && (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-bg/95 p-3 backdrop-blur lg:hidden">
