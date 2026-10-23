@@ -271,7 +271,7 @@ function PotCard({ epoch, now, decimals }: { epoch: Epoch; now: number; decimals
   const entries = epoch.nextNonce !== null ? Number(epoch.nextNonce) : (epoch.lots?.executed ?? null);
 
   return (
-    <section className={`${panel} flex flex-col gap-4 p-4`}>
+    <section className="flex flex-col gap-4 border-t border-dashed border-line pt-5">
       <dl className="grid grid-cols-3 gap-2">
         <div>
           <dt className="text-[11px] text-muted">{settled ? "Settlement pot" : "Net stake pot"}</dt>
