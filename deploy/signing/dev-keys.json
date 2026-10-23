@@ -91,7 +91,7 @@
       "publicKey": "EXdRi1koWKTW5cdTR8SdUFVWz7vX7h9dyQJtceswA9e1",
       "address": "EXdRi1koWKTW5cdTR8SdUFVWz7vX7h9dyQJtceswA9e1",
       "keyVersion": "projects/colosseum-eox/locations/us-central1/keyRings/eox-signing-dev/cryptoKeys/devnet-faucet/cryptoKeyVersions/1",
-      "state": "pending",
+      "state": "active",
       "validFrom": 1792757849,
       "validUntil": null
     }
