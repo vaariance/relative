@@ -404,6 +404,13 @@ export type CoxErrorCode =
   | "TRADING_CLOSED"
   | "UNKNOWN_EPOCH"
   | "NOT_CONFIGURED"
+  | "FAUCET_DISABLED"
+  | "FAUCET_COOLDOWN"
+  | "FAUCET_LIMITED"
+  | "FAUCET_EMPTY"
+  | "FAUCET_BUSY"
+  | "FAUCET_UNAVAILABLE"
+  | "CHALLENGE_INVALID"
   | "INVALID_REQUEST"
   | "NOT_FOUND"
   | "METHOD_NOT_ALLOWED"
@@ -649,4 +656,41 @@ export function systemState(missedCutoffs: number, paused: boolean, incident: bo
   if (incident) return "incident";
   if (missedCutoffs >= DELAYED_AFTER_MISSED_CUTOFFS) return "delayed";
   return "fresh";
+}
+
+export type FaucetClaimState = "reserved" | "signed" | "submitted" | "confirmed" | "failed";
+
+export interface FaucetChallenge {
+  challengeId: string;
+  owner: string;
+  message: string;
+  expiresAt: UnixSeconds;
+}
+
+export interface FaucetClaimInput {
+  owner: string;
+  challengeId: string;
+  signature: string;
+}
+
+export interface FaucetClaim {
+  claimId: string;
+  owner: string;
+  state: FaucetClaimState;
+  tokenAmount: BaseUnits;
+  solLamports: string;
+  signature: string | null;
+  createdAt: UnixSeconds;
+  confirmedAt: UnixSeconds | null;
+  failure: string | null;
+}
+
+export interface FaucetStatus {
+  enabled: boolean;
+  owner: string;
+  token: { mint: string; symbol: string; decimals: number; amount: BaseUnits };
+  sol: { amount: string; whenBelow: string };
+  cooldownSeconds: number;
+  nextClaimAt: UnixSeconds | null;
+  claim: FaucetClaim | null;
 }

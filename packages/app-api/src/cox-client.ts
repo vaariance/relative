@@ -20,6 +20,10 @@ import type {
   EpochLot,
   EpochOverview,
   EpochWithdrawInput,
+  FaucetChallenge,
+  FaucetClaim,
+  FaucetClaimInput,
+  FaucetStatus,
   Portfolio,
   Publication,
   RedeemInput,
@@ -135,6 +139,12 @@ export function createCoxApiClient(options: CoxApiClientOptions) {
       if (!OWNER_PATTERN.test(owner)) throw new CoxApiError("INVALID_REQUEST", "invalid owner", 0);
       return get<PreviewPortfolio>(`preview/portfolio?owner=${owner}`);
     },
+    faucetStatus: (owner: string) => {
+      if (!OWNER_PATTERN.test(owner)) throw new CoxApiError("INVALID_REQUEST", "invalid owner", 0);
+      return get<FaucetStatus>(`faucet/status?owner=${owner}`);
+    },
+    faucetChallenge: (owner: string) => post<FaucetChallenge>("faucet/challenge", { owner }),
+    faucetClaim: (input: FaucetClaimInput) => post<FaucetClaim>("faucet/claim", input),
     assets: () => get<CoxAsset[]>("assets"),
     crypto: () => get<CryptoComposition>("crypto"),
     latestPublication: () => get<Publication>("publications/latest"),
