@@ -1314,3 +1314,19 @@ another agent needs to know.
 - **Rules for agents:** Do not restore exchange fetching or the obsolete monitor as a fallback for native Pyth. Historical evidence access remains supported; preserve append-only data. This supersedes the keep-price-feeds decision in the earlier RPC proxy retirement entry.
 - **Open:** Scoped source/log commits await approval. No replacement polling monitor is introduced.
 - **Refs:** `deploy/dev/retire-exchange-stack.sh`, `deploy/dev/README.md`, `apps/evidence-api/README.md`; frozen offline pnpm 10.34.7 lock validation, shell syntax and evidence API/store TypeScript checks pass.
+
+### 2026-10-23 · Joel (Claude Code) · Live APIs read Solana only after a chain change
+
+- **Area:** `apps/app-api` (`src/cox/chain-changes.ts`, live source, stream, Epoch source), `deploy/dev`; Cloud Run `cox-app-api-live`, dev VM.
+- **What:** At Peter's request (2026-10-22, "Action required" and "Live: shared chain-change feed" emails), both live APIs stopped polling Solana every second.
+  - **Feed:** with `COX_CHAIN_CHANGES_GCS=gs://colosseum-cox-publication-archives-dev/pool-2/chain-changes/`, each API process lists Peter's `relative.chain-notification/v1` files about once a second (Cloud Storage, not Solana). It reads the chain once on start, on a higher or skipped revision, on a new generation, and when the feed turns healthy again.
+  - **Finality:** notifications are confirmed but the API reads finalized. After a change it reads again after 4, 8, 16 and 32 seconds until the finalized slot reaches the notified one.
+  - **Removed:** the one-second indexer loop and the 15-second wallet refresh on streams.
+  - **Caching:** wallet portfolios, Epoch accounts and Epoch lots are cached until the next change. One safety read runs every 20 minutes per process. Quotes, builds and submissions still read fresh.
+  - **Status:** `status.chain` gives `readAt`, `slot` and `feed` (`healthy`, `unhealthy` after 60 seconds without a heartbeat or when the publisher says so, or `polling` without the feed). An unhealthy feed never starts fast polling.
+  - **Previews:** a `chainChange` block in preview files is checked when present.
+  - **Monitor:** the API never used the exchange monitor; `status.monitor` stays `null`.
+  - **Deployed:** Cloud Run `cox-app-api-live-00013-qch` (image `cox-app-api:7d297d1`) and the VM at `7d297d1`.
+  - **Verified:** both checked Peter's real notification and preview files, served publications 0 to 4, previews 1 second old, vault covered and feed `healthy`. On each, `status.chain.readAt` stayed unchanged over 60 seconds, so no chain reads happened while idle. 86 app API tests pass.
+- **Rules for agents:** Do not add timers, polls, websockets or per-instance subscriptions that call Solana or Alchemy; react to the change feed instead. `COX_POLL_MS` applies only when `COX_CHAIN_CHANGES_GCS` is unset.
+- **Refs:** `apps/app-api/README.md` (Reading the chain only after a change), commits `9fc0832`..`7d297d1`.
