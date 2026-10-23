@@ -1652,3 +1652,11 @@ another agent needs to know.
 - **Open:** Corrected committed build, guarded rollout and real publication/idle verification remain required under Peter's approved hourly rollout. No contract, signer permission, API, UI or inclusion activation changed.
 - **Refs:** `apps/cox-publisher/native/src/chain.rs`, `worker.rs`, `executor.rs`; private `.cox/hourly-vm-input-simulation.txt`, `.cox/hourly-rollout-failure.json`.
 - **Verification:** Final native suite passes all 182 tests, including malformed/stale/future Clock, ceiling violations, unchanged wall-time freshness and exact closing wait. Diff whitespace check passes.
+
+### 2026-10-23 · Peter (Codex) · Hourly UTC publisher refresh verified live
+
+- **Area:** Native publisher rollout, existing README and pool 2 deployment record.
+- **What:** Deployed approved source `acd9f15`, Linux SHA-256 `06851d9a983c0beb1975d89d5f2b4d021d65dd66a75985e79071ae905d0fee79`, preserving configuration and runtime identity. Finalized Basic publication 10 uses the exact 21:00:00 UTC price cutoff and committed at 21:00:20 UTC. API indexed sequence 10 with custody and ledger both 5000431; units, fees, liabilities and request nonce are unchanged. Both services have zero restarts. All 182 native tests pass.
+- **Rules for agents:** Hourly scheduling is live, not a subsecond commitment guarantee. The shared publisher returns to idle: local physical HTTP counters stayed at 106 from 21:00:47 through 21:01:18 UTC. The cycle logged three rejected sendTransaction calls before successful commitment. Keep the 20-minute safety reconciliation and confirmed clock guard; no contract, signer permission, API or UI rollout accompanied this change. Inclusion remains unactivated.
+- **Correction:** Supersedes the no-signing/no-broadcast statement in the earlier 2026-10-23 "Confirmed clock bounds hourly publication prices" entry: later journal review showed sendTransaction attempts and finalized publication 9 at 20:41:21 UTC before this corrected rollout. Do not describe the earlier attempt as having no transaction side effects. Publication 10 independently verifies the corrected release.
+- **Refs:** `packages/cox/deploy/adaptive-pool-2-devnet.json` nativeRuntime.hourlyRefreshRollout; `apps/cox-publisher/README.md`.
