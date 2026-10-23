@@ -1,8 +1,8 @@
 "use client";
 
-import type { PreviewPortfolio } from "@eox/app-api";
+import type { PreviewHistory, PreviewPortfolio } from "@eox/app-api";
 import { type ReactNode, createContext, useContext, useEffect, useMemo, useState } from "react";
-import { type Estimate, type Freshness, type SeriesKind, type WalletEstimate, ageText, appendHistory, estimateOf, freshnessOf, perMinute, sampled, seriesOf, walletEstimateOf } from "@/lib/estimate";
+import { type Estimate, type Freshness, type SeriesKind, type WalletEstimate, HISTORY_LIMIT_SECONDS, HISTORY_SECONDS, ageText, appendHistory, estimateOf, freshnessOf, historyEstimates, historyStep, joinHistory, perMinute, sampled, seriesOf, trimHistory, walletEstimateOf } from "@/lib/estimate";
 import { direction, formatAmount, formatPrice } from "@/lib/format";
 import { CRYPTO_CLASS, type Point } from "@/lib/view";
 import { useAccount } from "./account";
@@ -11,6 +11,51 @@ import { Sparkline } from "./sparkline";
 import { Figure } from "./stat-card";
 
 const WALLET_MS = 5000;
+const RANGE_CACHE_MS = 5 * 60 * 1000;
+
+async function loadHistory(apiUrl: string, range: number, signal: AbortSignal): Promise<Estimate[]> {
+  const seconds = Math.min(range, HISTORY_LIMIT_SECONDS);
+  const step = historyStep(seconds);
+  const to = Math.floor(Date.now() / 1000);
+  const from = to - seconds;
+  const response = await fetch(`${apiUrl}/v1/preview/history?from=${from}&to=${to}&step=${step}`, { signal, cache: "no-store" });
+  if (!response.ok) throw new Error(`history ${response.status}`);
+  const payload = (await response.json().catch(() => null)) as { data?: PreviewHistory } | null;
+  return payload?.data ? historyEstimates(payload.data) : [];
+}
+
+const ranged = new Map<string, { at: number; estimates: Promise<Estimate[]> }>();
+
+function rangeHistory(apiUrl: string, seconds: number): Promise<Estimate[]> {
+  const key = `${apiUrl}|${seconds}`;
+  const held = ranged.get(key);
+  if (held && Date.now() - held.at < RANGE_CACHE_MS) return held.estimates;
+  const estimates = loadHistory(apiUrl, seconds, new AbortController().signal).catch(() => {
+    ranged.delete(key);
+    return [];
+  });
+  ranged.set(key, { at: Date.now(), estimates });
+  return estimates;
+}
+
+export function useRangeHistory(range: number, enabled: boolean): Estimate[] {
+  const { live, apiUrl } = useAccount();
+  const seconds = Math.min(range, HISTORY_LIMIT_SECONDS);
+  const wanted = enabled && live && seconds > HISTORY_SECONDS;
+  const [held, setHeld] = useState<{ key: string; estimates: Estimate[] } | null>(null);
+  const key = `${apiUrl}|${seconds}`;
+  useEffect(() => {
+    if (!wanted) return;
+    let current = true;
+    void rangeHistory(apiUrl, seconds).then((estimates) => {
+      if (current) setHeld({ key, estimates });
+    });
+    return () => {
+      current = false;
+    };
+  }, [wanted, apiUrl, seconds, key]);
+  return wanted && held?.key === key ? held.estimates : [];
+}
 
 interface Live {
   estimate: Estimate | null;
@@ -38,6 +83,17 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const now = useNow();
   const [held, setHeld] = useState<{ owner: string; portfolio: PreviewPortfolio | null } | null>(null);
   const [history, setHistory] = useState<Estimate[]>([]);
+
+  useEffect(() => {
+    if (!live) return;
+    const controller = new AbortController();
+    void loadHistory(apiUrl, HISTORY_SECONDS, controller.signal)
+      .then((older) => {
+        if (older.length > 0) setHistory((current) => trimHistory(joinHistory(older, current)));
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [live, apiUrl]);
 
   useEffect(() => {
     if (!preview) return;

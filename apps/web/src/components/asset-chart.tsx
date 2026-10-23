@@ -4,9 +4,9 @@ import { CandlestickChart, LineChart as LineIcon } from "lucide-react";
 import { useState } from "react";
 import type { Point } from "@/lib/view";
 import { barsOf } from "@/lib/bars";
-import { type SeriesKind, perMinute, seriesOf, spanOf } from "@/lib/estimate";
+import { type SeriesKind, joinHistory, perMinute, preferEstimates, seriesOf } from "@/lib/estimate";
 import { useAccount } from "./account";
-import { useLive } from "./live";
+import { useLive, useRangeHistory } from "./live";
 import { type ChartLine, type ChartMark, TradeChart } from "./trade-chart";
 
 export interface Series {
@@ -65,6 +65,13 @@ function span(seconds: number): string {
   return `${Math.max(1, Math.round(seconds / 60))} minutes`;
 }
 
+function since(cutoff: number, end: number): string {
+  const date = new Date(cutoff * 1000);
+  const time = `${date.toISOString().slice(11, 16)} UTC`;
+  if (new Date(end * 1000).toISOString().slice(0, 10) === date.toISOString().slice(0, 10)) return time;
+  return `${date.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })}, ${time}`;
+}
+
 export function AssetChart({ series, note, height }: { series: Series[]; note?: string; height?: number }) {
   const [selected, setSelected] = useState(series[0].id);
   const [range, setRange] = useState(240);
@@ -74,14 +81,15 @@ export function AssetChart({ series, note, height }: { series: Series[]; note?: 
   const { sequence } = useAccount();
   const current = series.find((item) => item.id === selected) ?? series[0];
   const preset = ranges.find((item) => item.minutes === range) ?? ranges[1];
-  const raw = current.live ? seriesOf(history, current.live.kind, current.live.id, sequence) : [];
-  const scaled = current.live?.scale === undefined ? raw : raw.map((point) => ({ cutoff: point.cutoff, value: point.value * (current.live?.scale ?? 1) }));
   const realtime = current.live?.realtime === true;
+  const older = useRangeHistory(range * 60, current.live !== undefined && !realtime);
+  const raw = current.live ? seriesOf(joinHistory(older, history), current.live.kind, current.live.id, sequence) : [];
+  const scaled = current.live?.scale === undefined ? raw : raw.map((point) => ({ cutoff: point.cutoff, value: point.value * (current.live?.scale ?? 1) }));
   const estimated = realtime ? scaled : perMinute(scaled);
   const end = Math.max(current.points[current.points.length - 1]?.cutoff ?? 0, estimated[estimated.length - 1]?.cutoff ?? 0);
   const settled = current.points.filter((point) => point.cutoff > end - range * 60);
   const recent = estimated.filter((point) => point.cutoff > end - range * 60);
-  const live = recent.length > 1 && spanOf(recent) >= spanOf(settled);
+  const live = preferEstimates(recent, settled);
   const shown = live ? recent : settled;
   const settledMarks = live ? settled.filter((point) => point.cutoff >= recent[0].cutoff).map((point) => ({ cutoff: point.cutoff, side: "settled" as const, label: `Settled on chain ${new Date(point.cutoff * 1000).toISOString().slice(11, 19)} UTC` })) : [];
   const choices = live && realtime ? [...seconds, ...intervals] : intervals;
@@ -137,8 +145,8 @@ export function AssetChart({ series, note, height }: { series: Series[]; note?: 
       </div>
       {(note || short || live) && (
         <p className="border-t border-line px-4 py-2 text-xs text-muted">
-          {live && `Live estimates since ${new Date(recent[0].cutoff * 1000).toISOString().slice(11, 16)} UTC, ${realtime ? "updated every second" : "one point a minute"} while this page is open. ${settledMarks.length > 0 ? "Dots are on-chain settlements. " : ""}`}
-          {short && !live && (held >= 23 * 3600 ? "Showing the last 24 hours, the most this page loads. " : `Showing ${span(held)} of history so far. `)}
+          {live && `Estimates from ${since(recent[0].cutoff, end)}, ${realtime ? "updated every second" : "updated once a minute"}. ${settledMarks.length > 0 ? "Dots are on-chain settlements. " : ""}`}
+          {short && (live ? `Estimates cover ${span(held)} of this range. ` : held >= 23 * 3600 ? "Showing the last 24 hours, the most this page loads. " : `Showing ${span(held)} of history so far. `)}
           {note}
         </p>
       )}
