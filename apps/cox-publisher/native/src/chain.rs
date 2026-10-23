@@ -764,6 +764,19 @@ impl ChainState {
                         .saturating_sub(1),
                 });
             } else {
+                let refresh_ms = self
+                    .basic
+                    .pool
+                    .origin
+                    .checked_add(self.basic.pool.last_batch)
+                    .and_then(|timestamp| (timestamp / 3_600).checked_add(1))
+                    .and_then(|hour| hour.checked_mul(3_600_000))
+                    .ok_or(Error::Overflow)?;
+                work.push(Work::Entry {
+                    id: "basic:hourly-refresh".into(),
+                    pool: WorkPool::Basic,
+                    eligible_after_ms: refresh_ms - 1,
+                });
                 if self.basic.pool.fee_pending {
                     let cutoff_ms = self
                         .basic
@@ -1415,7 +1428,7 @@ pub(crate) mod tests {
         s.basic.requests.push(request);
         let work = s.work(14_410_000).unwrap();
         assert!(
-            matches!(&work[0],Work::Entry{eligible_after_ms,..} if *eligible_after_ms==14_410_000)
+            work.iter().any(|item| matches!(item,Work::Entry{id,eligible_after_ms,..} if id == "basic:0" && *eligible_after_ms==14_410_000))
         );
         assert_eq!(
             crate::scheduler::decide(
@@ -1431,6 +1444,48 @@ pub(crate) mod tests {
         );
     }
     #[test]
+    fn hourly_refresh_wakes_on_utc_boundary_without_orders_and_returns_to_idle() {
+        let mut state = state();
+        state.basic.pool.origin = 14_421;
+        state.basic.pool.last_batch = 122;
+        let boundary = 18_000_000;
+        let checkpoint = crate::scheduler::Checkpoint::default();
+        let work = state.work(boundary - 1).unwrap();
+        assert_eq!(work, vec![Work::Entry {
+            id: "basic:hourly-refresh".into(),
+            pool: WorkPool::Basic,
+            eligible_after_ms: boundary - 1,
+        }]);
+        assert_eq!(crate::scheduler::decide(boundary - 1, &checkpoint, &work, 4).unwrap(),
+            crate::scheduler::Decision::Idle { wake_ms: Some(boundary) });
+        assert!(matches!(crate::scheduler::decide(boundary, &checkpoint, &work, 4).unwrap(),
+            crate::scheduler::Decision::Publish { closing_ms: None, .. }));
+        state.basic.pool.last_batch = 18_002 - state.basic.pool.origin;
+        let work = state.work(boundary + 3_000).unwrap();
+        assert_eq!(crate::scheduler::decide(boundary + 3_000, &checkpoint, &work, 4).unwrap(),
+            crate::scheduler::Decision::Idle { wake_ms: Some(21_600_000) });
+    }
+
+    #[test]
+    fn hourly_refresh_coalesces_missed_hours_and_preserves_pause_and_stage() {
+        let mut state = state();
+        let now = 36_000_000;
+        assert!(matches!(crate::scheduler::decide(now, &crate::scheduler::Checkpoint::default(), &state.work(now).unwrap(), 4).unwrap(),
+            crate::scheduler::Decision::Publish { closing_ms: None, .. }));
+        state.basic.pool.last_batch = 36_001 - state.basic.pool.origin;
+        assert_eq!(crate::scheduler::decide(now + 2_000, &crate::scheduler::Checkpoint::default(), &state.work(now + 2_000).unwrap(), 4).unwrap(),
+            crate::scheduler::Decision::Idle { wake_ms: Some(39_600_000) });
+        state.basic.registry.paused = true;
+        assert!(state.work(now).unwrap().is_empty());
+        state.basic.registry.paused = false;
+        state.basic.batch = Some(zero());
+        assert!(matches!(state.work(now).unwrap().as_slice(), [Work::Maintenance { .. }]));
+        state.basic.batch = None;
+        state.basic.pool.origin = u64::MAX;
+        assert_eq!(state.work(now), Err(Error::Overflow));
+    }
+
+    #[test]
     fn pending_fee_activation_wakes_after_bootstrap_and_stops_after_commit() {
         let mut s = state();
         s.basic.pool.initialized = false;
@@ -1442,10 +1497,7 @@ pub(crate) mod tests {
         assert!(matches!(&bootstrap[0], Work::Entry {id, ..} if id == "basic:bootstrap"));
         s.basic.pool.initialized = true;
         let future = s.work(cutoff_ms - 1).unwrap();
-        assert_eq!(future.len(), 1);
-        assert!(
-            matches!(&future[0], Work::Entry { eligible_after_ms, .. } if *eligible_after_ms == cutoff_ms - 1)
-        );
+        assert!(future.iter().any(|item| matches!(item, Work::Entry { id, eligible_after_ms, .. } if id == "basic:fee-activation" && *eligible_after_ms == cutoff_ms - 1)));
         assert_eq!(
             crate::scheduler::decide(
                 cutoff_ms - 1,
@@ -1459,15 +1511,12 @@ pub(crate) mod tests {
             }
         );
         let due = s.work(cutoff_ms).unwrap();
-        assert_eq!(due.len(), 1);
-        assert!(
-            matches!(&due[0], Work::Entry {id, pool: WorkPool::Basic, eligible_after_ms} if id == "basic:fee-activation" && *eligible_after_ms == cutoff_ms - 1)
-        );
+        assert!(due.iter().any(|item| matches!(item, Work::Entry {id, pool: WorkPool::Basic, eligible_after_ms} if id == "basic:fee-activation" && *eligible_after_ms == cutoff_ms - 1)));
         s.basic.pool.fee_pending = false;
         s.basic.pool.fee_version = 1;
         s.basic.pool.fee_bps = 2;
         s.basic.pool.fee_cap = 200_000;
-        assert!(s.work(cutoff_ms + 1_000).unwrap().is_empty());
+        assert!(!s.work(cutoff_ms + 1_000).unwrap().iter().any(|item| matches!(item, Work::Entry { id, .. } if id == "basic:fee-activation")));
     }
     #[test]
     fn pending_fee_activation_respects_pause_accepted_stage_and_checked_cutoff() {
@@ -1567,6 +1616,31 @@ pub(crate) mod tests {
                 ..
             }
         )));
+        let entry = cox_epoch::OperatorSnapshot {
+            id: [1; 32],
+            methodology: [1; 32],
+            sequence: 1,
+            oracle_timestamp: 14_402,
+            benchmark: 1_000_000,
+            prices: (0..30).map(|asset_id| cox_epoch::Price {
+                asset_id,
+                feed_id: [asset_id as u8 + 1; 32],
+                value: 1_000_000,
+            }).collect(),
+        };
+        let epoch = &mut s.epochs[0];
+        epoch.epoch.state.as_mut().unwrap().execute(
+            [7; 32], epoch.lots[0].state.as_mut().unwrap(), &entry, 14_402, 1_000_000,
+        ).unwrap();
+        assert!(matches!(
+            crate::scheduler::decide(
+                28_800_000,
+                &crate::scheduler::Checkpoint::default(),
+                &s.work(28_800_000).unwrap(),
+                4,
+            ).unwrap(),
+            crate::scheduler::Decision::Publish { closing_ms: Some(28_800_000), .. }
+        ));
     }
     #[test]
     fn epoch_scoring_and_allocation_follow_persisted_phase() {
