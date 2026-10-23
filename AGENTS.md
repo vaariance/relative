@@ -1511,3 +1511,9 @@ another agent needs to know.
 - **Area:** `apps/web` (`epochs-view.tsx`, Epochs page).
 - **What:** At Godwin's request, the Epochs page follows PancakeSwap Prediction's layout. Rounds are large swipeable cards centred on the live round, the live card has a countdown ring, pot, entries and Enter round, which turns the card into the entry form. Leaders show as tiles (top 10, toggle for all 30), and the rules sit behind a How it works button. Your entries appear only when the wallet has any. The server passes its clock to the page to avoid a hydration mismatch in the countdown. Supersedes the layout in Godwin's 2026-10-23 "Epochs page in the web app" entry. The live card and entry form were checked with a temporary fake live round (removed before commit); no real entry has been sent.
 - **Refs:** commit `2ff8189`.
+
+### 2026-10-23 · Godwin (Claude Code) · Epochs page in a three-column market layout
+
+- **Area:** `apps/web` (`epochs-view.tsx`, Epochs page).
+- **What:** At Godwin's request, the Epochs page follows Polymarket's Combos layout. Rounds in a left column (tabs on narrow screens), the selected round's coins in the middle grouped into "Ahead of $CRYPTO" and "Behind $CRYPTO" with a Back button each and a coin search, and a sticky entry slip on the right ("Pick 1 coin", stake, fee, enter) above the wallet's entries. On phones the slip is a bottom sheet once a coin is picked. Supersedes the carousel in Godwin's 2026-10-23 "Epochs page redesigned as a round carousel" entry. Checked at 1600px and phone width with a temporary fake live round, removed before commit; no real entry has been sent.
+- **Refs:** commit `cf9bfd8`.
