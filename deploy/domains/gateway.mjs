@@ -19,6 +19,8 @@ export default {
     headers.delete('x-forwarded-for');
     const client = request.headers.get('cf-connecting-ip');
     if (client) headers.set('x-forwarded-for', client);
+    headers.delete('x-relative-gateway');
+    if (env.GATEWAY_SECRET && binding !== 'SIGNER_ORIGIN') headers.set('x-relative-gateway', env.GATEWAY_SECRET);
     try {
       const upstream = await fetch(target, {
         method: request.method,
