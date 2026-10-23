@@ -131,27 +131,38 @@ picks one coin and stakes USDC while a round is live; at the close, coins that
 rose against $CRYPTO share the pot by their share of the total gains, weighted
 by stake. If no coin rose, every stake is returned in full.
 
-- **Layout:** three columns on wide screens, after Polymarket's Combos page.
-  Left, the rounds (Live, Next, then past rounds) with their entry counts.
-  Middle, the selected round's header (stage, window, countdown, pot, entries),
-  a coin search, and the coins grouped into "Ahead of $CRYPTO" and "Behind
-  $CRYPTO", each row showing its move, its share of the gains and a Back
-  button. Right, a sticky entry slip ("Pick 1 coin") and the wallet's entries.
-  On narrower screens the rounds become a row of tabs, and the slip slides up
-  from the bottom once a coin is picked.
-- **Share of gains:** what an entry on that coin would score if the round
-  ended now. Opening values come from `/v1/preview/history` at the open, live
-  values from the previews, and a settled round's from its closing references
-  (base 1, so multiplied by 100 to compare with the previews).
-- **Entry:** coin and stake in the slip; the fee is 2 bps capped at
-  0.20 USDC. Built with `POST /v1/transactions/epoch-entry`, sending all 30
-  tickers as the basket.
-- **Your entries:** every round's entries for the wallet, read every 20
-  seconds, with score, status and a Collect button
-  (`POST /v1/transactions/epoch-withdraw`).
-- **How it works:** the question-mark button opens the three rules.
-- **Clock:** the server passes its time to the page so the first render
-  matches, then the page counts each second.
+The layout follows Peter's Epoch design brief (2026-10-23):
+
+- **Top:** a Basic / Epoch switch (Basic goes to Markets), a Devnet label, and
+  a clock strip with the date, exact UTC window, status, countdown and the
+  local closing time. Arrows browse the previous and next Epochs. At zero the
+  status reads Closing, not Settled.
+- **Relative moves since Epoch start:** every asset ranked by its move against
+  $CRYPTO from the opening reference, as diverging bars with three decimals.
+  It is labelled "Live estimate · as of …", "Estimate paused", or "Closing
+  reference" once final. It ranks assets, not entries or payouts; there are no
+  odds or live payout estimates. During an open Epoch a row can be picked as
+  the backed asset.
+- **Create your entry:** the backed asset with a Backed badge, the basket
+  ("30 / 30 · 1 backed + 29 comparison", "All 30 eligible assets are included
+  this Epoch"), the stake with the wallet's USDC balance, the fee held until
+  settlement and the net stake, then Review entry. The review lists the backed
+  asset, basket, gross, fee, net, close time and time left, the locked and
+  execution notes, and "Positive relative performance does not guarantee a
+  profit", before Confirm in wallet. Entries use the API's `entriesOpen` gate.
+- **Pot and timeline:** Net stake pot (active net stake; the settlement pot
+  once allocating), queued unexecuted stake and entries, and the timeline Open
+  → Closing reference → Scoring → Allocating payouts → Withdrawable, with the
+  API's scored and allocated counts.
+- **How your payout works:** a collapsible panel with the plain explanation,
+  formulas and Peter's worked example.
+- **My entries:** one card per entry, grouped by Epoch, with All / Pending /
+  Active / Withdrawable / History filters. Each shows gross and net stake, its
+  performance basis ("Since your execution · HH:MM:SS UTC" or "Awaiting
+  execution"), score and payout only when the API has them, gain or loss as
+  payout minus gross stake, the basket, and Withdraw payout or Withdraw refund.
+- **Phones:** the strip comes first; the entry form opens full screen from a
+  sticky New entry button.
 
 When the API sends an empty `universe` for a round, the page takes the coin
 list from the closing references, or else from `/v1/assets`.
