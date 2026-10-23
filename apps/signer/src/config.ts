@@ -25,8 +25,14 @@ export interface AdaptiveCoxLinkage {
   operator: string;
 }
 
+export interface DynamicCoxLinkage {
+  kind: "cox-dynamic-v1";
+  poolId: string; pool: string; operator: string; sourceMethodologyDigest: string; testCollateralMint?: string;
+}
+
 export interface EpochLinkage {
   kind: "epoch-v1";
+  allowStagedSnapshots?: boolean;
   configId: string;
   config: string;
   admin: string;
@@ -34,7 +40,7 @@ export interface EpochLinkage {
   methodologyDigest: string;
 }
 
-export type ProtocolLinkage = CoxLinkage | AdaptiveCoxLinkage | EpochLinkage;
+export type ProtocolLinkage = CoxLinkage | AdaptiveCoxLinkage | DynamicCoxLinkage | EpochLinkage;
 
 export interface SolanaProgramBinding {
   programId: string;
@@ -116,7 +122,11 @@ export function loadSignerConfig(path: string): SignerConfig {
             if (l.methodology !== null && !BASE58_PATTERN.test(l.methodology)) fail(`${role} COX methodology`);
             if (l.kind === "cox-adaptive-v1" && ((BigInt(l.poolId) > 18446744073709551615n || l.poolId === "1") || typeof l.methodology !== "string" || !BASE58_PATTERN.test(l.operator) || !/^[0-9a-f]{64}$/.test(l.methodologyDigest))) fail(`${role} adaptive linkage`);
             if (l.kind === "cox-adaptive-v1" && l.testCollateralMint !== undefined && !BASE58_PATTERN.test(l.testCollateralMint)) fail(`${role} adaptive test collateral mint`);
+          } else if (l.kind === "cox-dynamic-v1") {
+            if (!INTEGER_PATTERN.test(l.poolId) || BigInt(l.poolId) > 18446744073709551615n || l.poolId === "1" || ![l.pool,l.operator].every(value => BASE58_PATTERN.test(value)) || !/^[0-9a-f]{64}$/.test(l.sourceMethodologyDigest) || /^0+$/.test(l.sourceMethodologyDigest)) fail(`${role} dynamic linkage`);
+            if (l.testCollateralMint !== undefined && !BASE58_PATTERN.test(l.testCollateralMint)) fail(`${role} dynamic test collateral mint`);
           } else if (l.kind === "epoch-v1") {
+            if (l.allowStagedSnapshots !== undefined && typeof l.allowStagedSnapshots !== "boolean") fail(`${role} staged Epoch snapshots`);
             if (!INTEGER_PATTERN.test(l.configId) || BigInt(l.configId) > 18446744073709551615n || ![l.config,l.admin,l.operator].every(value => BASE58_PATTERN.test(value)) || !/^[0-9a-f]{64}$/.test(l.methodologyDigest)) fail(`${role} Epoch linkage`);
           } else fail(`${role} unknown protocol linkage`);
         }

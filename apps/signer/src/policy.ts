@@ -17,6 +17,7 @@ const deny = (code: RejectionCode, message: string): never => {
 };
 
 const COMPUTE_BUDGET = ComputeBudgetProgram.programId;
+const REQUEST_HEAP_FRAME = 1;
 const SET_COMPUTE_UNIT_LIMIT = 2;
 const SET_COMPUTE_UNIT_PRICE = 3;
 
@@ -49,6 +50,12 @@ export function checkSolanaPolicy(
     const data = Buffer.from(instruction.data);
     if (programId!.equals(COMPUTE_BUDGET)) {
       if (transaction.version === 1) deny("OPERATION_NOT_PERMITTED", "V1 compute settings must be inline");
+      if (data[0] === REQUEST_HEAP_FRAME && data.length === 5) {
+        if (policy!.maxHeapBytes === undefined) deny("OPERATION_NOT_PERMITTED", "heap frames require explicit binding");
+        const heap = data.readUInt32LE(1);
+        if (heap < 32768 || heap % 1024 !== 0 || heap > (policy!.maxHeapBytes ?? 32768)) deny("LIMIT_EXCEEDED", "heap frame exceeds the permitted maximum");
+        continue;
+      }
       if (data[0] === SET_COMPUTE_UNIT_LIMIT && data.length === 5) {
         if (policy!.maxComputeUnitLimit !== undefined && data.readUInt32LE(1) > Number(policy!.maxComputeUnitLimit)) {
           deny("LIMIT_EXCEEDED", "compute unit limit exceeds the permitted maximum");
@@ -61,7 +68,7 @@ export function checkSolanaPolicy(
         }
         continue;
       }
-      deny("OPERATION_NOT_PERMITTED", "only compute unit limit and price instructions are permitted");
+      deny("OPERATION_NOT_PERMITTED", "only bounded compute unit limit, price and heap instructions are permitted");
     }
     const program = policy!.programs.find((p) => p.programId === programId!.toBase58());
     if (!program) deny("TARGET_NOT_BOUND", `program ${programId!.toBase58()} is not bound for ${role}`);

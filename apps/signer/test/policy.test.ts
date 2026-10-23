@@ -126,3 +126,11 @@ test("enforces the compute unit limit and the bound accounts of each instruction
   const other = Keypair.generate().publicKey;
   rejects(() => checkSolanaPolicy("oracle-operator", bound, solanaTransaction(signer, [crank([other, registry, pool])]), signer), "TARGET_NOT_BOUND");
 });
+
+test("heap frames require explicit opt-in and enforce the configured aligned maximum", () => {
+  const signer = Keypair.generate().publicKey;
+  const configured: RoleBindings = { solana: { ...solanaBindings.solana!, maxHeapBytes: 262144 } };
+  checkSolanaPolicy("oracle-operator", configured, solanaTransaction(signer, [ComputeBudgetProgram.requestHeapFrame({ bytes: 262144 }), call(signer)]), signer);
+  for (const bytes of [16384, 32769, 263168]) rejects(() => checkSolanaPolicy("oracle-operator", configured,
+    solanaTransaction(signer, [ComputeBudgetProgram.requestHeapFrame({ bytes }), call(signer)]), signer), "LIMIT_EXCEEDED");
+});

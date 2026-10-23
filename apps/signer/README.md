@@ -67,3 +67,9 @@ pnpm --filter @eox/signer test
 The `key-directory` script exports public identities from a configuration using a `GOOGLE_ACCESS_TOKEN`. The adapter proof script performs real KMS signing and can broadcast a funded devnet transaction; it is an operational check, not a read-only test.
 
 See the [signing client](../../packages/signing/README.md) for request types and the [deployment guide](../../deploy/dev/README.md) for service operations.
+
+### Versioned universes and staged snapshots
+
+The prepared `cox-dynamic-v1` linkage pins Basic pool identity, its configured operator and the original `sourceMethodologyDigest`. It follows program-owned sealed universe versions, while requiring an admin-approved schedule, exact boundary capture, immutable prior instruments and bounded staging for operator-authored successors. Historical universe attestors remain historical: pending runtime rotation becomes effective only at its admin-scheduled publication batch. Administration, user trades and transfers remain outside the runtime signing allowlist.
+
+Epoch's existing `epoch-v1` linkage requires explicit `allowStagedSnapshots: true` plus instruction allowlist entries before signing `initialize_snapshot`, `grow_snapshot`, `append_prices` or `seal_snapshot`. The guard binds the same operator, config, methodology and timestamp-derived snapshot PDA, caps new snapshots at 255 prices, enforces sorted unique pages of at most eight prices and preserves immutable sealed snapshots. This opt-in also permits refunding rent from an unsealed stage whose fixed oracle timestamp is at least 60 seconds old. Existing bindings keep their previous sealed-snapshot-only cleanup behavior. These source capabilities do not enable or deploy a live binding.

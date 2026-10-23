@@ -1,3 +1,4 @@
+import { checkDynamicCoxLinkage } from "./dynamic-linkage.js";
 import { createHash } from "node:crypto";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
 import type { AdaptiveCoxLinkage, EpochLinkage, ProtocolLinkage, SolanaProgramBinding } from "./config.js";
@@ -19,6 +20,7 @@ const same = (actual: PublicKey, expected: PublicKey, label: string): void => {
     deny(`wrong ${label}`);
 };
 export async function checkProtocolLinkage(binding: SolanaProgramBinding, linkage: ProtocolLinkage, transaction: PolicyTransaction, fetch: AccountFetcher): Promise<void> {
+  if (linkage.kind === "cox-dynamic-v1") return checkDynamicCoxLinkage(binding, linkage, transaction, fetch);
   if (linkage.kind === "cox-v2")
     return checkCoxLinkage(binding, linkage, transaction, fetch);
   if (linkage.kind !== "cox-adaptive-v1" && linkage.kind !== "epoch-v1")
@@ -183,12 +185,64 @@ export async function checkProtocolLinkage(binding: SolanaProgramBinding, linkag
   const methodOffset = root[112] === 1 ? 145 : 113;
   if (root.length < methodOffset + 32 || root.subarray(methodOffset, methodOffset + 32).toString("hex") !== l.methodologyDigest)
     deny("wrong Epoch methodology");
-  const names = ["publish_snapshot", "close_snapshot", "execute", "begin_close", "score", "allocate", "refund", "finalize_scores", "void_epoch"];
+  interface StagedSnapshot { sequence: bigint; timestamp: bigint; benchmark: bigint; expected: number; prices: Buffer[]; sealed: boolean; allocated: number }
+  const stagedSnapshots = new Map<string, StagedSnapshot>(), closedSnapshots = new Set<string>();
+  const now = () => BigInt(Math.floor(Date.now() / 1000));
+  const uint128 = (value: Buffer, offset: number) => value.readBigUInt64LE(offset) + (value.readBigUInt64LE(offset + 8) << 64n);
+  const maxReference = 1000000000000000000000000n;
+  async function stagedSnapshot(key: PublicKey): Promise<StagedSnapshot> {
+    if (closedSnapshots.has(key.toBase58())) return deny("snapshot was already closed");
+    const cached = stagedSnapshots.get(key.toBase58()); if (cached) return cached;
+    const bytes = await account(key, "SnapshotAccount", 144);
+    same(keyAt(bytes, 8), config, "staged snapshot config");
+    const sequence = bytes.readBigUInt64LE(40), timestamp = bytes.readBigUInt64LE(48), benchmark = uint128(bytes, 56), expected = bytes.readUInt16LE(72), count = bytes.readUInt32LE(106);
+    same(key, pda(Buffer.from("snapshot"), config.toBuffer(), u64(sequence)), "staged snapshot sequence PDA");
+    if (sequence !== timestamp || timestamp > now() || benchmark === 0n || benchmark > maxReference || expected < 1 || expected > 255 || count > expected || bytes.length < 144 + count * 50 || bytes[110 + count * 50]! > 1 || bytes.subarray(74, 106).toString("hex") !== l.methodologyDigest) return deny("invalid staged snapshot metadata or source");
+    const value = { sequence, timestamp, benchmark, expected, prices: Array.from({ length: count }, (_, index) => bytes.subarray(110 + index * 50, 160 + index * 50)), sealed: bytes[110 + count * 50] === 1, allocated: bytes.length };
+    stagedSnapshots.set(key.toBase58(), value); return value;
+  }
+  function appendSnapshotPrices(value: StagedSnapshot, prices: Buffer[]): void {
+    const combined = [...value.prices];
+    for (const price of prices) {
+      const id = price.readUInt16LE(0), feed = price.subarray(2, 34), amount = uint128(price, 34);
+      if (id > 255 || feed.every(byte => byte === 0) || amount === 0n || amount > maxReference || combined.length && combined[combined.length - 1]!.readUInt16LE(0) >= id || combined.some(previous => previous.subarray(2, 34).equals(feed))) return deny("invalid staged snapshot price identity or order");
+      combined.push(price);
+    }
+    value.prices = combined;
+  }
+  const names = ["publish_snapshot", "initialize_snapshot", "grow_snapshot", "append_prices", "seal_snapshot", "close_snapshot", "execute", "begin_close", "score", "allocate", "refund", "finalize_scores", "void_epoch"];
   for (const [instructionIndex, instruction] of relevant.entries()) {
     const { bytes, at, count } = call(instruction);
     const name = names.find(value => bytes.subarray(0, 8).equals(disc("global", value)));
     if (!name)
       return deny("instruction is not Epoch runtime");
+    if (["initialize_snapshot", "grow_snapshot", "append_prices", "seal_snapshot"].includes(name)) {
+      if (l.allowStagedSnapshots !== true || count !== 4) return deny("staged Epoch snapshots are not enabled or accounts mismatch");
+      same(at(0), operator, "staged snapshot operator"); same(at(1), config, "staged snapshot config"); same(at(3), SystemProgram.programId, "staged snapshot system program");
+      const key = at(2);
+      if (name === "initialize_snapshot") {
+        if (bytes.length !== 42) return deny("invalid staged snapshot initialization payload");
+        const sequence = bytes.readBigUInt64LE(8), timestamp = bytes.readBigUInt64LE(16), benchmark = uint128(bytes, 24), expected = bytes.readUInt16LE(40);
+        same(key, pda(Buffer.from("snapshot"), config.toBuffer(), u64(sequence)), "staged snapshot sequence PDA");
+        if (sequence !== timestamp || timestamp > now() || benchmark === 0n || benchmark > maxReference || expected < 1 || expected > 255 || stagedSnapshots.has(key.toBase58())) return deny("invalid staged snapshot initialization");
+        stagedSnapshots.set(key.toBase58(), { sequence, timestamp, benchmark, expected, prices: [], sealed: false, allocated: 2048 });
+      } else {
+        const value = await stagedSnapshot(key); if (value.sealed) return deny("sealed snapshot is immutable");
+        if (name === "grow_snapshot") {
+          if (bytes.length !== 12) return deny("invalid staged snapshot growth payload");
+          const growth = bytes.readUInt32LE(8);
+          if (growth < 1 || growth > 8192 || value.allocated + growth > Math.min(14000, 144 + 50 * value.expected)) return deny("staged snapshot growth exceeds bound");
+          value.allocated += growth;
+        } else if (name === "append_prices") {
+          const prices = bytes.length >= 12 ? bytes.readUInt32LE(8) : 0;
+          if (prices < 1 || prices > 8 || bytes.length !== 12 + prices * 50 || value.prices.length + prices > value.expected || 144 + 50 * (value.prices.length + prices) > value.allocated) return deny("invalid staged snapshot price page or capacity");
+          appendSnapshotPrices(value, Array.from({ length: prices }, (_, index) => bytes.subarray(12 + 50 * index, 62 + 50 * index)));
+        } else {
+          if (bytes.length !== 8 || value.prices.length !== value.expected) return deny("incomplete staged snapshot seal"); value.sealed = true;
+        }
+      }
+      continue;
+    }
     if (name === "publish_snapshot") {
       if (count !== 4 || bytes.length < 44)
         deny("invalid snapshot instruction");
@@ -199,6 +253,13 @@ export async function checkProtocolLinkage(binding: SolanaProgramBinding, linkag
       same(at(1), config, "snapshot config");
       same(at(2), pda(Buffer.from("snapshot"), config.toBuffer(), bytes.subarray(8, 16)), "snapshot sequence PDA");
       same(at(3), SystemProgram.programId, "system program");
+      if (l.allowStagedSnapshots === true) {
+        const sequence = bytes.readBigUInt64LE(8), timestamp = bytes.readBigUInt64LE(16), benchmark = uint128(bytes, 24);
+        if (sequence !== timestamp || timestamp > now() || benchmark === 0n || benchmark > maxReference) return deny("invalid atomic Epoch snapshot identity");
+        const value: StagedSnapshot = { sequence, timestamp, benchmark, expected: prices, prices: [], sealed: true, allocated: 144 + prices * 50 };
+        appendSnapshotPrices(value, Array.from({ length: prices }, (_, index) => bytes.subarray(44 + 50 * index, 94 + 50 * index)));
+        stagedSnapshots.set(at(2).toBase58(), value);
+      }
       continue;
     }
     if (bytes.length !== 8)
@@ -208,7 +269,11 @@ export async function checkProtocolLinkage(binding: SolanaProgramBinding, linkag
         deny("invalid snapshot close accounts");
       same(at(0), operator, "snapshot rent recipient");
       same(at(1), config, "snapshot close config");
-      await snapshot(at(2), instructionIndex);
+      if (l.allowStagedSnapshots === true) {
+        const value = await stagedSnapshot(at(2));
+        if (!value.sealed && value.timestamp + 60n > now()) return deny("unsealed snapshot cleanup requires a stale entry timestamp");
+      } else await snapshot(at(2), instructionIndex);
+      closedSnapshots.add(at(2).toBase58());
       continue;
     }
     const signed = name === "execute" || name === "begin_close";
@@ -261,6 +326,9 @@ export async function checkProtocolLinkage(binding: SolanaProgramBinding, linkag
       await snapshot(at(count - 1), instructionIndex);
   }
   async function snapshot(snapshotKey: PublicKey, instructionIndex: number): Promise<void> {
+    if (closedSnapshots.has(snapshotKey.toBase58())) return deny("snapshot was already closed");
+    const staged = stagedSnapshots.get(snapshotKey.toBase58());
+    if (staged) { if (!staged.sealed) return deny("snapshot methodology or seal mismatch"); return; }
     const produced = relevant.slice(0, instructionIndex).some(candidate => Buffer.from(candidate.data).subarray(0, 8).equals(disc("global", "publish_snapshot")) && transaction.message.staticAccountKeys[candidate.accountKeyIndexes[2]!]?.equals(snapshotKey));
     if (produced)
       return;

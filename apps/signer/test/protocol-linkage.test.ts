@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { Keypair, PublicKey, SystemProgram, TransactionInstruction, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
@@ -362,4 +363,69 @@ test("Epoch snapshot can be published and closed atomically, only after a valid 
   await refused(checkProtocolLinkage(f.binding, f.linkage, combine([close, publish]), f.fetch), /owner/);
   publish.keys[1]!.pubkey = holder;
   await refused(checkProtocolLinkage(f.binding, f.linkage, combine([publish, close]), f.fetch), /snapshot config/);
+});
+
+function stagedEpoch(age = 120, expected = 40) {
+  const f = epoch(), config = new PublicKey(f.linkage.config), timestamp = BigInt(Math.floor(Date.now() / 1000) - age);
+  const snapshot = f.pda(Buffer.from("snapshot"), config.toBuffer(), u64(timestamp)), data = f.put(snapshot, "SnapshotAccount", 2048);
+  config.toBuffer().copy(data, 8); data.writeBigUInt64LE(timestamp, 40); data.writeBigUInt64LE(timestamp, 48); data.writeBigUInt64LE(100000000000000n, 56);
+  data.writeUInt16LE(expected, 72); Buffer.from(f.linkage.methodologyDigest, "hex").copy(data, 74);
+  const linkage = { ...f.linkage, allowStagedSnapshots: true }, keys = [operator, config, snapshot, SystemProgram.programId];
+  const price = (id: number, feed = id + 1) => { const row = Buffer.alloc(50); row.writeUInt16LE(id); row.fill(feed, 2, 34); row.writeBigUInt64LE(100000000n, 34); return row; };
+  const page = (start: number, length: number) => { const count = Buffer.alloc(4); count.writeUInt32LE(length); return Buffer.concat([count, ...Array.from({ length }, (_, index) => price(start + index))]); };
+  const ix = (name: string, args = Buffer.alloc(0), accounts = keys) => TransactionMessage.decompile(f.tx(name, accounts, args).message).instructions[0]!;
+  const combine = (instructions: TransactionInstruction[]) => new VersionedTransaction(new TransactionMessage({ payerKey: operator, recentBlockhash: SystemProgram.programId.toBase58(), instructions }).compileToV0Message());
+  const check = (name: string, args = Buffer.alloc(0), accounts = keys) => checkProtocolLinkage(f.binding, linkage, f.tx(name, accounts, args), f.fetch);
+  return { ...f, config, snapshot, data, timestamp, linkage, keys, epochKeys: f.keys, price, page, ix, combine, check };
+}
+test("Epoch staging binds metadata, snapshot PDA and bounded growth/pages; sealing resumes across transactions", async () => {
+  const f = stagedEpoch();
+  const grow = Buffer.alloc(4); grow.writeUInt32LE(96);
+  await f.check("grow_snapshot", grow);
+  await refused(f.check("grow_snapshot", u64(8192n).subarray(0, 4)), /growth exceeds/);
+  await f.check("append_prices", f.page(0, 8));
+  await refused(f.check("append_prices", f.page(0, 9)), /price page/);
+  await refused(f.check("seal_snapshot"), /incomplete/);
+  await refused(checkProtocolLinkage(f.binding, { ...f.linkage, allowStagedSnapshots: false }, f.tx("append_prices", f.keys, f.page(0, 8)), f.fetch), /not enabled/);
+  await refused(f.check("append_prices", f.page(0, 8), [operator, f.config, holder, SystemProgram.programId]), /owner/);
+  f.data[74] ^= 1; await refused(f.check("append_prices", f.page(0, 8)), /metadata or source/); f.data[74] ^= 1;
+  const instructions = [f.ix("grow_snapshot", grow), ...[0, 8, 16, 24, 32].map(offset => f.ix("append_prices", f.page(offset, 8))), f.ix("seal_snapshot")];
+  await checkProtocolLinkage(f.binding, f.linkage, f.combine(instructions), f.fetch);
+  const wrong = f.page(8, 8); wrong.writeUInt16LE(7, 4);
+  await refused(checkProtocolLinkage(f.binding, f.linkage, f.combine([f.ix("grow_snapshot", grow), f.ix("append_prices", f.page(0, 8)), f.ix("append_prices", wrong)]), f.fetch), /identity or order/);
+});
+test("Epoch staged initialization is source-bound and can initialize, fill and seal before execution", async () => {
+  const f = stagedEpoch(120, 8); f.rows.delete(f.snapshot.toBase58());
+  const args = Buffer.alloc(34); args.writeBigUInt64LE(f.timestamp, 0); args.writeBigUInt64LE(f.timestamp, 8); args.writeBigUInt64LE(100000000000000n, 16); args.writeUInt16LE(8, 32);
+  await f.check("initialize_snapshot", args);
+  await refused(f.check("initialize_snapshot", args, [operator, f.config, holder, SystemProgram.programId]), /sequence PDA/);
+  const instructions = [f.ix("initialize_snapshot", args), f.ix("append_prices", f.page(0, 8)), f.ix("seal_snapshot")];
+  await checkProtocolLinkage(f.binding, f.linkage, f.combine(instructions), f.fetch);
+  const execute = f.ix("execute", Buffer.alloc(0), [operator, ...f.epochKeys, f.snapshot]);
+  await checkProtocolLinkage(f.binding, f.linkage, f.combine([...instructions, execute]), f.fetch);
+  await refused(checkProtocolLinkage(f.binding, f.linkage, f.combine([instructions[0]!, execute]), f.fetch), /account|config|seal/);
+});
+test("only opted-in stale unsealed Epoch snapshots may be closed; fresh stages remain intact", async () => {
+  const old = stagedEpoch(120), keys = [operator, old.config, old.snapshot];
+  await old.check("close_snapshot", Buffer.alloc(0), keys);
+  await refused(checkProtocolLinkage(old.binding, { ...old.linkage, allowStagedSnapshots: false }, old.tx("close_snapshot", keys), old.fetch), /seal/);
+  const fresh = stagedEpoch(10);
+  await refused(fresh.check("close_snapshot", Buffer.alloc(0), [operator, fresh.config, fresh.snapshot]), /stale entry/);
+  await refused(old.check("close_snapshot", Buffer.alloc(0), [holder, old.config, old.snapshot]), /rent recipient/);
+});
+test("Epoch staged signer account indices match the existing generated ABI", () => {
+  const idl = JSON.parse(readFileSync(new URL("../../../packages/cox-epoch/idl/epoch.json", import.meta.url), "utf8"));
+  for (const name of ["initialize_snapshot", "grow_snapshot", "append_prices", "seal_snapshot"]) {
+    const instruction = idl.instructions.find((value: { name: string }) => value.name === name);
+    assert.deepEqual(instruction.accounts.map((value: { name: string }) => value.name), ["operator", "config", "snapshot", "system_program"]);
+    assert.deepEqual(Buffer.from(instruction.discriminator), disc("global", name));
+  }
+});
+
+test("opted-in Epoch bindings preserve atomic publication and rent close compatibility", async () => {
+  const f = stagedEpoch(120, 1); f.rows.delete(f.snapshot.toBase58());
+  const args = Buffer.alloc(86); args.writeBigUInt64LE(f.timestamp, 0); args.writeBigUInt64LE(f.timestamp, 8); args.writeBigUInt64LE(100000000000000n, 16); args.writeUInt32LE(1, 32); f.price(0).copy(args, 36);
+  const publish = f.ix("publish_snapshot", args), close = f.ix("close_snapshot", Buffer.alloc(0), [operator, f.config, f.snapshot]);
+  await checkProtocolLinkage(f.binding, f.linkage, f.combine([publish, close]), f.fetch);
+  await refused(checkProtocolLinkage(f.binding, f.linkage, f.combine([close, publish]), f.fetch), /owner/);
 });
