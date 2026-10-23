@@ -7,6 +7,7 @@ import { replay } from "./replay.js";
 import type { CoxSource } from "./source.js";
 import type { EpochSource } from "./epoch-source.js";
 import type { CoxSubmissions } from "./submissions.js";
+import { FaucetError, type CoxFaucet } from "./faucet.js";
 import { FeeChangedError, NothingToDoError, TradingClosedError, TransactionInputError, TransactionRejectedError, type CoxTransactions } from "./transactions.js";
 
 const DEFAULT_PAGE = 100;
@@ -42,6 +43,8 @@ export interface CoxApiServerOptions {
   preview?: PreviewFeed | null;
   previewHistory?: PreviewHistory | null;
   classes?: readonly string[];
+  faucet?: CoxFaucet | null;
+  faucetForward?: string | null;
   postLimit?: { perMinute: number; trustForwardedFor: boolean } | null;
   trustForwardedFor?: boolean;
   stream?: { statusMs?: number; portfolioMs?: number; maxConnections?: number; maxPerClient?: number; maxWallets?: number };
@@ -53,6 +56,16 @@ function clientAddress(req: IncomingMessage, trustForwardedFor: boolean): string
   if (trustForwardedFor && value) {
     const last = value.split(",").map((part) => part.trim()).filter(Boolean).at(-1);
     if (last) return last;
+  }
+  return req.socket.remoteAddress ?? "unknown";
+}
+
+function faucetClientAddress(req: IncomingMessage, trustForwardedFor: boolean): string {
+  const forwarded = req.headers["x-forwarded-for"];
+  const value = Array.isArray(forwarded) ? forwarded.join(",") : forwarded;
+  if (trustForwardedFor && value) {
+    const first = value.split(",").map((part) => part.trim()).find(Boolean);
+    if (first) return first;
   }
   return req.socket.remoteAddress ?? "unknown";
 }
@@ -153,6 +166,49 @@ export function createCoxApiServer(options: CoxApiServerOptions): Server {
     return parsed as Record<string, unknown>;
   }
 
+  const faucet = options.faucet ?? null;
+  const faucetForward = options.faucetForward ? options.faucetForward.replace(/\/+$/, "") : null;
+
+  async function forwardFaucet(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+    const headers: Record<string, string> = { accept: "application/json", "x-forwarded-for": faucetClientAddress(req, trustForwardedFor) };
+    let payload: string | undefined;
+    if (req.method === "POST") {
+      admit(req, res);
+      payload = JSON.stringify(await body(req));
+      headers["content-type"] = "application/json";
+    }
+    const upstream = await fetch(`${faucetForward}${url.pathname}${url.search}`, { method: req.method, headers, body: payload, signal: AbortSignal.timeout(60_000) });
+    const text = await upstream.text();
+    const retryAfter = upstream.headers.get("retry-after");
+    res.writeHead(upstream.status, {
+      "content-type": upstream.headers.get("content-type") ?? "application/json; charset=utf-8",
+      "content-length": Buffer.byteLength(text),
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+      ...(retryAfter ? { "retry-after": retryAfter } : {}),
+    });
+    res.end(text);
+  }
+
+  async function faucetRoute(req: IncomingMessage, res: ServerResponse, url: URL, path: string[]): Promise<void> {
+    if (faucetForward) return forwardFaucet(req, res, url);
+    if (!faucet) throw new ApiError(409, "NOT_CONFIGURED", "this deployment serves no faucet");
+    const [, , b] = path;
+    if (path.length !== 3) throw new ApiError(404, "NOT_FOUND", "not found");
+    if (req.method === "GET" && b === "status") return send(res, await faucet.status(url.searchParams.get("owner")));
+    if (req.method === "POST" && (b === "challenge" || b === "claim")) {
+      admit(req, res);
+      const input = await body(req);
+      if (b === "challenge") return send(res, await faucet.challenge(input));
+      return send(res, await faucet.claim(input, faucetClientAddress(req, trustForwardedFor)));
+    }
+    if (b === "status" || b === "challenge" || b === "claim") {
+      res.setHeader("allow", b === "status" ? "GET" : "POST");
+      throw new ApiError(405, "METHOD_NOT_ALLOWED", "method not allowed");
+    }
+    throw new ApiError(404, "NOT_FOUND", "not found");
+  }
+
   async function post(req: IncomingMessage, res: ServerResponse, path: string[]): Promise<void> {
     const [, a, b] = path;
     if (path.length !== 3 || (a !== "transactions" && a !== "quotes")) throw new ApiError(404, "NOT_FOUND", "not found");
@@ -240,6 +296,7 @@ export function createCoxApiServer(options: CoxApiServerOptions): Server {
     }
     const url = new URL(req.url ?? "/", "http://localhost");
     const path = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+    if (path[0] === "v1" && path[1] === "faucet") return faucetRoute(req, res, url, path);
     if (req.method === "POST" && path[0] === "v1" && (path[1] === "transactions" || path[1] === "quotes")) return post(req, res, path);
     if (req.method !== "GET") {
       res.setHeader("allow", path[1] === "transactions" ? "POST" : "GET");
@@ -333,6 +390,10 @@ export function createCoxApiServer(options: CoxApiServerOptions): Server {
     route(req, res).catch((error: unknown) => {
       const errorBody = (code: CoxErrorCode, message: string) => ({ schemaVersion: COX_APP_API_SCHEMA_VERSION, error: { code, message } });
       if (error instanceof ApiError) return write(res, error.status, errorBody(error.code, error.message));
+      if (error instanceof FaucetError) {
+        if (error.retryAt !== null) res.setHeader("retry-after", String(Math.max(1, error.retryAt - now())));
+        return write(res, error.status, errorBody(error.code, error.message));
+      }
       if (error instanceof TransactionInputError) return write(res, 400, errorBody("INVALID_REQUEST", error.message));
       if (error instanceof StreamLimitError) {
         res.setHeader("retry-after", "10");
