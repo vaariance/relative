@@ -1563,3 +1563,11 @@ another agent needs to know.
 - **Verification:** Signer 88 and SDK 91 tests pass, including browser bundling, negative policy/account checks, exact-request replay and transient-RPC recovery; signer, SDK and signing-client type checks pass. No faucet signer release has been deployed and public claims remain disabled.
 - **Open:** Scoped commit approval and isolated signer canary/KMS verification. Joel owns ownership challenges, durable cross-instance cooldown/idempotency/limits and low-SOL eligibility; Godwin owns explicit devnet tUSDC and claim UI. Both were emailed. Do not enable claims before the ledger and integration tests pass.
 - **Refs:** `apps/signer/README.md`, `apps/signer/config/dev-faucet.json`, `packages/cox-client/README.md`, `packages/cox/deploy/adaptive-pool-2-devnet.json`.
+
+### 2026-10-23 · Peter (Codex) · Existing test collateral named rlUSD
+
+- **Area:** Existing devnet token metadata, faucet SDK labels and public deployment record.
+- **What:** Peter selected `rlUSD` as the custom test token name and symbol. Created Metaplex metadata `HsSpMTWNvyxrBqRhjWXS6ijnQCbxwz4Di9WD9Bzod9AY` for the existing mint `5rpGrekfBLHdF8PD8eKLzXQPPmhyF7FCKeE1VA5CwV3X`; finalized at 17:13:58 UTC with signature `2XvrqNbPX3nbXAKJMCmUMVMKxjrrBe3Vo1Worcndttod8LEZrsgu49tST6MW4Zvb7PeZas6UoveDM2nu3RVC6mbi`. Independent finalized reads verified name/symbol and unchanged mint bytes, including supply and mint authority. Metadata is mutable with admin update authority; no URI/logo is set.
+- **Rules for agents:** This supersedes `tUSDC` display wording in the earlier faucet entry. Reuse the same mint, custody and six decimals. Circle's official devnet USDC keeps its identity. API/UI implementation remains with its owners; Peter's closeout covers protocol, publisher, SDK and signer. At Peter's request, blockers go directly to Joel without copying Godwin. Public faucet API delivery and UI completion do not block the tested SDK/signer handoff.
+- **Open:** Prepared source/records require scoped commit approval; isolated faucet signer deployment and real grant verification follow the committed release. Dynamic activation remains gated on Joel's deployed consumers and operator approval.
+- **Refs:** `packages/cox-client/README.md`, `apps/signer/README.md`, `packages/cox/deploy/adaptive-pool-2-devnet.json`.
