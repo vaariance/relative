@@ -15,10 +15,14 @@ use tokio::sync::Mutex;
 const MAX_CONFIG_BYTES: u64 = 16_384;
 const MAX_MANIFEST_BYTES: usize = 64 * 1024 * 1024;
 const MAX_DEPTH: usize = 5;
-const MUTABLE: [&str; 8] = [
+const MUTABLE: [&str; 12] = [
     "identity.json",
     "checkpoint.json",
     "discovery.json",
+    "epoch-snapshot-stage.json",
+    "inclusion-approved.json",
+    "inclusion-execution.json",
+    "inclusion-preview-cutoff.json",
     "preview-ledger.json",
     "chain-change.json",
     "rpc-usage.json",
@@ -162,6 +166,9 @@ impl Config {
             || self
                 .markers_directory
                 .starts_with(self.state_directory.join("publications"))
+            || self
+                .markers_directory
+                .starts_with(self.state_directory.join("universes"))
             || self.max_file_bytes == 0
             || self.max_file_bytes > 16 * 1024 * 1024
             || self.max_files == 0
@@ -280,6 +287,7 @@ fn allowed_file(path: &str) -> bool {
     let parts = path.split('/').collect::<Vec<_>>();
     match parts.as_slice() {
         ["publications", sequence] => json_number(sequence),
+        ["universes", digest] => digest.strip_suffix(".json").is_some_and(valid_digest),
         ["prices", "anchors", digest] => digest.strip_suffix(".json").is_some_and(valid_digest),
         ["prices", universe, hour, timestamp] => {
             valid_digest(universe) && numeric(hour) && json_number(timestamp)
@@ -290,7 +298,7 @@ fn allowed_file(path: &str) -> bool {
 fn allowed_directory(path: &str) -> bool {
     let parts = path.split('/').collect::<Vec<_>>();
     match parts.as_slice() {
-        ["prices"] | ["publications"] | ["prices", "anchors"] => true,
+        ["prices"] | ["publications"] | ["universes"] | ["prices", "anchors"] => true,
         ["prices", universe] => valid_digest(universe),
         ["prices", universe, hour] => valid_digest(universe) && numeric(hour),
         _ => false,

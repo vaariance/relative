@@ -164,8 +164,11 @@ impl Archive {
         }
         if state.domain == "COX/STATE/ADAPTIVE/V1" {
             let _ = <u64 as AnchorDeserialize>::deserialize(&mut rest).map_err(|_| Error::State)?;
-            let mint=<Option<[u8;32]> as AnchorDeserialize>::deserialize(&mut rest).map_err(|_|Error::State)?;
-            if mint==Some([0;32]){return Err(Error::State);}
+            let mint = <Option<[u8; 32]> as AnchorDeserialize>::deserialize(&mut rest)
+                .map_err(|_| Error::State)?;
+            if mint == Some([0; 32]) {
+                return Err(Error::State);
+            }
         }
         if !rest.is_empty()
             || state.program != self.program.to_bytes()
@@ -509,19 +512,67 @@ mod tests {
     #[test]
     fn adaptive_commitment_from_protocol_encoder_preserves_scheduled_admission() {
         use anchor_lang::Discriminator;
-        let path=directory();let archive=archive(&path);
-        let mut raw=vec![0;8192];raw[..8].copy_from_slice(cox::Pool::DISCRIMINATOR);
-        let mut pool=cox::Pool::try_deserialize(&mut raw.as_slice()).unwrap();
+        let path = directory();
+        let archive = archive(&path);
+        let mut raw = vec![0; 8192];
+        raw[..8].copy_from_slice(cox::Pool::DISCRIMINATOR);
+        let mut pool = cox::Pool::try_deserialize(&mut raw.as_slice()).unwrap();
         raw[..8].copy_from_slice(cox::Batch::DISCRIMINATOR);
-        let mut batch=cox::Batch::try_deserialize(&mut raw.as_slice()).unwrap();
-        pool.schema_version=4;pool.trading_opens_at=14_400;pool.last_prices=vec![10,20];pool.references=vec![100;3];pool.classes=vec![cox::Class::default();3];
-        batch.cutoff=100;batch.snapshot_digest=[5;32];
-        let program=Pubkey::new_from_array(archive.program.to_bytes());let key=Pubkey::new_from_array(archive.pool.to_bytes());
-        let preimage=cox::state_bytes(&program,&key,&pool,&pool.classes,&batch,&[4;32]).unwrap();
-        let digest: [u8;32]=Sha256::digest(&preimage).into();
-        let publication=cox::Publication{schema_version:3,bump:Address::find_program_address(&[b"publication",archive.pool.as_ref()],&archive.program).1,pool:key,sequence:0,batch:0,state_digest:digest,snapshot_digest:[5;32],manifest_digest:[4;32],state_preimage:preimage,prices:vec![cox::PriceWire{price_e8:10,venue:3,step:0,candle_start:100,trade_age_minutes:0},cox::PriceWire{price_e8:20,venue:3,step:0,candle_start:100,trade_age_minutes:0}],committed_at:120};
-        let mut bytes=Vec::new();publication.try_serialize(&mut bytes).unwrap();bytes.resize(8192,0);
-        archive.preserve(archive.program,archive.address,&bytes,1,0,digest).unwrap();
-        assert_eq!(archive.read(0).unwrap().unwrap().state_digest,hex::encode(digest));fs::remove_dir_all(path).unwrap();
+        let mut batch = cox::Batch::try_deserialize(&mut raw.as_slice()).unwrap();
+        pool.schema_version = 4;
+        pool.trading_opens_at = 14_400;
+        pool.last_prices = vec![10, 20];
+        pool.references = vec![100; 3];
+        pool.classes = vec![cox::Class::default(); 3];
+        batch.cutoff = 100;
+        batch.snapshot_digest = [5; 32];
+        let program = Pubkey::new_from_array(archive.program.to_bytes());
+        let key = Pubkey::new_from_array(archive.pool.to_bytes());
+        let preimage =
+            cox::state_bytes(&program, &key, &pool, &pool.classes, &batch, &[4; 32]).unwrap();
+        let digest: [u8; 32] = Sha256::digest(&preimage).into();
+        let publication = cox::Publication {
+            schema_version: 3,
+            bump: Address::find_program_address(
+                &[b"publication", archive.pool.as_ref()],
+                &archive.program,
+            )
+            .1,
+            pool: key,
+            sequence: 0,
+            batch: 0,
+            state_digest: digest,
+            snapshot_digest: [5; 32],
+            manifest_digest: [4; 32],
+            state_preimage: preimage,
+            prices: vec![
+                cox::PriceWire {
+                    price_e8: 10,
+                    venue: 3,
+                    step: 0,
+                    candle_start: 100,
+                    trade_age_minutes: 0,
+                },
+                cox::PriceWire {
+                    price_e8: 20,
+                    venue: 3,
+                    step: 0,
+                    candle_start: 100,
+                    trade_age_minutes: 0,
+                },
+            ],
+            committed_at: 120,
+        };
+        let mut bytes = Vec::new();
+        publication.try_serialize(&mut bytes).unwrap();
+        bytes.resize(8192, 0);
+        archive
+            .preserve(archive.program, archive.address, &bytes, 1, 0, digest)
+            .unwrap();
+        assert_eq!(
+            archive.read(0).unwrap().unwrap().state_digest,
+            hex::encode(digest)
+        );
+        fs::remove_dir_all(path).unwrap();
     }
 }

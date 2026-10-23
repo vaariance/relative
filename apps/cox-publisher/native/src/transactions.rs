@@ -120,6 +120,98 @@ impl BasicAccounts {
             &args,
         ))
     }
+    pub fn begin_dynamic(
+        &self,
+        operator: Address,
+        value: &DynamicBasicPublication,
+    ) -> Result<Instruction, Error> {
+        let snapshot = value.snapshot_digest()?;
+        let mut args = value.publication.batch_id.to_le_bytes().to_vec();
+        args.extend_from_slice(&value.publication.sequence.to_le_bytes());
+        args.extend_from_slice(&value.publication.predecessor);
+        args.extend_from_slice(&snapshot);
+        args.extend_from_slice(&value.publication.benchmark.to_le_bytes());
+        let mut accounts = vec![
+            AccountMeta::new(operator, true),
+            AccountMeta::new_readonly(operator, true),
+            writable(self.registry),
+            writable(self.pool),
+            readonly(self.methodology),
+            writable(self.batch),
+            readonly(self.vault),
+            readonly(SYSTEM_PROGRAM),
+        ];
+        accounts.push(readonly(self.test_vault.unwrap_or(self.program)));
+        Ok(instruction(
+            self.program,
+            "begin_dynamic_publication",
+            accounts,
+            &args,
+        ))
+    }
+    fn dynamic_stage(&self, operator: Address, name: &str, args: &[u8]) -> Instruction {
+        instruction(
+            self.program,
+            name,
+            vec![
+                AccountMeta::new_readonly(operator, true),
+                readonly(self.registry),
+                readonly(self.pool),
+                readonly(self.methodology),
+                writable(self.batch),
+            ],
+            args,
+        )
+    }
+    pub fn append_dynamic_prices(
+        &self,
+        operator: Address,
+        offset: u16,
+        timestamp: u64,
+        prices: &[u64],
+    ) -> Result<Instruction, Error> {
+        if prices.is_empty()
+            || prices.len() > 16
+            || prices.contains(&0)
+            || usize::from(offset) + prices.len() > 255
+        {
+            return Err(Error::InvalidSnapshot);
+        }
+        let mut args = offset.to_le_bytes().to_vec();
+        args.extend_from_slice(&(prices.len() as u32).to_le_bytes());
+        for price in prices {
+            args.extend_from_slice(&price.to_le_bytes());
+            args.extend_from_slice(&[3, 0]);
+            args.extend_from_slice(&timestamp.to_le_bytes());
+            args.extend_from_slice(&0u16.to_le_bytes());
+        }
+        Ok(self.dynamic_stage(operator, "append_dynamic_prices", &args))
+    }
+    pub fn seal_dynamic(&self, operator: Address) -> Instruction {
+        self.dynamic_stage(operator, "seal_dynamic_publication", &[])
+    }
+    pub fn revalue_dynamic(
+        &self,
+        operator: Address,
+        offset: u16,
+        limit: u16,
+        backings: bool,
+    ) -> Result<Instruction, Error> {
+        if limit == 0 || limit > 16 || offset >= if backings { 256 } else { 255 } {
+            return Err(Error::InvalidSnapshot);
+        }
+        let mut args = offset.to_le_bytes().to_vec();
+        args.extend_from_slice(&limit.to_le_bytes());
+        Ok(self.dynamic_stage(
+            operator,
+            if backings {
+                "finish_dynamic_revaluation"
+            } else {
+                "prepare_dynamic_revaluation"
+            },
+            &args,
+        ))
+    }
     pub fn process(&self, nonce: u64, owner: Address, operation: BasicProcess) -> Instruction {
         self.instruction(
             operation.name(),
@@ -215,6 +307,44 @@ impl BasicPublication {
         bytes.extend_from_slice(&(self.roster.len() as u32).to_le_bytes());
         bytes.extend_from_slice(&self.roster);
         for price in &self.prices_e8 {
+            bytes.extend_from_slice(&price.to_le_bytes());
+        }
+        Ok(Sha256::digest(bytes).into())
+    }
+}
+
+pub struct DynamicBasicPublication {
+    pub publication: BasicPublication,
+    pub universe: cox::UniverseVersion,
+}
+impl DynamicBasicPublication {
+    pub fn snapshot_digest(&self) -> Result<[u8; 32], Error> {
+        let value = &self.publication;
+        if value.origin.checked_add(value.batch_id) != Some(value.timestamp)
+            || value.benchmark <= 0
+            || self.universe.instruments.is_empty()
+            || self.universe.instruments.len() > 255
+            || self.universe.instruments.len() != value.prices_e8.len()
+            || value.prices_e8.contains(&0)
+            || value.roster.iter().map(|id| u16::from(*id)).ne(self
+                .universe
+                .instruments
+                .iter()
+                .map(|instrument| instrument.class_id))
+        {
+            return Err(Error::InvalidSnapshot);
+        }
+        let domain = b"COX/SNAPSHOT/DYNAMIC/V1";
+        let mut bytes = (domain.len() as u32).to_le_bytes().to_vec();
+        bytes.extend_from_slice(domain);
+        bytes.extend_from_slice(&value.timestamp.to_le_bytes());
+        bytes.extend_from_slice(&value.benchmark.to_le_bytes());
+        bytes.extend_from_slice(&self.universe.digest);
+        bytes.extend_from_slice(&(value.prices_e8.len() as u32).to_le_bytes());
+        for (instrument, price) in self.universe.instruments.iter().zip(&value.prices_e8) {
+            bytes.extend_from_slice(&instrument.class_id.to_le_bytes());
+            bytes.extend_from_slice(&instrument.epoch_id.to_le_bytes());
+            bytes.extend_from_slice(&instrument.pyth_pro_feed_id.to_le_bytes());
             bytes.extend_from_slice(&price.to_le_bytes());
         }
         Ok(Sha256::digest(bytes).into())
@@ -329,6 +459,89 @@ impl EpochAccounts {
             ],
             &args,
         ))
+    }
+    fn manage_snapshot(
+        &self,
+        operator: Address,
+        sequence: u64,
+        name: &str,
+        args: &[u8],
+    ) -> Instruction {
+        instruction(
+            self.program,
+            name,
+            vec![
+                AccountMeta::new(operator, true),
+                readonly(self.config),
+                writable(self.snapshot(sequence)),
+                readonly(SYSTEM_PROGRAM),
+            ],
+            args,
+        )
+    }
+    pub fn initialize_snapshot(
+        &self,
+        operator: Address,
+        sequence: u64,
+        timestamp: u64,
+        benchmark: u128,
+        count: u16,
+    ) -> Result<Instruction, Error> {
+        if count == 0 || count > 255 || benchmark == 0 || benchmark > MAX_REFERENCE {
+            return Err(Error::InvalidSnapshot);
+        }
+        let mut args = sequence.to_le_bytes().to_vec();
+        args.extend_from_slice(&timestamp.to_le_bytes());
+        args.extend_from_slice(&benchmark.to_le_bytes());
+        args.extend_from_slice(&count.to_le_bytes());
+        Ok(self.manage_snapshot(operator, sequence, "initialize_snapshot", &args))
+    }
+    pub fn grow_snapshot(
+        &self,
+        operator: Address,
+        sequence: u64,
+        additional_bytes: u32,
+    ) -> Result<Instruction, Error> {
+        if additional_bytes == 0 || additional_bytes > 8_192 {
+            return Err(Error::InvalidSnapshot);
+        }
+        Ok(self.manage_snapshot(
+            operator,
+            sequence,
+            "grow_snapshot",
+            &additional_bytes.to_le_bytes(),
+        ))
+    }
+    pub fn append_snapshot_prices(
+        &self,
+        operator: Address,
+        sequence: u64,
+        prices: &[EpochPrice],
+    ) -> Result<Instruction, Error> {
+        if prices.is_empty()
+            || prices.len() > 8
+            || prices.iter().any(|price| {
+                price.asset_id >= 256
+                    || price.feed_id == [0; 32]
+                    || price.value == 0
+                    || price.value > MAX_REFERENCE
+            })
+            || prices
+                .windows(2)
+                .any(|pair| pair[0].asset_id >= pair[1].asset_id)
+        {
+            return Err(Error::InvalidSnapshot);
+        }
+        let mut args = (prices.len() as u32).to_le_bytes().to_vec();
+        for price in prices {
+            args.extend_from_slice(&price.asset_id.to_le_bytes());
+            args.extend_from_slice(&price.feed_id);
+            args.extend_from_slice(&price.value.to_le_bytes());
+        }
+        Ok(self.manage_snapshot(operator, sequence, "append_prices", &args))
+    }
+    pub fn seal_snapshot(&self, operator: Address, sequence: u64) -> Instruction {
+        self.manage_snapshot(operator, sequence, "seal_snapshot", &[])
     }
     fn custody(&self) -> Vec<AccountMeta> {
         vec![
@@ -480,4 +693,261 @@ pub fn compile(
         unsigned_transaction: transaction,
         account_count: message.account_keys.len(),
     })
+}
+
+#[cfg(test)]
+pub(crate) fn dynamic_test_universe(count: usize) -> cox::UniverseVersion {
+    use anchor_lang::prelude::Pubkey;
+    let mut universe = cox::UniverseVersion::draft(
+        0,
+        Pubkey::new_from_array([1; 32]),
+        Pubkey::new_from_array([7; 32]),
+        [3; 32],
+        1,
+        [0; 32],
+        count as u16,
+        cox::UniverseCapture {
+            price_universe_digest: [5; 32],
+            timestamp: 14_400,
+            benchmark: 100 * cox_math::SCALE,
+            prices_e8: vec![100; count],
+            signed_payload_digest: [6; 32],
+            trusted_storage_digest: [7; 32],
+            predecessor_sequence: 1,
+            predecessor_state_digest: [8; 32],
+        },
+    )
+    .unwrap();
+    universe.instruments = (0..count)
+        .map(|index| cox::Instrument {
+            stable_id: format!("asset{index}"),
+            symbol: cox::IDS
+                .get(index)
+                .map(|value| value.to_string())
+                .unwrap_or(format!("ASSET{index}")),
+            class_id: cox::class_for_asset_index(index).unwrap(),
+            epoch_id: index as u16,
+            pyth_pro_feed_id: index as u32 + 1,
+            pyth_core_feed_id: [index as u8 + 1; 32],
+            token_mint: None,
+            original_price_e8: 100,
+            original_benchmark: 100 * cox_math::SCALE,
+            original_timestamp: 14_400,
+        })
+        .collect();
+    cox::UniverseVersion::from_canonical(&universe.canonical_bytes().unwrap()).unwrap()
+}
+#[cfg(test)]
+mod dynamic_tests {
+    use super::*;
+    use anchor_lang::{InstructionData, ToAccountMetas};
+    fn key(value: u8) -> Address {
+        Address::new_from_array([value; 32])
+    }
+    fn publication(count: usize) -> DynamicBasicPublication {
+        let universe = dynamic_test_universe(count);
+        DynamicBasicPublication {
+            publication: BasicPublication {
+                origin: 14_400,
+                batch_id: 10,
+                sequence: 2,
+                predecessor: [8; 32],
+                timestamp: 14_410,
+                benchmark: 101 * cox_math::SCALE,
+                roster: universe
+                    .instruments
+                    .iter()
+                    .map(|value| value.class_id as u8)
+                    .collect(),
+                prices_e8: (0..count).map(|index| 100 + index as u64).collect(),
+            },
+            universe,
+        }
+    }
+    #[test]
+    fn dynamic_encoding_and_snapshot_match_generated_anchor_abi_at_31_and_255_assets() {
+        for count in [31, 255] {
+            let value = publication(count);
+            let wire = value
+                .publication
+                .prices_e8
+                .iter()
+                .map(|price| cox::PriceWire {
+                    price_e8: *price,
+                    venue: 3,
+                    step: 0,
+                    candle_start: value.publication.timestamp,
+                    trade_age_minutes: 0,
+                })
+                .collect::<Vec<_>>();
+            let snapshot = cox::dynamic_snapshot_digest(
+                value.publication.timestamp,
+                value.publication.benchmark,
+                &value.universe,
+                &wire,
+            )
+            .unwrap();
+            assert_eq!(value.snapshot_digest().unwrap(), snapshot);
+            let mut basic = BasicAccounts::derive(key(1), 2, value.universe.digest);
+            basic.test_vault = Some(key(9));
+            let begin = basic.begin_dynamic(key(7), &value).unwrap();
+            assert_eq!(
+                begin.data,
+                cox::instruction::BeginDynamicPublication {
+                    batch_id: 10,
+                    sequence: 2,
+                    predecessor: [8; 32],
+                    snapshot,
+                    benchmark: value.publication.benchmark
+                }
+                .data()
+            );
+            let pk = |key: Address| anchor_lang::prelude::Pubkey::new_from_array(key.to_bytes());
+            let accounts = cox::accounts::BeginDynamicPublication {
+                payer: pk(key(7)),
+                runtime: pk(key(7)),
+                registry: pk(basic.registry),
+                pool: pk(basic.pool),
+                methodology: pk(basic.methodology),
+                batch: pk(basic.batch),
+                vault: pk(basic.vault),
+                system_program: pk(SYSTEM_PROGRAM),
+                test_vault: Some(pk(key(9))),
+            }
+            .to_account_metas(None);
+            assert_eq!(begin.accounts.len(), accounts.len());
+            for (actual, expected) in begin.accounts.iter().zip(accounts) {
+                assert_eq!(actual.pubkey.to_bytes(), expected.pubkey.to_bytes());
+                assert_eq!(actual.is_signer, expected.is_signer);
+                assert_eq!(actual.is_writable, expected.is_writable);
+            }
+            let append = basic
+                .append_dynamic_prices(
+                    key(7),
+                    16,
+                    value.publication.timestamp,
+                    &value.publication.prices_e8[16..count.min(32)],
+                )
+                .unwrap();
+            assert_eq!(
+                append.data,
+                cox::instruction::AppendDynamicPrices {
+                    offset: 16,
+                    prices: wire[16..count.min(32)].to_vec()
+                }
+                .data()
+            );
+            assert_eq!(
+                basic.seal_dynamic(key(7)).data,
+                cox::instruction::SealDynamicPublication {}.data()
+            );
+            assert_eq!(
+                basic.revalue_dynamic(key(7), 16, 16, false).unwrap().data,
+                cox::instruction::PrepareDynamicRevaluation {
+                    offset: 16,
+                    limit: 16
+                }
+                .data()
+            );
+            assert_eq!(
+                basic.revalue_dynamic(key(7), 240, 16, true).unwrap().data,
+                cox::instruction::FinishDynamicRevaluation {
+                    offset: 240,
+                    limit: 16
+                }
+                .data()
+            );
+        }
+    }
+    #[test]
+    fn epoch_staging_instructions_match_generated_anchor_abi() {
+        let accounts = EpochAccounts::derive(key(2), key(3), 14_400).unwrap();
+        assert_eq!(
+            accounts
+                .initialize_snapshot(key(7), 28_800, 28_800, 100, 255)
+                .unwrap()
+                .data,
+            relative_epoch::instruction::InitializeSnapshot {
+                sequence: 28_800,
+                oracle_timestamp: 28_800,
+                benchmark: 100,
+                expected_prices: 255
+            }
+            .data()
+        );
+        assert_eq!(
+            accounts.grow_snapshot(key(7), 28_800, 8192).unwrap().data,
+            relative_epoch::instruction::GrowSnapshot {
+                additional_bytes: 8192
+            }
+            .data()
+        );
+        let prices = (0..8)
+            .map(|index| EpochPrice {
+                asset_id: index,
+                feed_id: [index as u8 + 1; 32],
+                value: 100,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            accounts
+                .append_snapshot_prices(key(7), 28_800, &prices)
+                .unwrap()
+                .data,
+            relative_epoch::instruction::AppendPrices {
+                prices: prices
+                    .iter()
+                    .map(|price| cox_epoch::Price {
+                        asset_id: price.asset_id,
+                        feed_id: price.feed_id,
+                        value: price.value
+                    })
+                    .collect()
+            }
+            .data()
+        );
+        assert_eq!(
+            accounts.seal_snapshot(key(7), 28_800).data,
+            relative_epoch::instruction::SealSnapshot {}.data()
+        );
+    }
+    #[test]
+    fn dynamic_pages_reject_wrong_bounds_and_full_31_asset_start_fits_v1_transaction() {
+        let value = publication(31);
+        let basic = BasicAccounts::derive(key(1), 2, value.universe.digest);
+        let mut instructions = vec![basic.begin_dynamic(key(7), &value).unwrap()];
+        for (index, page) in value.publication.prices_e8.chunks(16).enumerate() {
+            instructions.push(
+                basic
+                    .append_dynamic_prices(
+                        key(7),
+                        (index * 16) as u16,
+                        value.publication.timestamp,
+                        page,
+                    )
+                    .unwrap(),
+            );
+        }
+        instructions.push(basic.seal_dynamic(key(7)));
+        let tx = compile(
+            key(7),
+            Hash::new_from_array([1; 32]),
+            &instructions,
+            &[key(1)],
+            Budget {
+                compute_units: 1_400_000,
+                priority_fee_lamports: 0,
+                heap_bytes: Some(262_144),
+            },
+        )
+        .unwrap();
+        assert!(tx.unsigned_transaction.len() < 4096);
+        assert!(basic
+            .append_dynamic_prices(key(7), 250, 14_410, &[100; 16])
+            .is_err());
+        assert!(basic
+            .append_dynamic_prices(key(7), 0, 14_410, &[100; 17])
+            .is_err());
+        assert!(basic.revalue_dynamic(key(7), 256, 1, true).is_err());
+    }
 }

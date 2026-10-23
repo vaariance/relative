@@ -2,7 +2,7 @@ use cox_math::SCALE;
 use relative_publisher::{
     backup::{self, Created, RemoteMetadata, RemoteObject, Transport},
     benchmark::{Anchor, Asset, Observation},
-    preview::{upload, Error, Ledger, LedgerClass, Record},
+    preview::{upload, AssetOrigin, Error, Ledger, LedgerClass, Record, Universe},
 };
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, sync::Mutex};
@@ -32,6 +32,7 @@ fn fixture() -> (Anchor, Observation, Ledger) {
         signed_payload: vec![1],
     };
     let ledger = Ledger {
+        universe: None,
         program: solana_address::Address::new_from_array([2; 32]).to_string(),
         pool: solana_address::Address::new_from_array([3; 32]).to_string(),
         methodology_digest: "a".repeat(64),
@@ -189,4 +190,50 @@ fn notification_metadata_is_optional_for_legacy_records_and_does_not_confirm_est
     assert_eq!(encoded["chainChange"]["revision"], "3");
     assert_eq!(encoded["chainChange"]["commitment"], "confirmed");
     assert_eq!(serde_json::from_value::<Record>(encoded).unwrap(), record);
+}
+
+#[test]
+fn expanded_preview_keeps_permanent_origins_and_crypto_at_class_thirty() {
+    let (mut anchor, mut observation, mut ledger) = fixture();
+    anchor.benchmark = 200 * SCALE;
+    anchor.assets = (0..31).map(|index| Asset {
+        id: format!("A{index}"), feed_id: index + 1, origin_price_e8: 200,
+    }).collect();
+    observation.benchmark = 200 * SCALE;
+    observation.prices_e8 = vec![200; 31];
+    ledger.benchmark = 200 * SCALE;
+    ledger.prices_e8 = vec![200; 31];
+    ledger.classes = (0..32).map(|_| LedgerClass {
+        backing: 1_000_000, units: 1_000_000 * SCALE as u128,
+    }).collect();
+    ledger.universe = Some(Universe {
+        price_digest: anchor.universe_digest,
+        origins: anchor.assets.iter().enumerate().map(|(index, asset)| AssetOrigin {
+            asset_id: asset.id.clone(), class_id: if index < 30 {index as u16} else {31},
+            price_e8: if index < 30 {100} else {200},
+            benchmark: if index < 30 {100 * SCALE} else {200 * SCALE},
+        }).collect(),
+    });
+    let record = Record::derive(&anchor, &observation, &ledger).unwrap();
+    assert_eq!(record.crypto_class, 30);
+    assert_eq!(record.assets[30].class_id, 31);
+    assert!(record.assets.iter().all(|asset| asset.reference == (100 * SCALE).to_string()));
+    let projection = record.basic_projection.unwrap();
+    assert!(projection.classes.iter().all(|class| class.backing == "1000000"));
+    ledger.universe.as_mut().unwrap().origins[30].class_id = 30;
+    assert_eq!(Record::derive(&anchor, &observation, &ledger), Err(Error::Invalid));
+}
+
+#[test]
+fn approved_activation_stops_old_universe_preview_names_before_new_roster_uses_them() {
+    use relative_publisher::preview::PreviewCutoff;
+    let (anchor, _, _) = fixture();
+    let cutoff = PreviewCutoff { schema: "relative.inclusion-preview-cutoff/v1".into(),
+        price_digest: anchor.universe_digest, cutoff_timestamp: 10 };
+    assert_eq!(cutoff.limit(&anchor, 20).unwrap(), 10);
+    assert_eq!(cutoff.limit(&anchor, 9).unwrap(), 9);
+    let mut next = anchor.clone(); next.universe_digest = [8; 32];
+    assert_eq!(cutoff.limit(&next, 20).unwrap(), 20);
+    let mut invalid = cutoff.clone(); invalid.schema = "other".into();
+    assert_eq!(invalid.limit(&anchor, 20), Err(Error::Invalid));
 }

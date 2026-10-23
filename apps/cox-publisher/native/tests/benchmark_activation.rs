@@ -36,7 +36,7 @@ fn policy() -> InclusionPolicy {
 fn definition(i: u32) -> AssetDefinition {
     AssetDefinition {
         stable_asset_id: format!("asset-{i}"),
-        token_mint: format!("{}{}", "1".repeat(31), i + 1),
+        token_mint: Some(format!("{}{}", "1".repeat(31), i + 1)),
         exposure_group: format!("underlying-{i}"),
         feed: FeedIdentity::Pro {
             price_feed_id: u64::from(i + 1),
@@ -373,7 +373,7 @@ fn benchmark_capacity_matches_the_full_methodology_universe() {
         universe_digest: [9; 32],
         timestamp_us: 1_000_000,
         benchmark: 100_000_000_000_000,
-        assets: (0..256)
+        assets: (0..255)
             .map(|index| Asset {
                 id: format!("asset-{index}"),
                 feed_id: index + 1,
@@ -382,15 +382,15 @@ fn benchmark_capacity_matches_the_full_methodology_universe() {
             .collect(),
     };
     let mut calculator = Benchmark::new(initial.clone(), Memory::default(), None).unwrap();
-    let prices = vec![200; 256];
+    let prices = vec![200; 255];
     let observation = calculator
         .observe(&batch(2_000_000, &prices), |_| Ok(()))
         .unwrap();
     assert_eq!(observation.benchmark, initial.benchmark * 2);
     let mut oversized = initial;
     oversized.assets.push(Asset {
-        id: "asset-256".into(),
-        feed_id: 257,
+        id: "asset-255".into(),
+        feed_id: 256,
         origin_price_e8: 100,
     });
     assert!(matches!(

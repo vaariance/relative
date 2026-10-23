@@ -15,8 +15,11 @@ async fn main() {
             _=>Err("Usage: relative-publisher run --config PATH"),
         },
         Some("capture-origin") => capture_origin().await,
+        Some("capture-activation") => capture_activation().await,
         Some("prepare-methodology") => prepare_methodology(),
         Some("prepare-inclusion") => prepare_inclusion(),
+        Some("prepare-universe") => prepare_universe(),
+        Some("prepare-genesis-universe") => prepare_genesis_universe(),
         Some("preview") => preview().await,
         Some("backup") => backup().await,
         Some("restore") => restore().await,
@@ -240,9 +243,48 @@ fn prepare_inclusion() -> Result<(), &'static str> {
     if arguments.len() != 4 || arguments[0] != "--request" || arguments[2] != "--output" {
         return Err("Usage: relative-publisher prepare-inclusion --request ABSOLUTE_PATH --output NEW_ABSOLUTE_PATH");
     }
-    let artifact = relative_publisher::preparation::prepare(std::path::Path::new(&arguments[1]), std::path::Path::new(&arguments[3]))
-        .map_err(|_| "Inclusion preparation failed; no runtime configuration or active universe was changed")?;
-    println!("{}", serde_json::json!({"prepared":true,"activated":false,"digest":artifact.digest,"blockers":artifact.blockers}));
+    let artifact = relative_publisher::preparation::prepare(
+        std::path::Path::new(&arguments[1]),
+        std::path::Path::new(&arguments[3]),
+    )
+    .map_err(|_| {
+        "Inclusion preparation failed; no runtime configuration or active universe was changed"
+    })?;
+    println!(
+        "{}",
+        serde_json::json!({"prepared":true,"activated":false,"digest":artifact.digest,"blockers":artifact.blockers})
+    );
+    Ok(())
+}
+
+fn prepare_universe() -> Result<(), &'static str> {
+    let arguments = std::env::args().skip(2).collect::<Vec<_>>();
+    if arguments.len() != 4 || arguments[0] != "--request" || arguments[2] != "--output" {
+        return Err("Usage: relative-publisher prepare-universe --request ABSOLUTE_PATH --output NEW_ABSOLUTE_PATH");
+    }
+    let artifact = relative_publisher::inclusion_pipeline::prepare_file(
+        std::path::Path::new(&arguments[1]),
+        std::path::Path::new(&arguments[3]),
+    ).map_err(|_| "Universe preparation failed; admission, approval schedule, signed capture or lineage validation failed")?;
+    println!("{}", serde_json::json!({
+        "prepared": true, "activated": false,
+        "digest": artifact.digest,
+        "submittedTransactions": 0,
+    }));
+    Ok(())
+}
+
+fn prepare_genesis_universe() -> Result<(), &'static str> {
+    let arguments = std::env::args().skip(2).collect::<Vec<_>>();
+    if arguments.len() != 4 || arguments[0] != "--request" || arguments[2] != "--output" {
+        return Err("Usage: relative-publisher prepare-genesis-universe --request ABSOLUTE_PATH --output NEW_ABSOLUTE_PATH");
+    }
+    let receipt = relative_publisher::universe_runtime::prepare_genesis_file(
+        std::path::Path::new(&arguments[1]), std::path::Path::new(&arguments[3]),
+    ).map_err(|_| "Genesis universe preparation failed; original methodology, capture or identity validation failed")?;
+    let view = receipt.validate().map_err(|_| "Genesis receipt validation failed")?;
+    println!("{}", serde_json::json!({"prepared": true, "activated": false,
+        "digest": hex::encode(view.digest), "assetCount": view.mapping.len(), "submittedTransactions": 0}));
     Ok(())
 }
 
@@ -251,9 +293,17 @@ fn prepare_methodology() -> Result<(), &'static str> {
     if arguments.len() != 4 || arguments[0] != "--request" || arguments[2] != "--output" {
         return Err("Usage: relative-publisher prepare-methodology --request ABSOLUTE_PATH --output NEW_ABSOLUTE_PATH");
     }
-    let artifact = relative_publisher::methodology::prepare_file(std::path::Path::new(&arguments[1]), std::path::Path::new(&arguments[3]))
-        .map_err(|_| "Methodology preparation failed; no signing, submission or runtime changes performed")?;
-    println!("{}", serde_json::json!({"prepared":true,"activated":false,"digest":artifact.digest,"methodology":artifact.methodology_address,"pool":artifact.pool_admission.pool_address,"tradingOpensAt":artifact.pool_admission.trading_opens_at}));
+    let artifact = relative_publisher::methodology::prepare_file(
+        std::path::Path::new(&arguments[1]),
+        std::path::Path::new(&arguments[3]),
+    )
+    .map_err(|_| {
+        "Methodology preparation failed; no signing, submission or runtime changes performed"
+    })?;
+    println!(
+        "{}",
+        serde_json::json!({"prepared":true,"activated":false,"digest":artifact.digest,"methodology":artifact.methodology_address,"pool":artifact.pool_admission.pool_address,"tradingOpensAt":artifact.pool_admission.trading_opens_at})
+    );
     Ok(())
 }
 
@@ -264,15 +314,38 @@ async fn capture_origin() -> Result<(), &'static str> {
     }
     let artifact = relative_publisher::origin::capture_file(std::path::Path::new(&arguments[1]), std::path::Path::new(&arguments[3])).await
         .map_err(|_| "Origin capture failed; request, credentials, devnet, signed feed or output validation failed")?;
-    println!("{}", serde_json::json!({"captured":true,"signatureVerified":true,"feedCount":artifact.assets.len(),"timestampUs":artifact.timestamp_us,"digest":artifact.digest,"submittedTransactions":0}));
+    println!(
+        "{}",
+        serde_json::json!({"captured":true,"signatureVerified":true,"feedCount":artifact.assets.len(),"timestampUs":artifact.timestamp_us,"digest":artifact.digest,"submittedTransactions":0})
+    );
     Ok(())
 }
 
 async fn preview() -> Result<(), &'static str> {
-    let args=std::env::args().skip(2).collect::<Vec<_>>();
-    if args.len()!=4 || args[0]!="--config" || args[2]!="--backup-config" {
+    let args = std::env::args().skip(2).collect::<Vec<_>>();
+    if args.len() != 4 || args[0] != "--config" || args[2] != "--backup-config" {
         return Err("Usage: relative-publisher preview --config PATH --backup-config PATH");
     }
-    relative_publisher::preview::run(std::path::Path::new(&args[1]), std::path::Path::new(&args[3])).await
-        .map_err(|_|"Preview export stopped; configuration, source, storage or upload integrity failed")
+    relative_publisher::preview::run(
+        std::path::Path::new(&args[1]),
+        std::path::Path::new(&args[3]),
+    )
+    .await
+    .map_err(|_| {
+        "Preview export stopped; configuration, source, storage or upload integrity failed"
+    })
+}
+
+async fn capture_activation() -> Result<(), &'static str> {
+    let arguments = std::env::args().skip(2).collect::<Vec<_>>();
+    if arguments.len() != 4 || arguments[0] != "--request" || arguments[2] != "--output" {
+        return Err("Usage: relative-publisher capture-activation --request ABSOLUTE_PATH --output NEW_ABSOLUTE_PATH");
+    }
+    let artifact = relative_publisher::activation::capture_file(std::path::Path::new(&arguments[1]), std::path::Path::new(&arguments[3])).await
+        .map_err(|_| "Activation capture failed; exact boundary, signed feed, continuity or output validation failed; no transaction submitted")?;
+    println!(
+        "{}",
+        serde_json::json!({"captured":true,"activated":false,"signatureVerified":true,"feedCount":artifact.captured.assets.len(),"timestampUs":artifact.captured.timestamp_us,"benchmark":artifact.old_benchmark.to_string(),"digest":artifact.digest,"submittedTransactions":0})
+    );
+    Ok(())
 }

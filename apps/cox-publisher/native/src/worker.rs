@@ -14,6 +14,7 @@ pub enum Error {
     Clock,
     Simulation,
     StaleDraft,
+    UniverseTransition,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransactionStatus {
@@ -30,6 +31,9 @@ pub enum Tick {
 }
 #[allow(async_fn_in_trait)]
 pub trait Chain {
+    fn next_wake_ms(&self) -> Option<u64> {
+        None
+    }
     fn needs_reconciliation(&self) -> bool {
         false
     }
@@ -151,11 +155,14 @@ impl<C: Chain, P: Snapshots, S: Store> Publisher<C, P, S> {
         }
         let work = self.chain.authoritative_work(now_ms).await?;
         match decide(now_ms, &state, &work, self.batch_limit).map_err(|_| Error::Chain)? {
-            Decision::Idle { wake_ms } => Ok(Tick::Idle(if self.chain.needs_reconciliation() {
-                Some(wake_ms.map_or(next_ms, |wake| wake.min(next_ms)))
-            } else {
-                wake_ms
-            })),
+            Decision::Idle { wake_ms } => {
+                let wake_ms = wake_ms.into_iter().chain(self.chain.next_wake_ms()).min();
+                Ok(Tick::Idle(if self.chain.needs_reconciliation() {
+                    Some(wake_ms.map_or(next_ms, |wake| wake.min(next_ms)))
+                } else {
+                    wake_ms
+                }))
+            },
             Decision::Wait { wake_ms } => Ok(Tick::Waiting(wake_ms)),
             Decision::Reconcile => Err(Error::Storage),
             Decision::Maintenance { work, next_pool } => {

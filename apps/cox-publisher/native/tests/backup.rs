@@ -328,7 +328,15 @@ async fn malicious_manifest_paths_and_collisions_are_rejected_before_restore_wri
     let f = Fixture::new();
     let transport = Memory::default();
     let base = backup::capture(&f.config).unwrap();
-    for path in ["../secret", "config.json", "identity.json"] {
+    for path in [
+        "../secret",
+        "config.json",
+        "identity.json",
+        "universes/../identity.json",
+        "universes/capture.json",
+        "universes/abc.json",
+        "universes/",
+    ] {
         let mut manifest = base.clone();
         manifest.entries.push(Entry {
             path: path.into(),
@@ -826,4 +834,139 @@ async fn publication_retention_preserves_cloud_history_and_the_local_predecessor
         .root
         .join("full-publication-recovery/publications/0.json")
         .exists());
+}
+
+#[tokio::test]
+async fn immutable_universe_receipts_survive_retention_and_round_trip_restore() {
+    let mut f = Fixture::new();
+    f.config.incremental = true;
+    f.config.retain_price_seconds = Some(129_600);
+    let universes = f.config.state_directory.join("universes");
+    fs::create_dir(&universes).unwrap();
+    let receipt_path = universes.join(format!("{}.json", "b".repeat(64)));
+    fs::write(&receipt_path, b"immutable-universe-receipt").unwrap();
+    let invalid_path = universes.join("capture.json");
+    fs::write(&invalid_path, b"not-a-committed-receipt").unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        * 1_000_000;
+    let recent = f
+        .config
+        .state_directory
+        .join("prices")
+        .join("a".repeat(64))
+        .join((now / 3_600_000_000).to_string());
+    fs::create_dir_all(&recent).unwrap();
+    fs::write(recent.join(format!("{now}.json")), b"recent").unwrap();
+    let transport = Memory::default();
+    for pass in 0..2 {
+        let report = backup::backup(&f.config, &transport).await.unwrap();
+        let destination = f.root.join(format!("universe-restore-{pass}"));
+        let manifest =
+            backup::restore(&f.config, &transport, &report.manifest_sha256, &destination)
+                .await
+                .unwrap();
+        assert!(manifest
+            .entries
+            .iter()
+            .any(|entry| entry.path == format!("universes/{}.json", "b".repeat(64))));
+        assert!(!manifest
+            .entries
+            .iter()
+            .any(|entry| entry.path == "universes/capture.json"));
+        assert_eq!(
+            fs::read(
+                destination
+                    .join("universes")
+                    .join(receipt_path.file_name().unwrap())
+            )
+            .unwrap(),
+            b"immutable-universe-receipt"
+        );
+        assert_eq!(
+            fs::read(&receipt_path).unwrap(),
+            b"immutable-universe-receipt"
+        );
+        assert!(!f
+            .config
+            .state_directory
+            .join("prices")
+            .join("a".repeat(64))
+            .join("0/1000000.json")
+            .exists());
+    }
+    let mut invalid = f.config.clone();
+    invalid.markers_directory = universes.join("markers");
+    assert_eq!(invalid.validate(), Err(Error::Configuration));
+}
+#[test]
+fn universe_receipts_keep_regular_file_size_and_symlink_safeguards() {
+    let f = Fixture::new();
+    let universes = f.config.state_directory.join("universes");
+    fs::create_dir(&universes).unwrap();
+    let path = universes.join(format!("{}.json", "b".repeat(64)));
+    fs::write(&path, vec![0_u8; f.config.max_file_bytes as usize + 1]).unwrap();
+    assert_eq!(backup::capture(&f.config), Err(Error::Limit));
+    fs::remove_file(&path).unwrap();
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(f.config.state_directory.join("identity.json"), &path).unwrap();
+        assert_eq!(backup::capture(&f.config), Err(Error::UnsafePath));
+        fs::remove_file(&path).unwrap();
+        fs::remove_dir(&universes).unwrap();
+        std::os::unix::fs::symlink(f.config.state_directory.join("prices"), &universes).unwrap();
+        assert_eq!(backup::capture(&f.config), Err(Error::UnsafePath));
+    }
+}
+
+#[tokio::test]
+async fn accepted_epoch_snapshot_journal_is_frozen_and_restored_with_its_signed_work() {
+    let f = Fixture::new();
+    let path = f.config.state_directory.join("epoch-snapshot-stage.json");
+    fs::write(&path, b"accepted-signed-snapshot").unwrap();
+    fs::write(
+        f.config.state_directory.join("inclusion-approved.json"),
+        b"approved-governance",
+    )
+    .unwrap();
+    fs::write(
+        f.config.state_directory.join("inclusion-execution.json"),
+        b"captured-signed-boundary",
+    )
+    .unwrap();
+    fs::write(
+        f.config
+            .state_directory
+            .join("inclusion-preview-cutoff.json"),
+        b"bound-preview-cutoff",
+    )
+    .unwrap();
+    let transport = Memory {
+        mutation: Mutex::new(Some((path.clone(), b"stage-progressed".to_vec()))),
+        ..Memory::default()
+    };
+    let report = backup::backup(&f.config, &transport).await.unwrap();
+    let destination = f.root.join("epoch-stage-restore");
+    backup::restore(&f.config, &transport, &report.manifest_sha256, &destination)
+        .await
+        .unwrap();
+    assert_eq!(
+        fs::read(destination.join("epoch-snapshot-stage.json")).unwrap(),
+        b"accepted-signed-snapshot"
+    );
+    assert_eq!(fs::read(path).unwrap(), b"stage-progressed");
+    assert_eq!(
+        fs::read(destination.join("inclusion-approved.json")).unwrap(),
+        b"approved-governance"
+    );
+    assert_eq!(
+        fs::read(destination.join("inclusion-execution.json")).unwrap(),
+        b"captured-signed-boundary"
+    );
+    assert_eq!(
+        fs::read(destination.join("inclusion-preview-cutoff.json")).unwrap(),
+        b"bound-preview-cutoff"
+    );
 }

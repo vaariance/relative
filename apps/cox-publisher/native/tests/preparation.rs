@@ -26,12 +26,12 @@ impl Fixture {
         let policy = InclusionPolicy {
             minimum_notice_seconds: 100,
             validation_max_age_seconds: 100_000,
-            max_assets: 256,
+            max_assets: 255,
         };
         let scheduled = |index: u32, at: u64| {
             let definition = AssetDefinition {
                 stable_asset_id: format!("asset-{index}"),
-                token_mint: format!("{}{}", "1".repeat(31), index + 2),
+                token_mint: Some(format!("{}{}", "1".repeat(31), index + 2)),
                 exposure_group: format!("underlying-{index}"),
                 feed: FeedIdentity::Pro {
                     price_feed_id: u64::from(index + 1),

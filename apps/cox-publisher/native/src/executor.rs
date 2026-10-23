@@ -2,7 +2,7 @@ use crate::{
     benchmark::{Anchor, Observation},
     chain::{plan_maintenance_for, ChainReader, ChainState},
     scheduler::{DraftTransaction, PendingTransaction, Pool, Work},
-    transactions::{self, BasicPublication, Budget, EpochPrice},
+    transactions::{self, BasicPublication, Budget, DynamicBasicPublication, EpochPrice},
     worker::{self, TransactionStatus},
 };
 use anchor_lang::AccountDeserialize;
@@ -18,9 +18,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AssetMapping {
-    pub basic_id: u8,
+    pub basic_id: u16,
     pub epoch_id: u16,
     pub epoch_feed_id: [u8; 32],
 }
@@ -45,8 +45,15 @@ pub struct Executor<S> {
     discovery: crate::chain::Discovery,
     max_price_age_ms: u64,
     max_feed_age_ms: u64,
+    dynamic: Option<(crate::universe_runtime::View, Anchor)>,
+    snapshot_archive: Option<crate::runtime::SnapshotArchive>,
+    epoch_stage_path: Option<std::path::PathBuf>,
+    epoch_stage: Option<crate::epoch_stage::Stage>,
+    epoch_stage_snapshot: Option<(relative_epoch::SnapshotAccount, usize)>,
+    epoch_retry_ms: u64,
+    inclusion: Option<crate::inclusion_execution::Shared>,
 }
-fn validate_methodology_policy(
+pub(crate) fn validate_methodology_policy(
     methodology: &cox::Methodology,
     anchor: &Anchor,
     mapping: &[AssetMapping],
@@ -68,7 +75,7 @@ fn validate_methodology_policy(
     for (index, id) in policy.roster.iter().enumerate() {
         let position = mapping
             .iter()
-            .position(|mapping| mapping.basic_id == *id)
+            .position(|mapping| mapping.basic_id == u16::from(*id))
             .ok_or(worker::Error::Snapshot)?;
         let asset = &anchor.assets[position];
         if cox::IDS[usize::from(*id)] != asset.id
@@ -99,6 +106,9 @@ fn epoch_selected(work: &[Work], opens: u64) -> bool {
     work.iter().any(|item| id(item).starts_with(&prefix))
 }
 fn is_basic(work: &Work) -> bool {
+    if matches!(work,Work::Close{id,..} if id==crate::inclusion_execution::BOUNDARY_ID) {
+        return true;
+    }
     matches!(
         work,
         Work::Entry {
@@ -125,7 +135,7 @@ impl<S: DraftSigner> Executor<S> {
             || max_operations > 16
             || mapping
                 .iter()
-                .any(|m| m.basic_id >= 30 || m.epoch_id >= 256 || m.epoch_feed_id == [0; 32])
+                .any(|m| m.basic_id >= 256 || m.epoch_id >= 256 || m.epoch_feed_id == [0; 32])
             || mapping
                 .iter()
                 .map(|m| m.basic_id)
@@ -170,6 +180,13 @@ impl<S: DraftSigner> Executor<S> {
             chain_activity: None,
             max_price_age_ms: 5_000,
             max_feed_age_ms: 60_000,
+            dynamic: None,
+            snapshot_archive: None,
+            epoch_stage_path: None,
+            epoch_stage: None,
+            epoch_stage_snapshot: None,
+            epoch_retry_ms: 0,
+            inclusion: None,
         })
     }
     pub fn with_chain_changes(
@@ -194,6 +211,25 @@ impl<S: DraftSigner> Executor<S> {
         self.preview_ledger_path = Some(path);
         self
     }
+    pub fn with_inclusion(mut self, inclusion: crate::inclusion_execution::Shared) -> Self {
+        self.inclusion = Some(inclusion);
+        self
+    }
+    pub fn with_snapshot_archive(mut self, archive: crate::runtime::SnapshotArchive) -> Self {
+        self.snapshot_archive = Some(archive);
+        self
+    }
+    pub fn with_dynamic_view(
+        mut self,
+        view: crate::universe_runtime::View,
+        root: Anchor,
+    ) -> Result<Self, worker::Error> {
+        if view.anchor != self.anchor || view.mapping != self.mapping {
+            return Err(worker::Error::Snapshot);
+        }
+        self.dynamic = Some((view, root));
+        Ok(self)
+    }
     pub fn with_price_policy_limits(
         mut self,
         max_price_age_ms: u64,
@@ -211,6 +247,20 @@ impl<S: DraftSigner> Executor<S> {
         path: impl Into<std::path::PathBuf>,
         first_epoch: u64,
     ) -> Result<Self, worker::Error> {
+        let path = path.into();
+        let stage_path = path
+            .parent()
+            .ok_or(worker::Error::Storage)?
+            .join("epoch-snapshot-stage.json");
+        if let Ok(info) = std::fs::metadata(&stage_path) {
+            if info.len() > 1_048_576 {
+                return Err(worker::Error::Storage);
+            }
+        }
+        self.epoch_stage = crate::journal::read::<Option<crate::epoch_stage::Stage>>(&stage_path)
+            .map_err(|_| worker::Error::Storage)?
+            .flatten();
+        self.epoch_stage_path = Some(stage_path);
         self.discovery = crate::chain::Discovery::load(
             path,
             self.reader.epoch_program,
@@ -296,51 +346,75 @@ impl<S: DraftSigner> Executor<S> {
             .map_err(|_| worker::Error::Storage)
     }
     fn validate_anchor(&self, state: &ChainState) -> Result<(), worker::Error> {
-        validate_methodology_policy(
-            &state.basic.methodology,
-            &self.anchor,
-            &self.mapping,
-            self.max_price_age_ms,
-            self.max_feed_age_ms,
-        )?;
-        if state.basic.pool.origin.checked_mul(1_000_000) != Some(self.anchor.timestamp_us)
-            || state.epoch_config.origin_benchmark != self.anchor.benchmark as u128
-            || state.epoch_config.methodology != state.basic.methodology.digest
-            || state.basic.pool.trading_opens_at > self.discovery.first_epoch()
-        {
-            return Err(worker::Error::Snapshot);
-        }
-        for (index, mapping) in self.mapping.iter().enumerate() {
-            if cox::IDS[usize::from(mapping.basic_id)] != self.anchor.assets[index].id {
+        if let Some((expected, root)) = &self.dynamic {
+            if state.basic.methodology.digest != expected.digest {
+                return Err(worker::Error::UniverseTransition);
+            }
+            let observed = crate::universe_runtime::view(&state.basic.methodology.canonical)
+                .map_err(|_| worker::Error::Snapshot)?;
+            if observed != *expected
+                || state.basic.pool.schema_version != 5
+                || state.basic.pool.origin.checked_mul(1_000_000) != Some(root.timestamp_us)
+                || state.epoch_config.origin_benchmark != root.benchmark as u128
+                || state.epoch_config.methodology != expected.source_methodology
+                || state.basic.pool.origin_prices != expected.original_prices
+                || state.basic.pool.classes.len() != self.mapping.len() + 1
+            {
                 return Err(worker::Error::Snapshot);
             }
-        }
-        if state
-            .basic
-            .methodology
-            .roster
-            .iter()
-            .any(|asset| !self.mapping.iter().any(|m| m.basic_id == *asset))
-        {
-            return Err(worker::Error::Snapshot);
-        }
-        if state.basic.pool.initialized {
-            let expected = state
+        } else {
+            if state.basic.pool.schema_version == 5 {
+                return Err(worker::Error::UniverseTransition);
+            }
+            validate_methodology_policy(
+                &state.basic.methodology,
+                &self.anchor,
+                &self.mapping,
+                self.max_price_age_ms,
+                self.max_feed_age_ms,
+            )?;
+            if state.basic.pool.origin.checked_mul(1_000_000) != Some(self.anchor.timestamp_us)
+                || state.epoch_config.origin_benchmark != self.anchor.benchmark as u128
+                || state.epoch_config.methodology != state.basic.methodology.digest
+                || state.basic.pool.trading_opens_at > self.discovery.first_epoch()
+            {
+                return Err(worker::Error::Snapshot);
+            }
+            for (index, mapping) in self.mapping.iter().enumerate() {
+                if cox::IDS[usize::from(mapping.basic_id)] != self.anchor.assets[index].id {
+                    return Err(worker::Error::Snapshot);
+                }
+            }
+            if state
                 .basic
                 .methodology
                 .roster
                 .iter()
-                .map(|asset| {
-                    self.mapping
-                        .iter()
-                        .position(|m| m.basic_id == *asset)
-                        .map(|i| self.anchor.assets[i].origin_price_e8)
-                        .ok_or(worker::Error::Snapshot)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            if state.basic.pool.origin_prices != expected {
+                .any(|asset| !self.mapping.iter().any(|m| m.basic_id == u16::from(*asset)))
+            {
                 return Err(worker::Error::Snapshot);
             }
+            if state.basic.pool.initialized {
+                let expected = state
+                    .basic
+                    .methodology
+                    .roster
+                    .iter()
+                    .map(|asset| {
+                        self.mapping
+                            .iter()
+                            .position(|m| m.basic_id == u16::from(*asset))
+                            .map(|i| self.anchor.assets[i].origin_price_e8)
+                            .ok_or(worker::Error::Snapshot)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                if state.basic.pool.origin_prices != expected {
+                    return Err(worker::Error::Snapshot);
+                }
+            }
+        }
+        if state.basic.pool.trading_opens_at > self.discovery.first_epoch() {
+            return Err(worker::Error::Snapshot);
         }
         for epoch in &state.epochs {
             for asset in epoch
@@ -357,12 +431,353 @@ impl<S: DraftSigner> Executor<S> {
                         mapping.epoch_id == asset.id && mapping.epoch_feed_id == asset.feed_id
                     })
                     .ok_or(worker::Error::Snapshot)?;
-                if asset.origin_price != u128::from(self.anchor.assets[index].origin_price_e8) {
+                let original = self
+                    .dynamic
+                    .as_ref()
+                    .map(|(view, _)| view.original_prices[index])
+                    .unwrap_or(self.anchor.assets[index].origin_price_e8);
+                if asset.origin_price != u128::from(original) {
                     return Err(worker::Error::Snapshot);
                 }
             }
         }
         Ok(())
+    }
+    fn persist_epoch_stage(
+        &mut self,
+        stage: Option<crate::epoch_stage::Stage>,
+    ) -> Result<(), worker::Error> {
+        let path = self
+            .epoch_stage_path
+            .as_ref()
+            .ok_or(worker::Error::Storage)?;
+        crate::journal::atomic_write(path, &stage).map_err(|_| worker::Error::Storage)?;
+        self.epoch_stage = stage;
+        self.epoch_stage_snapshot = None;
+        Ok(())
+    }
+    async fn read_epoch_stage_snapshot(
+        &self,
+        state: &ChainState,
+        stage: &crate::epoch_stage::Stage,
+    ) -> Result<Option<(relative_epoch::SnapshotAccount, usize)>, worker::Error> {
+        let accounts = transactions::EpochAccounts::derive(
+            self.reader.epoch_program,
+            self.reader.epoch_config,
+            self.discovery.first_epoch(),
+        )
+        .map_err(|_| worker::Error::Chain)?;
+        let value=chain_error(self.reader.rpc.call("getAccountInfo",json!([accounts.snapshot(stage.timestamp()).to_string(),{"commitment":"confirmed","encoding":"base64","minContextSlot":state.slot}])).await)?;
+        let account = value.get("value").ok_or(worker::Error::Chain)?;
+        if account.is_null() {
+            return Ok(None);
+        }
+        if account.get("owner").and_then(|value| value.as_str())
+            != Some(self.reader.epoch_program.to_string().as_str())
+            || account.get("executable").and_then(|value| value.as_bool()) != Some(false)
+        {
+            return Err(worker::Error::Snapshot);
+        }
+        let bytes = STANDARD
+            .decode(
+                account
+                    .pointer("/data/0")
+                    .and_then(|value| value.as_str())
+                    .ok_or(worker::Error::Snapshot)?,
+            )
+            .map_err(|_| worker::Error::Snapshot)?;
+        let saved = relative_epoch::SnapshotAccount::try_deserialize(&mut bytes.as_slice())
+            .map_err(|_| worker::Error::Snapshot)?;
+        stage.verify_snapshot(
+            &saved,
+            &stage.prices(&self.mapping)?,
+            state.epoch_config.methodology,
+        )?;
+        Ok(Some((saved, bytes.len())))
+    }
+    fn epoch_stage_expired(&self, state: &ChainState, stage: &crate::epoch_stage::Stage) -> bool {
+        if stage.closing() {
+            return self.now_ms / 1000
+                > stage
+                    .timestamp()
+                    .saturating_add(cox_epoch::CLOSING_GRACE_SECONDS);
+        }
+        self.now_ms / 1000
+            > stage
+                .timestamp()
+                .saturating_add(state.epoch_config.max_entry_price_age)
+            || !state.epochs.iter().any(|epoch| {
+                epoch_selected(&stage.work, epoch.epoch.opens_at)
+                    && self.now_ms / 1000
+                        < epoch
+                            .epoch
+                            .state
+                            .as_ref()
+                            .map_or(0, |state| state.closes_at())
+            })
+    }
+    fn epoch_stage_work(stage: &crate::epoch_stage::Stage) -> Result<Work, worker::Error> {
+        let first = stage.work.first().ok_or(worker::Error::Storage)?;
+        let mut pieces = id(first).split(':');
+        if pieces.next() != Some("epoch") {
+            return Err(worker::Error::Storage);
+        }
+        let opens = pieces
+            .next()
+            .and_then(|value| value.parse::<u64>().ok())
+            .ok_or(worker::Error::Storage)?;
+        Ok(Work::Maintenance {
+            id: format!("epoch:{opens}:snapshot-stage"),
+            pool: Pool::Epoch,
+        })
+    }
+    async fn prepare_epoch_stage(
+        &mut self,
+        state: &ChainState,
+        work: &[Work],
+        observation: Option<&Observation>,
+    ) -> Result<Vec<Instruction>, worker::Error> {
+        if self.epoch_stage.is_none() {
+            let observation = observation.ok_or(worker::Error::Snapshot)?;
+            self.snapshot_archive
+                .as_ref()
+                .ok_or(worker::Error::Snapshot)?
+                .validate(observation)?;
+            let stage = crate::epoch_stage::Stage {
+                schema: "relative.epoch-snapshot-stage/v1".into(),
+                program: self.reader.epoch_program.to_string(),
+                config: self.reader.epoch_config.to_string(),
+                operator: self.reader.operator.to_string(),
+                anchor: self.anchor.clone(),
+                observation: observation.clone(),
+                work: work
+                    .iter()
+                    .filter(|work| !is_basic(work))
+                    .cloned()
+                    .collect(),
+            };
+            stage.validate(
+                self.reader.epoch_program,
+                self.reader.epoch_config,
+                self.reader.operator,
+                &self.anchor,
+            )?;
+            let saved = self.read_epoch_stage_snapshot(state, &stage).await?;
+            self.persist_epoch_stage(Some(stage))?;
+            self.epoch_stage_snapshot = saved;
+        }
+        let stage = self.epoch_stage.as_ref().ok_or(worker::Error::Storage)?;
+        stage.validate(
+            self.reader.epoch_program,
+            self.reader.epoch_config,
+            self.reader.operator,
+            &self.anchor,
+        )?;
+        let accounts = transactions::EpochAccounts::derive(
+            self.reader.epoch_program,
+            self.reader.epoch_config,
+            self.discovery.first_epoch(),
+        )
+        .map_err(|_| worker::Error::Chain)?;
+        if self.epoch_stage_expired(state, stage) {
+            return Ok(vec![
+                accounts.close_snapshot(self.reader.operator, stage.timestamp())
+            ]);
+        }
+        self.snapshot_archive
+            .as_ref()
+            .ok_or(worker::Error::Snapshot)?
+            .validate(&stage.observation)?;
+        let prices = stage.prices(&self.mapping)?;
+        let saved = self
+            .epoch_stage_snapshot
+            .as_ref()
+            .map(|(snapshot, space)| (snapshot, *space));
+        let mut instructions = stage.plan(&accounts, self.reader.operator, saved, &prices)?;
+        if saved.is_some_and(|(snapshot, _)| snapshot.sealed) {
+            for epoch in &state.epochs {
+                if !epoch_selected(&stage.work, epoch.epoch.opens_at) {
+                    continue;
+                }
+                let current = epoch.epoch.state.as_ref().ok_or(worker::Error::Chain)?;
+                if stage.closing()
+                    && current.phase() == cox_epoch::Phase::Open
+                    && current.closes_at() == stage.timestamp()
+                {
+                    instructions.push(
+                        epoch
+                            .accounts
+                            .begin_close(self.reader.operator, stage.timestamp()),
+                    );
+                } else if !stage.closing() {
+                    for lot in &epoch.lots {
+                        if stage.work.iter().any(|work| {
+                            id(work) == format!("epoch:{}:{}", epoch.epoch.opens_at, lot.nonce)
+                        }) && matches!(
+                            lot.state.as_ref().map(|lot| lot.state()),
+                            Some(cox_epoch::LotState::Pending)
+                        ) {
+                            instructions.push(epoch.accounts.execute(
+                                self.reader.operator,
+                                lot.nonce,
+                                stage.timestamp(),
+                            ));
+                        }
+                    }
+                }
+            }
+            instructions.push(accounts.close_snapshot(self.reader.operator, stage.timestamp()));
+        }
+        Ok(instructions)
+    }
+    fn dynamic_publication(
+        &self,
+        state: &ChainState,
+        observation: &Observation,
+    ) -> Result<DynamicBasicPublication, worker::Error> {
+        let universe = cox::read_dynamic_manifest(&state.basic.methodology)
+            .map_err(|_| worker::Error::Snapshot)?;
+        let timestamp = observation.timestamp_us / 1_000_000;
+        if state.basic.batch.is_none()
+            && timestamp
+                .checked_sub(state.basic.pool.origin)
+                .is_none_or(|batch| {
+                    batch
+                        <= state
+                            .basic
+                            .pool
+                            .last_batch
+                            .max(state.basic.pool.stage_batch)
+                })
+        {
+            return Err(worker::Error::Snapshot);
+        }
+        if observation.universe_digest != self.anchor.universe_digest
+            || observation.timestamp_us % 1_000_000 != 0
+            || observation.prices_e8.len() != self.mapping.len()
+        {
+            return Err(worker::Error::Snapshot);
+        }
+        let prices = universe
+            .instruments
+            .iter()
+            .map(|instrument| {
+                self.mapping
+                    .iter()
+                    .position(|mapping| {
+                        mapping.basic_id == instrument.class_id
+                            && mapping.epoch_id == instrument.epoch_id
+                    })
+                    .map(|index| observation.prices_e8[index])
+                    .ok_or(worker::Error::Snapshot)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let value = DynamicBasicPublication {
+            publication: BasicPublication {
+                origin: state.basic.pool.origin,
+                batch_id: timestamp
+                    .checked_sub(state.basic.pool.origin)
+                    .ok_or(worker::Error::Snapshot)?,
+                sequence: state
+                    .basic
+                    .pool
+                    .sequence
+                    .checked_add(1)
+                    .ok_or(worker::Error::Chain)?,
+                predecessor: state.basic.pool.state_digest,
+                timestamp,
+                benchmark: observation.benchmark,
+                roster: universe
+                    .instruments
+                    .iter()
+                    .map(|instrument| {
+                        u8::try_from(instrument.class_id).map_err(|_| worker::Error::Snapshot)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+                prices_e8: prices,
+            },
+            universe,
+        };
+        value
+            .snapshot_digest()
+            .map_err(|_| worker::Error::Snapshot)?;
+        Ok(value)
+    }
+    fn resume_dynamic_prices(&self, state: &ChainState) -> Result<Vec<Instruction>, worker::Error> {
+        let batch = state
+            .basic
+            .batch
+            .as_ref()
+            .filter(|batch| batch.phase == 4 && batch.schema_version == 4)
+            .ok_or(worker::Error::Chain)?;
+        let observation = self
+            .snapshot_archive
+            .as_ref()
+            .ok_or(worker::Error::Snapshot)?
+            .accepted(
+                batch
+                    .cutoff
+                    .checked_mul(1_000_000)
+                    .ok_or(worker::Error::Clock)?,
+            )?;
+        self.resume_dynamic_prices_from(state, &observation)
+    }
+    fn resume_dynamic_prices_from(
+        &self,
+        state: &ChainState,
+        observation: &Observation,
+    ) -> Result<Vec<Instruction>, worker::Error> {
+        let batch = state
+            .basic
+            .batch
+            .as_ref()
+            .filter(|batch| batch.phase == 4 && batch.schema_version == 4)
+            .ok_or(worker::Error::Chain)?;
+        let publication = self.dynamic_publication(state, observation)?;
+        if publication.publication.batch_id != batch.batch_id
+            || publication.publication.sequence != batch.sequence
+            || publication.publication.predecessor != batch.predecessor_digest
+            || publication.publication.benchmark != batch.benchmark
+            || publication
+                .snapshot_digest()
+                .map_err(|_| worker::Error::Snapshot)?
+                != batch.snapshot_digest
+            || batch.prices.len() > publication.publication.prices_e8.len()
+            || batch
+                .prices
+                .iter()
+                .zip(&publication.publication.prices_e8)
+                .any(|(saved, price)| {
+                    saved.price_e8 != *price
+                        || saved.venue != 3
+                        || saved.step != 0
+                        || saved.candle_start != batch.cutoff
+                        || saved.trade_age_minutes != 0
+                })
+        {
+            return Err(worker::Error::Snapshot);
+        }
+        let mut instructions = Vec::new();
+        for (page, prices) in publication.publication.prices_e8[batch.prices.len()..]
+            .chunks(16)
+            .enumerate()
+        {
+            instructions.push(
+                state
+                    .basic
+                    .accounts
+                    .append_dynamic_prices(
+                        self.reader.operator,
+                        u16::try_from(batch.prices.len() + page * 16)
+                            .map_err(|_| worker::Error::Chain)?,
+                        batch.cutoff,
+                        prices,
+                    )
+                    .map_err(|_| worker::Error::Snapshot)?,
+            );
+        }
+        instructions.push(state.basic.accounts.seal_dynamic(self.reader.operator));
+        Ok(instructions)
     }
     fn publication_instructions(
         &self,
@@ -384,47 +799,83 @@ impl<S: DraftSigner> Executor<S> {
             if state.basic.registry.paused || state.basic.batch.is_some() {
                 return Err(worker::Error::Chain);
             }
-            let prices = state
-                .basic
-                .methodology
-                .roster
-                .iter()
-                .map(|asset| {
-                    self.mapping
-                        .iter()
-                        .position(|m| m.basic_id == *asset)
-                        .map(|i| observation.prices_e8[i])
-                        .ok_or(worker::Error::Snapshot)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let publication = BasicPublication {
-                origin: state.basic.pool.origin,
-                batch_id: timestamp
-                    .checked_sub(state.basic.pool.origin)
-                    .ok_or(worker::Error::Snapshot)?,
-                sequence: if state.basic.pool.initialized {
+            let dynamic = state.basic.pool.schema_version == 5;
+            if dynamic {
+                let publication = self.dynamic_publication(state, observation)?;
+                instructions.push(
                     state
                         .basic
-                        .pool
-                        .sequence
-                        .checked_add(1)
-                        .ok_or(worker::Error::Chain)?
-                } else {
-                    0
-                },
-                predecessor: state.basic.pool.state_digest,
-                timestamp,
-                benchmark: observation.benchmark,
-                roster: state.basic.methodology.roster.clone(),
-                prices_e8: prices,
-            };
-            instructions.push(chain_error(
-                state
+                        .accounts
+                        .begin_dynamic(self.reader.operator, &publication)
+                        .map_err(|_| worker::Error::Snapshot)?,
+                );
+                for (page, prices) in publication.publication.prices_e8.chunks(16).enumerate() {
+                    instructions.push(
+                        state
+                            .basic
+                            .accounts
+                            .append_dynamic_prices(
+                                self.reader.operator,
+                                (page * 16) as u16,
+                                timestamp,
+                                prices,
+                            )
+                            .map_err(|_| worker::Error::Snapshot)?,
+                    );
+                }
+                instructions.push(state.basic.accounts.seal_dynamic(self.reader.operator));
+            } else {
+                let prices = state
                     .basic
-                    .accounts
-                    .publish(self.reader.operator, &publication),
-            )?);
-            for request in state.basic.requests.iter().take(self.max_operations) {
+                    .methodology
+                    .roster
+                    .iter()
+                    .map(|asset| {
+                        self.mapping
+                            .iter()
+                            .position(|m| m.basic_id == u16::from(*asset))
+                            .map(|i| observation.prices_e8[i])
+                            .ok_or(worker::Error::Snapshot)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let publication = BasicPublication {
+                    origin: state.basic.pool.origin,
+                    batch_id: timestamp
+                        .checked_sub(state.basic.pool.origin)
+                        .ok_or(worker::Error::Snapshot)?,
+                    sequence: if state.basic.pool.initialized {
+                        state
+                            .basic
+                            .pool
+                            .sequence
+                            .checked_add(1)
+                            .ok_or(worker::Error::Chain)?
+                    } else {
+                        0
+                    },
+                    predecessor: state.basic.pool.state_digest,
+                    timestamp,
+                    benchmark: observation.benchmark,
+                    roster: state.basic.methodology.roster.clone(),
+                    prices_e8: prices,
+                };
+                instructions.push(chain_error(
+                    state
+                        .basic
+                        .accounts
+                        .publish(self.reader.operator, &publication),
+                )?);
+            }
+            for request in state
+                .basic
+                .requests
+                .iter()
+                .take(if dynamic && self.mapping.len() > 32 {
+                    0
+                } else {
+                    self.max_operations
+                })
+            {
                 instructions.push(state.basic.accounts.process(
                     request.nonce,
                     solana_address::Address::new_from_array(request.owner.to_bytes()),
@@ -606,6 +1057,13 @@ fn critical_digest(state: &ChainState) -> [u8; 32] {
         hash.update(batch.cursor.to_le_bytes());
         hash.update([batch.phase]);
         hash.update(batch.closed_queue_end.to_le_bytes());
+        hash.update((batch.prices.len() as u32).to_le_bytes());
+        for price in &batch.prices {
+            hash.update(price.price_e8.to_le_bytes());
+            hash.update([price.venue, price.step]);
+            hash.update(price.candle_start.to_le_bytes());
+            hash.update(price.trade_age_minutes.to_le_bytes());
+        }
     } else {
         hash.update([0]);
     }
@@ -653,6 +1111,40 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
     fn needs_reconciliation(&self) -> bool {
         self.discovery.incomplete
     }
+    fn next_wake_ms(&self) -> Option<u64> {
+        let inclusion = self.inclusion.as_ref().and_then(|control| {
+            control
+                .lock()
+                .ok()
+                .and_then(|control| control.wake_ms(self.now_ms))
+        });
+        let epoch = if self.epoch_retry_ms > self.now_ms {
+            if let Some(stage) = self.epoch_stage.as_ref() {
+                let age = if stage.closing() {
+                    cox_epoch::CLOSING_GRACE_SECONDS
+                } else {
+                    self.last_state
+                        .as_ref()
+                        .map(|state| state.epoch_config.max_entry_price_age)
+                        .unwrap_or(60)
+                };
+                Some(
+                    self.epoch_retry_ms.min(
+                        stage
+                            .timestamp()
+                            .saturating_add(age)
+                            .saturating_add(1)
+                            .saturating_mul(1000),
+                    ),
+                )
+            } else {
+                Some(self.epoch_retry_ms)
+            }
+        } else {
+            None
+        };
+        inclusion.into_iter().chain(epoch).min()
+    }
     async fn authoritative_work(&mut self, now_ms: u64) -> Result<Vec<Work>, worker::Error> {
         self.now_ms = now_ms;
         let state = self.read_state().await?;
@@ -699,7 +1191,40 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
                 }
             }
         }
-        let work = chain_error(state.work(now_ms))?;
+        let mut work = chain_error(state.work(now_ms))?;
+        if self.epoch_stage.is_none() && now_ms < self.epoch_retry_ms {
+            work.retain(is_basic);
+        }
+        if let Some(stage) = self.epoch_stage.clone() {
+            stage.validate(
+                self.reader.epoch_program,
+                self.reader.epoch_config,
+                self.reader.operator,
+                &self.anchor,
+            )?;
+            if self.now_ms < self.epoch_retry_ms && !self.epoch_stage_expired(&state, &stage) {
+                work.retain(is_basic);
+            } else {
+                self.epoch_retry_ms = 0;
+                self.epoch_stage_snapshot = self.read_epoch_stage_snapshot(&state, &stage).await?;
+                let still_pending = stage.work.iter().any(|item| work.contains(item));
+                if self.epoch_stage_snapshot.is_none()
+                    && (!still_pending || self.epoch_stage_expired(&state, &stage))
+                {
+                    self.persist_epoch_stage(None)?;
+                } else {
+                    work.retain(is_basic);
+                    work.push(Self::epoch_stage_work(&stage)?);
+                }
+            }
+        }
+        if let Some(control) = &self.inclusion {
+            let inclusion_work =
+                crate::inclusion_execution::observe(control, &self.reader.rpc, &state, now_ms)
+                    .await?;
+            crate::inclusion_execution::filter_work(control, now_ms, &mut work)?;
+            work.extend(inclusion_work.into_iter().filter(|work|!matches!(work,Work::Maintenance{id,..} if id==crate::inclusion_execution::ROLLOUT_ID && self.epoch_stage.is_some())));
+        }
         self.last_state = Some(state);
         Ok(work)
     }
@@ -711,18 +1236,83 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
         if work.is_empty() {
             return Err(worker::Error::Chain);
         }
+        let pool_work: Vec<_> = if self.mapping.len() > 30 || self.epoch_stage.is_some() {
+            let basic = is_basic(&work[0]);
+            work.iter()
+                .filter(|item| is_basic(item) == basic)
+                .cloned()
+                .collect()
+        } else {
+            work.to_vec()
+        };
+        let work = pool_work.as_slice();
         let state = match self.last_state.take() {
             Some(state) => state,
             None => self.read_state().await?,
         };
         self.validate_anchor(&state)?;
         let authoritative = chain_error(state.work(self.now_ms))?;
-        if work.iter().any(|item| !authoritative.contains(item)) {
+        if work.iter().any(|item| {
+            !authoritative.contains(item)
+                && !(self.inclusion.is_some()
+                    && crate::inclusion_execution::Controller::matches(item))
+                && !self
+                    .epoch_stage
+                    .as_ref()
+                    .is_some_and(|stage| Self::epoch_stage_work(stage).as_ref() == Ok(item))
+        }) {
             return Err(worker::Error::Chain);
         }
         self.preserve_publication(&state).await?;
         let guard = critical_digest(&state);
-        let mut instructions = if let Some(observation) = observation {
+        let has_epoch_work = work.iter().any(|work| !is_basic(work));
+        let staged_epoch =
+            has_epoch_work && (self.epoch_stage.is_some() || self.mapping.len() > 30);
+        let rollout=work.iter().any(|work|matches!(work,Work::Maintenance{id,..} if id==crate::inclusion_execution::ROLLOUT_ID));
+        let mut instructions = if rollout {
+            let control = self.inclusion.as_ref().ok_or(worker::Error::Chain)?;
+            let mut outcome = crate::inclusion_execution::plan(
+                control,
+                &self.reader.rpc,
+                &state,
+                self.reader.operator,
+                self.now_ms,
+                self.epoch_stage.is_some(),
+            )
+            .await?;
+            if matches!(outcome, crate::inclusion_execution::Action::Waiting) {
+                outcome = crate::inclusion_execution::plan(
+                    control,
+                    &self.reader.rpc,
+                    &state,
+                    self.reader.operator,
+                    self.now_ms,
+                    self.epoch_stage.is_some(),
+                )
+                .await?;
+            }
+            match outcome {
+                crate::inclusion_execution::Action::Instructions(instructions) => instructions,
+                crate::inclusion_execution::Action::Restart => {
+                    return Err(worker::Error::UniverseTransition)
+                }
+                crate::inclusion_execution::Action::Waiting => {
+                    return Err(worker::Error::StaleDraft)
+                }
+            }
+        } else if staged_epoch {
+            match self.prepare_epoch_stage(&state, work, observation).await {
+                Ok(instructions) => {
+                    self.epoch_retry_ms = 0;
+                    instructions
+                }
+                Err(worker::Error::Snapshot) => {
+                    self.epoch_retry_ms = self.now_ms.saturating_add(20 * 60 * 1000);
+                    return Err(worker::Error::Snapshot);
+                }
+                Err(error) => return Err(error),
+            }
+        } else if let Some(observation) = observation {
             let mut instructions = self.publication_instructions(&state, work, observation)?;
             if work.iter().any(|item| !is_basic(item)) {
                 self.existing_epoch_snapshots(
@@ -741,13 +1331,23 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
             {
                 return Err(worker::Error::Chain);
             }
-            chain_error(plan_maintenance_for(
-                &state,
-                self.reader.operator,
-                self.now_ms / 1000,
-                self.max_operations,
-                work,
-            ))?
+            if work.iter().any(is_basic)
+                && state
+                    .basic
+                    .batch
+                    .as_ref()
+                    .is_some_and(|batch| batch.phase == 4)
+            {
+                self.resume_dynamic_prices(&state)?
+            } else {
+                chain_error(plan_maintenance_for(
+                    &state,
+                    self.reader.operator,
+                    self.now_ms / 1000,
+                    self.max_operations,
+                    work,
+                ))?
+            }
         };
         if instructions.is_empty() {
             return Err(worker::Error::Chain);
@@ -821,7 +1421,7 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
                 && (!state.basic.pool.initialized && clock < state.basic.pool.trading_opens_at)
             {
                 expiry = expiry.min(state.basic.pool.trading_opens_at);
-            } else if work.iter().any(is_basic) {
+            } else if work.iter().any(is_basic) && !staged_epoch {
                 expiry = expiry.min(
                     (observation.timestamp_us / 1_000_000)
                         .checked_add(6)
@@ -844,6 +1444,26 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
                             .closes_at(),
                     );
                 }
+            }
+        }
+        if staged_epoch {
+            if let Some(stage) = self
+                .epoch_stage
+                .as_ref()
+                .filter(|stage| !self.epoch_stage_expired(&state, stage))
+            {
+                let age = if stage.closing() {
+                    cox_epoch::CLOSING_GRACE_SECONDS
+                } else {
+                    state.epoch_config.max_entry_price_age
+                };
+                expiry = expiry.min(
+                    stage
+                        .timestamp()
+                        .checked_add(age)
+                        .and_then(|end| end.checked_add(1))
+                        .ok_or(worker::Error::Clock)?,
+                );
             }
         }
         if expiry <= clock {
@@ -990,6 +1610,7 @@ impl DraftSigner for crate::signing::RemoteSigner {
 mod tests {
     use super::*;
     use crate::{benchmark::Asset, chain::tests::state, rpc::Rpc};
+    use anchor_lang::Discriminator;
     use std::sync::Arc;
     struct NeverSigner;
     impl DraftSigner for NeverSigner {
@@ -1072,6 +1693,203 @@ mod tests {
         methodology.sealed = true;
         methodology.origin = config.origin;
         methodology.roster = config.roster;
+    }
+    fn dynamic_executor(count: usize) -> Executor<NeverSigner> {
+        let mut executor = executor();
+        let universe = transactions::dynamic_test_universe(count);
+        let view = crate::universe_runtime::view(&universe.canonical_bytes().unwrap()).unwrap();
+        executor.anchor = view.anchor.clone();
+        executor.mapping = view.mapping.clone();
+        executor.dynamic = Some((view, executor.anchor.clone()));
+        executor
+    }
+    #[test]
+    fn dynamic_partial_price_restart_reuses_exact_accepted_timestamp_and_rejects_changed_prefix() {
+        let executor = dynamic_executor(255);
+        let mut state = crate::chain::tests::dynamic_stage(255, 4, 0);
+        let observation = Observation {
+            universe_digest: executor.anchor.universe_digest,
+            timestamp_us: 14_410_000_000,
+            benchmark: 101 * cox_math::SCALE,
+            prices_e8: vec![101; 255],
+            signed_payload: vec![1],
+        };
+        let publication = executor.dynamic_publication(&state, &observation).unwrap();
+        let batch = state.basic.batch.as_mut().unwrap();
+        batch.snapshot_digest = publication.snapshot_digest().unwrap();
+        batch.prices = (0..32)
+            .map(|_| cox::PriceWire {
+                price_e8: 101,
+                venue: 3,
+                step: 0,
+                candle_start: 14_410,
+                trade_age_minutes: 0,
+            })
+            .collect();
+        let instructions = executor
+            .resume_dynamic_prices_from(&state, &observation)
+            .unwrap();
+        assert_eq!(instructions.len(), 15);
+        assert_eq!(
+            instructions[0],
+            state
+                .basic
+                .accounts
+                .append_dynamic_prices(executor.reader.operator, 32, 14_410, &[101; 16])
+                .unwrap()
+        );
+        assert_eq!(
+            instructions.last().unwrap(),
+            &state.basic.accounts.seal_dynamic(executor.reader.operator)
+        );
+        let restarted = dynamic_executor(255);
+        assert_eq!(
+            restarted
+                .resume_dynamic_prices_from(&state, &observation)
+                .unwrap(),
+            instructions
+        );
+        let mut wrong_time = observation.clone();
+        wrong_time.timestamp_us += 1_000_000;
+        assert!(matches!(
+            executor.resume_dynamic_prices_from(&state, &wrong_time),
+            Err(worker::Error::Snapshot)
+        ));
+        state.basic.batch.as_mut().unwrap().prices[0].price_e8 = 102;
+        assert!(matches!(
+            executor.resume_dynamic_prices_from(&state, &observation),
+            Err(worker::Error::Snapshot)
+        ));
+    }
+    #[test]
+    fn dynamic_initial_publication_uses_staged_abi_and_defers_requests_for_large_universe() {
+        let executor = dynamic_executor(255);
+        let state = crate::chain::tests::dynamic_state(255);
+        let observation = Observation {
+            universe_digest: executor.anchor.universe_digest,
+            timestamp_us: 14_410_000_000,
+            benchmark: 101 * cox_math::SCALE,
+            prices_e8: vec![101; 255],
+            signed_payload: vec![1],
+        };
+        let work = vec![Work::Entry {
+            id: "basic:request".into(),
+            pool: Pool::Basic,
+            eligible_after_ms: 0,
+        }];
+        let instructions = executor
+            .publication_instructions(&state, &work, &observation)
+            .unwrap();
+        assert_eq!(instructions.len(), 18);
+        assert_eq!(
+            &instructions[0].data[..8],
+            &Sha256::digest(b"global:begin_dynamic_publication")[..8]
+        );
+        assert_eq!(
+            &instructions[17].data[..8],
+            &Sha256::digest(b"global:seal_dynamic_publication")[..8]
+        );
+        let mut state = crate::chain::tests::dynamic_stage(255, 4, 0);
+        let before = critical_digest(&state);
+        state
+            .basic
+            .batch
+            .as_mut()
+            .unwrap()
+            .prices
+            .push(cox::PriceWire {
+                price_e8: 101,
+                venue: 3,
+                step: 0,
+                candle_start: 14_410,
+                trade_age_minutes: 0,
+            });
+        assert_ne!(before, critical_digest(&state));
+    }
+    #[tokio::test]
+    async fn staged_epoch_executes_only_original_pending_lot_and_preserves_exact_close_deadline() {
+        let mut executor = dynamic_executor(31);
+        let mut state = crate::chain::tests::dynamic_state(31);
+        state.epoch_config.max_entry_price_age = 60;
+        state.epochs.push(crate::chain::tests::epoch(true));
+        let observation = Observation {
+            universe_digest: executor.anchor.universe_digest,
+            timestamp_us: 14_410_000_000,
+            benchmark: 101 * cox_math::SCALE,
+            prices_e8: vec![101; 31],
+            signed_payload: vec![1],
+        };
+        let work = vec![Work::Entry {
+            id: "epoch:14400:0".into(),
+            pool: Pool::Epoch,
+            eligible_after_ms: 14_401_000,
+        }];
+        let stage = crate::epoch_stage::Stage {
+            schema: "relative.epoch-snapshot-stage/v1".into(),
+            program: executor.reader.epoch_program.to_string(),
+            config: executor.reader.epoch_config.to_string(),
+            operator: executor.reader.operator.to_string(),
+            anchor: executor.anchor.clone(),
+            observation: observation.clone(),
+            work: work.clone(),
+        };
+        let path = std::env::temp_dir().join(format!("epoch-executor-{}", std::process::id()));
+        let archive = crate::runtime::SnapshotArchive::new(
+            executor.anchor.clone(),
+            crate::journal::FileHistory {
+                directory: path.join("prices"),
+            },
+            5_000,
+        )
+        .unwrap();
+        executor.snapshot_archive = Some(archive);
+        executor.epoch_stage = Some(stage.clone());
+        executor.now_ms = 14_411_000;
+        let mut data = relative_epoch::SnapshotAccount::DISCRIMINATOR.to_vec();
+        data.resize(20_000, 0);
+        let mut snapshot =
+            relative_epoch::SnapshotAccount::try_deserialize(&mut data.as_slice()).unwrap();
+        snapshot.sealed = true;
+        executor.epoch_stage_snapshot = Some((snapshot, 4_096));
+        let instructions = executor
+            .prepare_epoch_stage(
+                &state,
+                &[Executor::<NeverSigner>::epoch_stage_work(&stage).unwrap()],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            instructions,
+            vec![
+                state.epochs[0]
+                    .accounts
+                    .execute(executor.reader.operator, 0, 14_410),
+                state.epochs[0]
+                    .accounts
+                    .close_snapshot(executor.reader.operator, 14_410)
+            ]
+        );
+        executor.now_ms = 14_471_000;
+        assert!(executor.epoch_stage_expired(&state, &stage));
+        let mut closing = stage.clone();
+        closing.observation.timestamp_us = 28_800_000_000;
+        closing.work = vec![Work::Close {
+            id: "epoch:14400:close".into(),
+            timestamp_ms: 28_800_000,
+        }];
+        executor.now_ms = (28_800 + cox_epoch::CLOSING_GRACE_SECONDS) * 1000;
+        assert!(!executor.epoch_stage_expired(&state, &closing));
+        executor.now_ms += 1_000;
+        assert!(executor.epoch_stage_expired(&state, &closing));
+        executor.epoch_stage = Some(closing);
+        executor.now_ms = 28_801_000;
+        executor.epoch_retry_ms = executor.now_ms + 1_200_000;
+        assert_eq!(worker::Chain::next_wake_ms(&executor), Some(30_001_000));
+        executor.epoch_stage = None;
+        assert_eq!(worker::Chain::next_wake_ms(&executor), Some(30_001_000));
+
+        let _ = std::fs::remove_dir_all(path);
     }
     #[test]
     fn adaptive_policy_pins_feeds_origin_prices_universe_and_freshness_before_signing() {

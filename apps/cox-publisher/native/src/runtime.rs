@@ -194,7 +194,11 @@ pub struct SnapshotArchive {
     max_feed_age_us: u64,
 }
 impl SnapshotArchive {
-    fn new(anchor: Anchor, history: FileHistory, max_age_ms: u64) -> Result<Self, Error> {
+    pub(crate) fn new(
+        anchor: Anchor,
+        history: FileHistory,
+        max_age_ms: u64,
+    ) -> Result<Self, Error> {
         let resumed = history
             .latest_for_anchor(&anchor)
             .map_err(|_| Error::Storage)?;
@@ -209,7 +213,23 @@ impl SnapshotArchive {
             max_feed_age_us: 60_000_000,
         })
     }
-    fn validate(&self, value: &Observation) -> Result<(), worker::Error> {
+    pub(crate) fn trusted_keys(&self) -> Result<Vec<pyth::TrustedSigner>, worker::Error> {
+        self.trusted_signers
+            .read()
+            .map_err(|_| worker::Error::Storage)?
+            .clone()
+            .ok_or(worker::Error::Snapshot)
+    }
+    pub(crate) fn accepted(&self, timestamp_us: u64) -> Result<Observation, worker::Error> {
+        let value = self
+            .history
+            .exact(&self.anchor.universe_digest, timestamp_us)
+            .map_err(|_| worker::Error::Storage)?
+            .ok_or(worker::Error::Snapshot)?;
+        self.validate(&value)?;
+        Ok(value)
+    }
+    pub(crate) fn validate(&self, value: &Observation) -> Result<(), worker::Error> {
         if value.timestamp_us % 1_000_000 != 0 {
             return Err(worker::Error::Snapshot);
         }
@@ -411,7 +431,7 @@ async fn benchmark_task(
         }
     }
 }
-async fn pyth_task(
+pub(crate) async fn pyth_task(
     config: PythConfig,
     prices: mpsc::Sender<Vec<u8>>,
     mut stop: watch::Receiver<bool>,
@@ -573,6 +593,52 @@ pub async fn run(path: &Path) -> Result<(), Error> {
             .parse()
             .map_err(|_| Error::Configuration)?,
     };
+    let mut boot_discovery = crate::chain::Discovery::new(
+        reader.epoch_program,
+        reader.epoch_config,
+        config.first_epoch_opens_at,
+    )
+    .map_err(|_| Error::Configuration)?;
+    let boot_state =
+        crate::rpc::with_trigger("startup", reader.read_with_discovery(&mut boot_discovery))
+            .await
+            .map_err(|_| Error::Network)?;
+    let dynamic = if boot_state.basic.pool.schema_version == 5 {
+        let universe = cox::read_dynamic_manifest(&boot_state.basic.methodology)
+            .map_err(|_| Error::Configuration)?;
+        let root =
+            crate::rpc::with_trigger("startup", reader.methodology(universe.source_methodology))
+                .await
+                .map_err(|_| Error::Network)?;
+        crate::executor::validate_methodology_policy(
+            &root,
+            &config.anchor,
+            &config.mapping,
+            config.max_price_age_ms,
+            config.max_feed_age_ms,
+        )
+        .map_err(|_| Error::Configuration)?;
+        let view = crate::universe_runtime::reconcile_committed(
+            &config.state_directory,
+            &boot_state.basic.methodology.canonical,
+            &config.anchor,
+        )
+        .map_err(|_| Error::Storage)?;
+        if view.source_methodology != root.digest {
+            return Err(Error::Configuration);
+        }
+        Some(view)
+    } else {
+        None
+    };
+    let active_anchor = dynamic
+        .as_ref()
+        .map(|view| view.anchor.clone())
+        .unwrap_or_else(|| config.anchor.clone());
+    let active_mapping = dynamic
+        .as_ref()
+        .map(|view| view.mapping.clone())
+        .unwrap_or_else(|| config.mapping.clone());
     let changes = Arc::new(
         crate::changes::ChainChanges::open(&config.state_directory.join("chain-change.json"))
             .map_err(|_| Error::Storage)?,
@@ -596,11 +662,21 @@ pub async fn run(path: &Path) -> Result<(), Error> {
         test_vault.to_string(),
     ]);
     let (wakes, mut wake) = watch::channel(WakeHint::default());
+    let inclusion = crate::inclusion_execution::Controller::open(&config.state_directory)
+        .map_err(|_| Error::Configuration)?;
+    if inclusion
+        .lock()
+        .map_err(|_| Error::Storage)?
+        .refresh_file()
+        .is_err()
+    {
+        eprintln!("Inclusion approval rejected; current universe remains active");
+    }
     let chain = Executor::new(
         reader,
         signer,
-        config.anchor.clone(),
-        config.mapping.clone(),
+        active_anchor.clone(),
+        active_mapping,
         Budget {
             compute_units: config.compute_units,
             priority_fee_lamports: config.priority_fee_lamports,
@@ -611,6 +687,7 @@ pub async fn run(path: &Path) -> Result<(), Error> {
     .map_err(|_| Error::Configuration)?
     .with_price_policy_limits(config.max_price_age_ms, config.max_feed_age_ms)
     .map_err(|_| Error::Configuration)?
+    .with_inclusion(inclusion.clone())
     .with_chain_changes(changes.clone())
     .with_chain_activity(wake.clone())
     .with_wake_accounts(custody_watches)
@@ -621,8 +698,15 @@ pub async fn run(path: &Path) -> Result<(), Error> {
         config.first_epoch_opens_at,
     )
     .map_err(|_| Error::Configuration)?;
+    let chain = if let Some(view) = dynamic {
+        chain
+            .with_dynamic_view(view, config.anchor.clone())
+            .map_err(|_| Error::Configuration)?
+    } else {
+        chain
+    };
     let mut archive = SnapshotArchive::new(
-        config.anchor.clone(),
+        active_anchor.clone(),
         FileHistory {
             directory: config.state_directory.join("prices"),
         },
@@ -641,7 +725,7 @@ pub async fn run(path: &Path) -> Result<(), Error> {
         archive.validate(value).map_err(|_| Error::Storage)?;
     }
     let mut publisher = Publisher::new(
-        chain,
+        chain.with_snapshot_archive(archive.clone()),
         archive.clone(),
         FileCheckpoint {
             path: config.state_directory.join("checkpoint.json"),
@@ -665,9 +749,8 @@ pub async fn run(path: &Path) -> Result<(), Error> {
     ));
     let mut pyth = tokio::spawn(pyth_task(
         PythConfig {
-            token: pyth_key,
-            feed_ids: config
-                .anchor
+            token: pyth_key.clone(),
+            feed_ids: active_anchor
                 .assets
                 .iter()
                 .map(|asset| asset.feed_id)
@@ -679,16 +762,17 @@ pub async fn run(path: &Path) -> Result<(), Error> {
     ));
     let mut benchmark = tokio::spawn(benchmark_task(
         rpc.clone(),
-        archive,
+        archive.clone(),
         config.max_feed_age_ms,
         price,
         wake.clone(),
         config.state_directory.join("rpc-usage.json"),
-        stop,
+        stop.clone(),
     ));
     let shutdown = shutdown();
     tokio::pin!(shutdown);
     let mut schedule = WakeSchedule::default();
+    let mut inclusion_capture: Option<tokio::task::JoinHandle<Result<(), worker::Error>>> = None;
     let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     heartbeat.tick().await;
@@ -711,7 +795,7 @@ pub async fn run(path: &Path) -> Result<(), Error> {
                     }
                     schedule.after_tick(value,now);
                 },
-                Err(error @ (worker::Error::Storage|worker::Error::Clock|worker::Error::Signer))=>{
+                Err(error @ (worker::Error::Storage|worker::Error::Clock|worker::Error::Signer|worker::Error::UniverseTransition))=>{
                     eprintln!("Publisher stopped: {error:?}");
                     return Err(Error::Publisher);
                 },
@@ -730,7 +814,16 @@ pub async fn run(path: &Path) -> Result<(), Error> {
                     _=&mut pyth=>return Err(Error::Feed),
                     _=&mut benchmark=>return Err(Error::Feed),
                     _=tokio::time::sleep_until(deadline)=>break,
-                    _=heartbeat.tick()=>changes.heartbeat().map_err(|_|Error::Storage)?,
+                    _=heartbeat.tick()=>{
+                        changes.heartbeat().map_err(|_|Error::Storage)?;
+                        if inclusion_capture.as_ref().is_some_and(|task|task.is_finished()) {
+                            if let Some(task)=inclusion_capture.take(){if !matches!(task.await,Ok(Ok(()))){eprintln!("Inclusion capture sidecar stopped; exact-boundary evidence remains required");}inclusion.lock().map_err(|_|Error::Storage)?.capture_stopped();}
+                        }
+                        let now=now_ms()?;
+                        let (changed,request)={let mut control=inclusion.lock().map_err(|_|Error::Storage)?;let changed=match control.refresh_file(){Ok(changed)=>changed,Err(_)=>{eprintln!("Inclusion approval rejected; current universe remains active");false}}|control.expire_if_due(now).map_err(|_|Error::Storage)?|control.take_dirty();let request=if inclusion_capture.is_none(){control.capture_request(now)}else{None};(changed,request)};
+                        if let Some(request)=request {inclusion_capture=Some(tokio::spawn(crate::inclusion_execution::capture(inclusion.clone(),request,pyth_key.clone(),archive.clone(),stop.clone())));}
+                        if changed {schedule.deadline_ms=now;schedule.trigger=Some("inclusion-event");break;}
+                    },
                     changed=wake.changed()=>{
                         changed.map_err(|_|Error::Feed)?;
                         let hint=*wake.borrow_and_update();
@@ -743,6 +836,14 @@ pub async fn run(path: &Path) -> Result<(), Error> {
     }.await;
     changes.set_health(false).map_err(|_| Error::Storage)?;
     let _ = stops.send(true);
+    if let Some(mut task) = inclusion_capture {
+        if tokio::time::timeout(Duration::from_secs(3), &mut task)
+            .await
+            .is_err()
+        {
+            task.abort();
+        }
+    }
     for task in [&mut grpc] {
         if !task.is_finished()
             && tokio::time::timeout(Duration::from_secs(3), &mut *task)

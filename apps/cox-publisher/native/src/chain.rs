@@ -297,6 +297,15 @@ impl ChainReader {
                 .collect::<Result<_, _>>()?,
         ))
     }
+    pub async fn methodology(&self, digest: [u8; 32]) -> Result<Methodology, Error> {
+        let key = pda(self.basic_program, &[b"methodology", &digest]);
+        let (_, values) = self.multiple(&[key], 0).await?;
+        let value: Methodology = decode(&values[0], self.basic_program)?;
+        if value.digest != digest {
+            return Err(Error::InvalidAccount);
+        }
+        Ok(value)
+    }
     pub async fn read(&self) -> Result<ChainState, Error> {
         let pool_key = pda(
             self.basic_program,
@@ -353,7 +362,17 @@ impl ChainReader {
         slot = s;
         let methodology: Methodology = decode(&extra[0], self.basic_program)?;
         if methodology_key != pda(self.basic_program, &[b"methodology", &methodology.digest])
-            || cox::read_adaptive_manifest(&methodology).is_err()
+            || (if pool.schema_version == 5 {
+                cox::read_dynamic_manifest(&methodology)
+                    .map(|universe| {
+                        universe.pool
+                            == anchor_lang::prelude::Pubkey::new_from_array(pool_key.to_bytes())
+                            && universe.instruments.len() + 1 == pool.classes.len()
+                    })
+                    .unwrap_or(false)
+            } else {
+                cox::read_adaptive_manifest(&methodology).is_ok()
+            }) == false
             || methodology.origin != pool.origin
         {
             return Err(Error::InvalidAccount);
@@ -378,8 +397,7 @@ impl ChainReader {
                     }
                 || batch.predecessor_digest != pool.state_digest
                 || batch.predecessor_sequence != pool.sequence
-                || batch.phase == 2
-                || batch.cursor > batch.closed_queue_end
+                || !valid_batch_phase(&pool, &methodology, &batch)
             {
                 return Err(Error::InvalidAccount);
             }
@@ -418,7 +436,15 @@ impl ChainReader {
             .as_ref()
             .map(|b| b.closed_queue_end)
             .unwrap_or(pool.next_request_nonce);
-        let request_keys: Vec<_> = (start..end.min(start.saturating_add(16)))
+        let request_end = if batch
+            .as_ref()
+            .is_some_and(|batch| matches!(batch.phase, 4..=6))
+        {
+            start
+        } else {
+            end.min(start.saturating_add(16))
+        };
+        let request_keys: Vec<_> = (start..request_end)
             .map(|nonce| {
                 pda(
                     self.basic_program,
@@ -705,7 +731,10 @@ fn validate_basic(
     if pool.schema_version == 3 || id == 1 {
         return Err(Error::RetiredPool);
     }
-    if pool.schema_version != 4 || pool.pool_id != id || address(registry.runtime) != operator {
+    if !matches!(pool.schema_version, 4 | 5)
+        || pool.pool_id != id
+        || address(registry.runtime) != operator
+    {
         return Err(Error::WrongAuthority);
     }
     if pool.test_collateral_mint == Some(pool.collateral_mint) {
@@ -778,6 +807,25 @@ impl ChainState {
                             eligible_after_ms: timestamp.saturating_sub(1),
                         });
                     }
+                }
+            }
+        }
+        if self.basic.batch.is_none() && self.basic.pool.stage_batch > self.basic.pool.last_batch {
+            let highwater = self
+                .basic
+                .pool
+                .origin
+                .checked_add(self.basic.pool.stage_batch)
+                .and_then(|timestamp| timestamp.checked_mul(1000))
+                .ok_or(Error::Overflow)?;
+            for item in &mut work {
+                if let Work::Entry {
+                    pool: WorkPool::Basic,
+                    eligible_after_ms,
+                    ..
+                } = item
+                {
+                    *eligible_after_ms = (*eligible_after_ms).max(highwater);
                 }
             }
         }
@@ -854,6 +902,53 @@ impl ChainState {
         Ok(work)
     }
 }
+fn valid_batch_phase(pool: &Pool, methodology: &Methodology, batch: &Batch) -> bool {
+    if batch.closed_queue_end < batch.queue_start
+        || batch.closed_queue_end > pool.next_request_nonce
+    {
+        return false;
+    }
+    if pool.schema_version == 5 && batch.schema_version != 4 {
+        return false;
+    }
+    if matches!(batch.phase, 0 | 1 | 3) {
+        return batch.cursor >= batch.queue_start && batch.cursor <= batch.closed_queue_end;
+    }
+    if pool.schema_version != 5 || batch.schema_version != 4 {
+        return false;
+    }
+    let Ok(universe) = cox::read_dynamic_manifest(methodology) else {
+        return false;
+    };
+    let n = universe.instruments.len();
+    let classes = pool.classes.len();
+    match batch.phase {
+        4 => {
+            batch.cursor == batch.queue_start
+                && batch.prices.len() <= n
+                && batch.references.is_empty()
+                && batch.fixed.is_empty()
+        }
+        5 => {
+            batch.cursor < (n as u64)
+                && batch.prices.len() == n
+                && batch.references.len() == classes
+                && batch.fixed.is_empty()
+                && batch.burns.len() == classes
+                && batch.mints.len() == 1
+        }
+        6 => {
+            batch.cursor < (classes as u64)
+                && batch.fixed.len() == batch.cursor as usize
+                && batch.prices.len() == n
+                && batch.references.len() == classes
+                && batch.burns.len() == classes
+                && batch.mints.len() == 1
+        }
+        _ => false,
+    }
+}
+
 pub fn plan_maintenance(
     state: &ChainState,
     operator: Address,
@@ -896,7 +991,22 @@ fn plan_maintenance_inner(
         })
     {
         if let Some(batch) = &state.basic.batch {
-            if batch.cursor == batch.closed_queue_end {
+            if matches!(batch.phase, 5 | 6) {
+                instructions.push(
+                    state
+                        .basic
+                        .accounts
+                        .revalue_dynamic(
+                            operator,
+                            u16::try_from(batch.cursor).map_err(|_| Error::InvalidAccount)?,
+                            16,
+                            batch.phase == 6,
+                        )
+                        .map_err(|_| Error::InvalidAccount)?,
+                );
+            } else if batch.phase == 4 {
+                return Err(Error::InvalidAccount);
+            } else if batch.cursor == batch.closed_queue_end {
                 instructions.push(match batch.phase {
                     0 | 3 => state.basic.accounts.seal_evaluation(),
                     1 => state.basic.accounts.finalize(operator),
@@ -1018,6 +1128,123 @@ pub(crate) mod tests {
             epoch_config: zero(),
             epochs: vec![],
         }
+    }
+    pub(crate) fn dynamic_state(count: usize) -> ChainState {
+        let mut state = state();
+        let universe = crate::transactions::dynamic_test_universe(count);
+        state.basic.pool.schema_version = 5;
+        state.basic.pool.classes = (0..=count)
+            .map(|_| cox::Class {
+                backing: 0,
+                units: 0,
+            })
+            .collect();
+        state.basic.pool.sequence = 1;
+        state.basic.pool.benchmark = 100 * cox_math::SCALE;
+        state.basic.pool.origin_prices = vec![100; count];
+        state.basic.pool.last_prices = vec![100; count];
+        state.basic.methodology.schema_version = 3;
+        state.basic.methodology.sealed = true;
+        state.basic.methodology.bybit = false;
+        state.basic.methodology.origin = 14_400;
+        state.basic.methodology.roster = (0..count).map(|index| index as u8).collect();
+        state.basic.methodology.canonical = universe.canonical_bytes().unwrap();
+        state.basic.methodology.expected_length = state.basic.methodology.canonical.len() as u32;
+        state.basic.methodology.digest = universe.digest;
+        state.basic.accounts = BasicAccounts::derive(key(1), 2, universe.digest);
+        state
+    }
+    pub(crate) fn dynamic_stage(count: usize, phase: u8, cursor: u64) -> ChainState {
+        let mut state = dynamic_state(count);
+        let mut batch: Batch = zero();
+        batch.schema_version = 4;
+        batch.phase = phase;
+        batch.cursor = cursor;
+        batch.cutoff = 14_410;
+        batch.batch_id = 10;
+        batch.sequence = 2;
+        batch.benchmark = 101 * cox_math::SCALE;
+        if phase >= 5 {
+            batch.prices = (0..count)
+                .map(|_| cox::PriceWire {
+                    price_e8: 101,
+                    venue: 3,
+                    step: 0,
+                    candle_start: 14_410,
+                    trade_age_minutes: 0,
+                })
+                .collect();
+            batch.references = vec![100 * cox_math::SCALE; count + 1];
+            batch.burns = vec![0; count + 1];
+            batch.mints = vec![0];
+        }
+        if phase == 6 {
+            batch.fixed = (0..cursor)
+                .map(|_| cox::Class {
+                    backing: 0,
+                    units: 0,
+                })
+                .collect();
+        }
+        state.basic.batch = Some(batch);
+        state
+    }
+    #[test]
+    fn dynamic_stage_cursor_uses_assets_and_classes_instead_of_closed_request_queue() {
+        let mut state = dynamic_stage(255, 5, 240);
+        assert!(valid_batch_phase(
+            &state.basic.pool,
+            &state.basic.methodology,
+            state.basic.batch.as_ref().unwrap()
+        ));
+        assert_eq!(
+            plan_maintenance(&state, key(7), 14_411, 4).unwrap(),
+            vec![state
+                .basic
+                .accounts
+                .revalue_dynamic(key(7), 240, 16, false)
+                .unwrap()]
+        );
+        state = dynamic_stage(255, 6, 255);
+        assert!(valid_batch_phase(
+            &state.basic.pool,
+            &state.basic.methodology,
+            state.basic.batch.as_ref().unwrap()
+        ));
+        assert_eq!(
+            plan_maintenance(&state, key(7), 14_411, 4).unwrap(),
+            vec![state
+                .basic
+                .accounts
+                .revalue_dynamic(key(7), 255, 16, true)
+                .unwrap()]
+        );
+        state.basic.batch.as_mut().unwrap().cursor = 256;
+        assert!(!valid_batch_phase(
+            &state.basic.pool,
+            &state.basic.methodology,
+            state.basic.batch.as_ref().unwrap()
+        ));
+        state = dynamic_stage(255, 4, 0);
+        assert!(valid_batch_phase(
+            &state.basic.pool,
+            &state.basic.methodology,
+            state.basic.batch.as_ref().unwrap()
+        ));
+        state.basic.batch.as_mut().unwrap().prices = (0..256)
+            .map(|_| cox::PriceWire {
+                price_e8: 101,
+                venue: 3,
+                step: 0,
+                candle_start: 14_410,
+                trade_age_minutes: 0,
+            })
+            .collect();
+        assert!(!valid_batch_phase(
+            &state.basic.pool,
+            &state.basic.methodology,
+            state.basic.batch.as_ref().unwrap()
+        ));
     }
     pub(crate) fn epoch(with_lot: bool) -> EpochState {
         let accounts = EpochAccounts::derive(key(2), key(3), 14_400).unwrap();
@@ -1174,6 +1401,34 @@ pub(crate) mod tests {
         ));
         s.basic.registry.paused = true;
         assert!(s.work(0).unwrap().is_empty());
+    }
+    #[test]
+    fn cancelled_preparation_highwater_requires_newer_price_without_replaying_canceled_timestamp() {
+        let mut s = dynamic_state(31);
+        s.basic.pool.stage_batch = 10;
+        s.basic.pool.last_batch = 0;
+        s.basic.pool.next_request_nonce = 1;
+        let mut request: Request = zero();
+        request.status = 0;
+        request.nonce = 0;
+        request.target_batch = 9;
+        s.basic.requests.push(request);
+        let work = s.work(14_410_000).unwrap();
+        assert!(
+            matches!(&work[0],Work::Entry{eligible_after_ms,..} if *eligible_after_ms==14_410_000)
+        );
+        assert_eq!(
+            crate::scheduler::decide(
+                14_410_000,
+                &crate::scheduler::Checkpoint::default(),
+                &work,
+                2
+            )
+            .unwrap(),
+            crate::scheduler::Decision::Idle {
+                wake_ms: Some(14_410_001)
+            }
+        );
     }
     #[test]
     fn pending_fee_activation_wakes_after_bootstrap_and_stops_after_commit() {

@@ -6,7 +6,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-const MAX_REQUEST_BYTES: u64 = 2 * 1024 * 1024;
+pub const MAX_REQUEST_BYTES: u64 = 4 * 1024 * 1024;
 static NEXT: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {

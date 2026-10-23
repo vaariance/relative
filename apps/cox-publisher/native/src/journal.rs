@@ -2,10 +2,11 @@ use crate::benchmark::{Anchor, Error, History, Observation};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
+pub const MAX_JOURNAL_BYTES: u64 = 16 * 1024 * 1024;
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 
 pub fn atomic_write<T: Serialize>(path: &Path, value: &T) -> Result<(), Error> {
@@ -40,13 +41,26 @@ pub fn atomic_write<T: Serialize>(path: &Path, value: &T) -> Result<(), Error> {
     result
 }
 pub fn read<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, Error> {
-    match fs::read(path) {
-        Ok(bytes) => serde_json::from_slice(&bytes)
-            .map(Some)
-            .map_err(|_| Error::Persistence),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(_) => Err(Error::Persistence),
+    let info = match fs::symlink_metadata(path) {
+        Ok(info) => info,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(Error::Persistence),
+    };
+    if !info.is_file() || info.file_type().is_symlink() || info.len() > MAX_JOURNAL_BYTES {
+        return Err(Error::Persistence);
     }
+    let mut file = File::open(path)
+        .map_err(|_| Error::Persistence)?
+        .take(MAX_JOURNAL_BYTES + 1);
+    let mut bytes = Vec::with_capacity(info.len() as usize);
+    file.read_to_end(&mut bytes)
+        .map_err(|_| Error::Persistence)?;
+    if bytes.len() as u64 > MAX_JOURNAL_BYTES {
+        return Err(Error::Persistence);
+    }
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|_| Error::Persistence)
 }
 #[derive(Clone)]
 pub struct FileHistory {
@@ -58,6 +72,85 @@ impl FileHistory {
             .join(hex::encode(universe))
             .join((timestamp_us / 3_600_000_000).to_string())
             .join(format!("{timestamp_us}.json"))
+    }
+    pub fn stage_observation(&self, anchor: &Anchor, value: &Observation) -> Result<(), Error> {
+        struct Check;
+        impl History for Check {
+            fn append(&mut self, _: &Observation) -> Result<(), Error> {
+                Ok(())
+            }
+        }
+        crate::benchmark::Benchmark::new(anchor.clone(), Check, Some(value.clone()))?;
+        let anchor_path = self
+            .directory
+            .join("anchors")
+            .join(format!("{}.json", hex::encode(anchor.universe_digest)));
+        match read::<Anchor>(&anchor_path)? {
+            Some(prior) if prior != *anchor => return Err(Error::Conflict),
+            Some(_) => {}
+            None => atomic_write(&anchor_path, anchor)?,
+        }
+        let path = self.path(&value.universe_digest, value.timestamp_us);
+        match read::<Observation>(&path)? {
+            Some(prior) if prior != *value => Err(Error::Conflict),
+            Some(_) => Ok(()),
+            None => atomic_write(&path, value),
+        }
+    }
+    pub fn latest_staged(&self, anchor: &Anchor) -> Result<Option<Observation>, Error> {
+        let directory = self.directory.join(hex::encode(anchor.universe_digest));
+        let entries = match fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err(Error::Persistence),
+        };
+        let mut hours = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|_| Error::Persistence)?;
+            if hours.len() > 2048 {
+                return Err(Error::Persistence);
+            }
+            let name = entry.file_name();
+            if let Some(hour) = name.to_str().and_then(|name| name.parse::<u64>().ok()) {
+                if !entry.file_type().map_err(|_| Error::Persistence)?.is_dir() {
+                    return Err(Error::Persistence);
+                }
+                hours.push(hour);
+            }
+        }
+        hours.sort_unstable_by(|a, b| b.cmp(a));
+        for hour in hours {
+            let mut latest = None;
+            for (count, entry) in fs::read_dir(directory.join(hour.to_string()))
+                .map_err(|_| Error::Persistence)?
+                .enumerate()
+            {
+                if count > 4096 {
+                    return Err(Error::Persistence);
+                }
+                let entry = entry.map_err(|_| Error::Persistence)?;
+                let path = entry.path();
+                let Some(timestamp) = path
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .and_then(|value| value.parse::<u64>().ok())
+                else {
+                    continue;
+                };
+                if timestamp / 3_600_000_000 != hour
+                    || !entry.file_type().map_err(|_| Error::Persistence)?.is_file()
+                {
+                    return Err(Error::Persistence);
+                }
+                if timestamp >= anchor.timestamp_us {
+                    latest = Some(latest.map_or(timestamp, |prior: u64| prior.max(timestamp)));
+                }
+            }
+            if let Some(timestamp) = latest {
+                return self.exact(&anchor.universe_digest, timestamp);
+            }
+        }
+        Ok(None)
     }
     pub fn active_anchor(&self) -> Result<Option<Anchor>, Error> {
         read(&self.directory.join("active-anchor.json"))

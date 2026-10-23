@@ -1,15 +1,18 @@
-use cox_math::geometric::{geometric_level, MAX_GEOMETRIC_ASSETS};
+use cox_math::geometric::geometric_level;
+const MAX_GEOMETRIC_ASSETS: usize = 255;
 use relative_methodology::inclusion::{assert_snapshot, FeedIdentity, UniverseSnapshot};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Asset {
     pub id: String,
     pub feed_id: u32,
     pub origin_price_e8: u64,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Anchor {
     pub universe_digest: [u8; 32],
     pub timestamp_us: u64,
