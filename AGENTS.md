@@ -1363,3 +1363,15 @@ another agent needs to know.
   - Market line charts move once a minute; only the user's own position may update every second.
 - **Open:** Godwin: start charts from Joel's `/v1/preview/history` so they open filled instead of only collecting from page load. The landing page's unused names and the Privacy Policy (Privy, CoinGecko, DefiLlama) are unchanged.
 - **Refs:** `apps/web/README.md` (Trading gate, expiry and collateral; Live estimates), commits `1d4319d`..`ca371dd`.
+
+### 2026-10-23 · Godwin (Claude Code) · Web app charts open filled from preview history
+
+- **Area:** `apps/web` (`src/lib/estimate.ts`, `src/components/live.tsx`, `src/components/asset-chart.tsx`).
+- **What:** Following Joel's 2026-10-23 "Preview history route and class table deployed" entry, charts no longer start empty.
+  - **On load:** each tab fetches `GET /v1/preview/history` once, with 60-second steps for the last 4 hours, and puts it before the live previews (`joinHistory`; only strictly newer times are added after it). Markets sparklines, the Index, Leading and Trailing cards and the 1H/4H charts are filled on first paint.
+  - **Longer ranges:** 1D asks for 300-second steps and 1W/1M for 3600-second steps over at most 7 days less one hour (the route refuses a `from` exactly 7 days back). Each range is fetched once and kept for 5 minutes, shared by every asset page.
+  - **Line choice:** a chart shows estimates when they cover at least as much time as the settled publications or hold more points (`preferEstimates`); settled publications stay as dots. When the API holds less than the range, the chart says how much it covers.
+  - **Unchanged:** market lines still move once a minute and only the position's unit value and worth move every second. The history route has no unit values, so position charts still start from the previews the tab receives.
+  - **Verified:** against `https://api.getrelative.trade` in the dev server: BTC and ETH 1H, 4H, 1D and 1W open filled (the API held about 11 hours of previews), Markets sparklines filled on first paint. 53 web tests and the type check pass. Not checked with a connected wallet; not deployed to Vercel.
+- **Rules for agents:** Do not fetch preview history on a timer or per second; fetch it on load and on a range change. A malformed or missing step stays a gap; never fill or average it. History points are estimates like previews.
+- **Refs:** commits `32faa31`, `a124d1a`.
