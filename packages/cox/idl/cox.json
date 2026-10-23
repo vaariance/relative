@@ -7,6 +7,492 @@
   },
   "instructions": [
     {
+      "name": "activate_universe",
+      "discriminator": [
+        153,
+        182,
+        131,
+        57,
+        29,
+        195,
+        62,
+        199
+      ],
+      "accounts": [
+        {
+          "name": "runtime",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          },
+          "relations": [
+            "schedule"
+          ]
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "next_methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "next_methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "schedule",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  118,
+                  101,
+                  114,
+                  115,
+                  101,
+                  45,
+                  115,
+                  99,
+                  104,
+                  101,
+                  100,
+                  117,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "schedule.version",
+                "account": "UniverseSchedule"
+              }
+            ]
+          }
+        },
+        {
+          "name": "test_vault",
+          "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "append_dynamic_prices",
+      "discriminator": [
+        80,
+        104,
+        134,
+        64,
+        94,
+        24,
+        232,
+        183
+      ],
+      "accounts": [
+        {
+          "name": "runtime",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          },
+          "relations": [
+            "batch"
+          ]
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "batch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  116,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "offset",
+          "type": "u16"
+        },
+        {
+          "name": "prices",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "PriceWire"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "begin_dynamic_publication",
+      "discriminator": [
+        9,
+        110,
+        135,
+        213,
+        239,
+        25,
+        216,
+        72
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "runtime",
+          "signer": true
+        },
+        {
+          "name": "registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "batch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  116,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "test_vault",
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "batch_id",
+          "type": "u64"
+        },
+        {
+          "name": "sequence",
+          "type": "u64"
+        },
+        {
+          "name": "predecessor",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "snapshot",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "benchmark",
+          "type": "i128"
+        }
+      ]
+    },
+    {
       "name": "begin_retirement",
       "discriminator": [
         61,
@@ -255,6 +741,100 @@
       "args": []
     },
     {
+      "name": "cancel_dynamic_preparation",
+      "discriminator": [
+        130,
+        62,
+        129,
+        9,
+        187,
+        117,
+        139,
+        19
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          },
+          "relations": [
+            "batch"
+          ]
+        },
+        {
+          "name": "batch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  116,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "cancel_fees",
       "discriminator": [
         133,
@@ -324,6 +904,115 @@
           "relations": [
             "pool"
           ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "cancel_universe_schedule",
+      "discriminator": [
+        64,
+        104,
+        41,
+        5,
+        114,
+        60,
+        61,
+        4
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          },
+          "relations": [
+            "schedule"
+          ]
+        },
+        {
+          "name": "schedule",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  118,
+                  101,
+                  114,
+                  115,
+                  101,
+                  45,
+                  115,
+                  99,
+                  104,
+                  101,
+                  100,
+                  117,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "schedule.version",
+                "account": "UniverseSchedule"
+              }
+            ]
+          }
         }
       ],
       "args": []
@@ -489,6 +1178,175 @@
         },
         {
           "name": "expiry",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "deposit_v2",
+      "discriminator": [
+        109,
+        75,
+        69,
+        153,
+        172,
+        218,
+        146,
+        19
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "request",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  113,
+                  117,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "pool.next_request_nonce",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "user_token",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "test_vault",
+          "writable": true,
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "to",
+          "type": "u16"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "minimum_units",
+          "type": "u128"
+        },
+        {
+          "name": "expiry",
+          "type": "u64"
+        },
+        {
+          "name": "expected_fee_version",
           "type": "u64"
         }
       ]
@@ -1280,6 +2138,217 @@
       "args": []
     },
     {
+      "name": "finish_dynamic_revaluation",
+      "discriminator": [
+        94,
+        213,
+        171,
+        65,
+        183,
+        23,
+        168,
+        45
+      ],
+      "accounts": [
+        {
+          "name": "runtime",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          },
+          "relations": [
+            "batch"
+          ]
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "batch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  116,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "offset",
+          "type": "u16"
+        },
+        {
+          "name": "limit",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "grow_dynamic_account",
+      "discriminator": [
+        157,
+        5,
+        160,
+        230,
+        154,
+        231,
+        72,
+        8
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "target",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "additional_bytes",
+          "type": "u32"
+        }
+      ]
+    },
+    {
       "name": "initialize_adaptive_pool",
       "discriminator": [
         229,
@@ -1524,6 +2593,81 @@
         {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_dynamic_position",
+      "discriminator": [
+        32,
+        203,
+        167,
+        98,
+        73,
+        28,
+        90,
+        183
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
         },
         {
           "name": "system_program",
@@ -1890,6 +3034,143 @@
       "args": []
     },
     {
+      "name": "migrate_dynamic_pool",
+      "discriminator": [
+        234,
+        50,
+        82,
+        113,
+        241,
+        163,
+        196,
+        248
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "next_methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "next_methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "test_vault",
+          "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "migrate_pool",
       "discriminator": [
         55,
@@ -2077,6 +3358,138 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "prepare_dynamic_revaluation",
+      "discriminator": [
+        208,
+        156,
+        52,
+        17,
+        237,
+        252,
+        233,
+        223
+      ],
+      "accounts": [
+        {
+          "name": "runtime",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          },
+          "relations": [
+            "batch"
+          ]
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "batch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  116,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "offset",
+          "type": "u16"
+        },
+        {
+          "name": "limit",
+          "type": "u16"
+        }
+      ]
     },
     {
       "name": "publish",
@@ -2504,6 +3917,73 @@
       }
     },
     {
+      "name": "quote_request_v2",
+      "discriminator": [
+        196,
+        243,
+        132,
+        102,
+        95,
+        250,
+        175,
+        52
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "operation",
+          "type": "u8"
+        },
+        {
+          "name": "from",
+          "type": "u16"
+        },
+        {
+          "name": "to",
+          "type": "u16"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "units",
+          "type": "u128"
+        },
+        {
+          "name": "expected_fee_version",
+          "type": "u64"
+        }
+      ],
+      "returns": {
+        "defined": {
+          "name": "FeeQuoteRead"
+        }
+      }
+    },
+    {
       "name": "quote_request_with_fee",
       "discriminator": [
         124,
@@ -2697,6 +4177,53 @@
       }
     },
     {
+      "name": "read_reference_v2",
+      "discriminator": [
+        90,
+        24,
+        107,
+        222,
+        120,
+        216,
+        220,
+        195
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "class",
+          "type": "u16"
+        }
+      ],
+      "returns": {
+        "defined": {
+          "name": "ReferenceRead"
+        }
+      }
+    },
+    {
       "name": "redeem",
       "discriminator": [
         184,
@@ -2857,6 +4384,175 @@
         },
         {
           "name": "expiry",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "redeem_v2",
+      "discriminator": [
+        141,
+        73,
+        176,
+        100,
+        92,
+        94,
+        58,
+        87
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "request",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  113,
+                  117,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "pool.next_request_nonce",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "user_token",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "test_vault",
+          "writable": true,
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "from",
+          "type": "u16"
+        },
+        {
+          "name": "units",
+          "type": "u128"
+        },
+        {
+          "name": "minimum_proceeds",
+          "type": "u64"
+        },
+        {
+          "name": "expiry",
+          "type": "u64"
+        },
+        {
+          "name": "expected_fee_version",
           "type": "u64"
         }
       ]
@@ -3338,6 +5034,100 @@
       ]
     },
     {
+      "name": "register_dynamic_methodology",
+      "discriminator": [
+        89,
+        156,
+        114,
+        165,
+        115,
+        215,
+        214,
+        228
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "methodology",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "digest"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "digest",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "length",
+          "type": "u32"
+        },
+        {
+          "name": "activation_batch",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "register_methodology",
       "discriminator": [
         166,
@@ -3428,6 +5218,192 @@
         {
           "name": "activation_batch",
           "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "register_scheduled_methodology",
+      "discriminator": [
+        69,
+        179,
+        161,
+        67,
+        178,
+        247,
+        53,
+        247
+      ],
+      "accounts": [
+        {
+          "name": "runtime",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          },
+          "relations": [
+            "schedule"
+          ]
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "schedule",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  118,
+                  101,
+                  114,
+                  115,
+                  101,
+                  45,
+                  115,
+                  99,
+                  104,
+                  101,
+                  100,
+                  117,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "schedule.version",
+                "account": "UniverseSchedule"
+              }
+            ]
+          }
+        },
+        {
+          "name": "next_methodology",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "digest"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "digest",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "length",
+          "type": "u32"
         }
       ]
     },
@@ -3975,6 +5951,173 @@
       ]
     },
     {
+      "name": "schedule_universe",
+      "discriminator": [
+        216,
+        126,
+        102,
+        225,
+        180,
+        97,
+        130,
+        254
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "schedule",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  118,
+                  101,
+                  114,
+                  115,
+                  101,
+                  45,
+                  115,
+                  99,
+                  104,
+                  101,
+                  100,
+                  117,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "arg",
+                "path": "version"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "version",
+          "type": "u64"
+        },
+        {
+          "name": "identities_digest",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "expected_instruments",
+          "type": "u16"
+        },
+        {
+          "name": "activation_timestamp",
+          "type": "u64"
+        },
+        {
+          "name": "expires_at",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "seal_adaptive_methodology",
       "discriminator": [
         152,
@@ -4054,6 +6197,256 @@
           }
         }
       ]
+    },
+    {
+      "name": "seal_dynamic_methodology",
+      "discriminator": [
+        143,
+        251,
+        225,
+        145,
+        118,
+        111,
+        129,
+        155
+      ],
+      "accounts": [
+        {
+          "name": "runtime",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "next_methodology",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "next_methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "seal_dynamic_publication",
+      "discriminator": [
+        20,
+        241,
+        7,
+        95,
+        127,
+        190,
+        216,
+        13
+      ],
+      "accounts": [
+        {
+          "name": "runtime",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          },
+          "relations": [
+            "batch"
+          ]
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "batch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  116,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
     },
     {
       "name": "seal_evaluation",
@@ -4233,6 +6626,174 @@
       ]
     },
     {
+      "name": "seal_scheduled_methodology",
+      "discriminator": [
+        76,
+        139,
+        110,
+        79,
+        151,
+        42,
+        243,
+        152
+      ],
+      "accounts": [
+        {
+          "name": "runtime",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          },
+          "relations": [
+            "schedule"
+          ]
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "schedule",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  118,
+                  101,
+                  114,
+                  115,
+                  101,
+                  45,
+                  115,
+                  99,
+                  104,
+                  101,
+                  100,
+                  117,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "schedule.version",
+                "account": "UniverseSchedule"
+              }
+            ]
+          }
+        },
+        {
+          "name": "next_methodology",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "next_methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "switch",
       "discriminator": [
         74,
@@ -4397,6 +6958,179 @@
         },
         {
           "name": "expiry",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "switch_v2",
+      "discriminator": [
+        7,
+        175,
+        211,
+        38,
+        171,
+        134,
+        37,
+        171
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "request",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  113,
+                  117,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "pool.next_request_nonce",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "user_token",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "test_vault",
+          "writable": true,
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "from",
+          "type": "u16"
+        },
+        {
+          "name": "to",
+          "type": "u16"
+        },
+        {
+          "name": "units",
+          "type": "u128"
+        },
+        {
+          "name": "minimum_units",
+          "type": "u128"
+        },
+        {
+          "name": "expiry",
+          "type": "u64"
+        },
+        {
+          "name": "expected_fee_version",
           "type": "u64"
         }
       ]
@@ -4682,6 +7416,183 @@
               {
                 "kind": "account",
                 "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "offset",
+          "type": "u32"
+        },
+        {
+          "name": "bytes",
+          "type": "bytes"
+        }
+      ]
+    },
+    {
+      "name": "upload_scheduled_methodology",
+      "discriminator": [
+        220,
+        49,
+        137,
+        194,
+        237,
+        111,
+        135,
+        188
+      ],
+      "accounts": [
+        {
+          "name": "runtime",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          },
+          "relations": [
+            "schedule"
+          ]
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "schedule",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  118,
+                  101,
+                  114,
+                  115,
+                  101,
+                  45,
+                  115,
+                  99,
+                  104,
+                  101,
+                  100,
+                  117,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "schedule.version",
+                "account": "UniverseSchedule"
+              }
+            ]
+          }
+        },
+        {
+          "name": "next_methodology",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "next_methodology.digest",
                 "account": "Methodology"
               }
             ]
@@ -5022,6 +7933,19 @@
         15,
         38
       ]
+    },
+    {
+      "name": "UniverseSchedule",
+      "discriminator": [
+        71,
+        71,
+        219,
+        106,
+        58,
+        228,
+        3,
+        143
+      ]
     }
   ],
   "events": [
@@ -5049,6 +7973,19 @@
         178,
         212,
         215
+      ]
+    },
+    {
+      "name": "DynamicPreparationCancelled",
+      "discriminator": [
+        227,
+        21,
+        5,
+        32,
+        249,
+        46,
+        247,
+        17
       ]
     },
     {
@@ -5205,6 +8142,19 @@
         159,
         8,
         239
+      ]
+    },
+    {
+      "name": "UniverseActivated",
+      "discriminator": [
+        204,
+        166,
+        41,
+        29,
+        239,
+        75,
+        187,
+        143
       ]
     },
     {
@@ -5701,6 +8651,39 @@
           {
             "name": "amount",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DynamicPreparationCancelled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "batch",
+            "type": "u64"
+          },
+          {
+            "name": "sequence",
+            "type": "u64"
+          },
+          {
+            "name": "snapshot",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "phase",
+            "type": "u8"
           }
         ]
       }
@@ -6637,6 +9620,14 @@
           {
             "name": "refunded_amount",
             "type": "u64"
+          },
+          {
+            "name": "from_id",
+            "type": "u16"
+          },
+          {
+            "name": "to_id",
+            "type": "u16"
           }
         ]
       }
@@ -6793,6 +9784,106 @@
           {
             "name": "effective_batch",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UniverseActivated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "version",
+            "type": "u64"
+          },
+          {
+            "name": "digest",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "timestamp",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UniverseSchedule",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "schema_version",
+            "type": "u16"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "predecessor_digest",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "source_methodology",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "type": "u64"
+          },
+          {
+            "name": "identities_digest",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "expected_instruments",
+            "type": "u16"
+          },
+          {
+            "name": "activation_timestamp",
+            "type": "u64"
+          },
+          {
+            "name": "expires_at",
+            "type": "u64"
+          },
+          {
+            "name": "cancelled",
+            "type": "bool"
+          },
+          {
+            "name": "consumed",
+            "type": "bool"
           }
         ]
       }

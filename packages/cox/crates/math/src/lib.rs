@@ -139,8 +139,14 @@ pub struct Class {
     pub units: u128,
 }
 pub fn validate_classes(classes: &[Class]) -> Result<()> {
+    validate_classes_bounded(classes, 31)
+}
+pub fn validate_dynamic_classes(classes: &[Class]) -> Result<()> {
+    validate_classes_bounded(classes, 256)
+}
+fn validate_classes_bounded(classes: &[Class], max_classes: usize) -> Result<()> {
     if classes.is_empty()
-        || classes.len() > 31
+        || classes.len() > max_classes
         || classes.iter().any(|c| c.units == 0 && c.backing != 0)
     {
         return Err(MathError::InvalidClassState);
@@ -159,7 +165,13 @@ pub struct Revaluation {
     pub residual: u64,
 }
 pub fn revalue(classes: &[Class], h: &[i128]) -> Result<Revaluation> {
-    validate_classes(classes)?;
+    revalue_bounded(classes, h, 31)
+}
+pub fn revalue_dynamic(classes: &[Class], h: &[i128]) -> Result<Revaluation> {
+    revalue_bounded(classes, h, 256)
+}
+fn revalue_bounded(classes: &[Class], h: &[i128], max_classes: usize) -> Result<Revaluation> {
+    validate_classes_bounded(classes, max_classes)?;
     if classes.len() != h.len() || h.iter().any(|x| *x < 0) {
         return Err(MathError::InvalidClassState);
     }
@@ -190,7 +202,7 @@ pub fn revalue(classes: &[Class], h: &[i128]) -> Result<Revaluation> {
         })
         .collect::<Result<Vec<_>>>()?;
     let residual = amount(total - sum(result.iter().map(|c| c.backing as i128))?)?;
-    validate_classes(&result)?;
+    validate_classes_bounded(&result, max_classes)?;
     Ok(Revaluation {
         classes: result,
         residual,
@@ -286,7 +298,24 @@ pub fn batch_with_fees(
     publication_batch: u64,
     fees: &[FeeTerms],
 ) -> Result<BatchResult> {
-    validate_classes(classes)?;
+    batch_with_fees_bounded(classes, requests, publication_batch, fees, 31)
+}
+pub fn batch_with_fees_dynamic(
+    classes: &[Class],
+    requests: &[Request],
+    publication_batch: u64,
+    fees: &[FeeTerms],
+) -> Result<BatchResult> {
+    batch_with_fees_bounded(classes, requests, publication_batch, fees, 256)
+}
+fn batch_with_fees_bounded(
+    classes: &[Class],
+    requests: &[Request],
+    publication_batch: u64,
+    fees: &[FeeTerms],
+    max_classes: usize,
+) -> Result<BatchResult> {
+    validate_classes_bounded(classes, max_classes)?;
     if requests.len() != fees.len() {
         return Err(MathError::InvalidFeeTerms);
     }
@@ -456,7 +485,7 @@ pub fn batch_with_fees(
     if residual < 0 {
         return Err(MathError::InsolventBatch);
     }
-    validate_classes(&result)?;
+    validate_classes_bounded(&result, max_classes)?;
     Ok(BatchResult {
         classes: result,
         payable: amount(payable)?,
@@ -637,4 +666,111 @@ pub fn snapshot_bytes(cutoff: u64, prices: &[Price], roster: &[String]) -> Resul
         bytes.extend_from_slice(&artifact_digest(&price_bytes(p)?));
     }
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod dynamic_capacity_tests {
+    use super::*;
+
+    #[test]
+    fn dynamic_capacity_is_explicit_and_bounded() {
+        for count in [1, 31, 32, 256, 257] {
+            let classes = vec![
+                Class {
+                    backing: 0,
+                    units: 0
+                };
+                count
+            ];
+            let h = vec![SCALE; count];
+            let legacy_valid = count <= 31;
+            let dynamic_valid = count <= 256;
+            assert_eq!(validate_classes(&classes).is_ok(), legacy_valid);
+            assert_eq!(revalue(&classes, &h).is_ok(), legacy_valid);
+            assert_eq!(batch_with_fees(&classes, &[], 1, &[]).is_ok(), legacy_valid);
+            assert_eq!(validate_dynamic_classes(&classes).is_ok(), dynamic_valid);
+            assert_eq!(revalue_dynamic(&classes, &h).is_ok(), dynamic_valid);
+            assert_eq!(
+                batch_with_fees_dynamic(&classes, &[], 1, &[]).is_ok(),
+                dynamic_valid
+            );
+        }
+        assert_eq!(
+            validate_dynamic_classes(&[]),
+            Err(MathError::InvalidClassState)
+        );
+    }
+
+    #[test]
+    fn dynamic_revaluation_matches_legacy_for_existing_classes() {
+        let classes = vec![
+            Class {
+                backing: 100_001,
+                units: 100_001 * SCALE as u128,
+            },
+            Class {
+                backing: 200_003,
+                units: 200_003 * SCALE as u128,
+            },
+        ];
+        let h = vec![SCALE * 3 / 2, SCALE / 2];
+        let expected = revalue(&classes, &h).unwrap();
+        assert_eq!(revalue_dynamic(&classes, &h).unwrap(), expected);
+        let mut expanded = classes;
+        expanded.resize(
+            256,
+            Class {
+                backing: 0,
+                units: 0,
+            },
+        );
+        let mut expanded_h = h;
+        expanded_h.resize(256, SCALE);
+        let result = revalue_dynamic(&expanded, &expanded_h).unwrap();
+        assert_eq!(&result.classes[..2], expected.classes.as_slice());
+        assert_eq!(result.residual, expected.residual);
+        assert!(result.classes[2..]
+            .iter()
+            .all(|c| c.backing == 0 && c.units == 0));
+    }
+
+    #[test]
+    fn dynamic_batch_preserves_fees_and_supports_last_class() {
+        let classes = vec![
+            Class {
+                backing: 0,
+                units: 0
+            };
+            256
+        ];
+        let request = Request {
+            id: "last-class".into(),
+            expiry: 2,
+            operation: Operation::Deposit {
+                to: 255,
+                amount: 1_000_000,
+                min_units: 1,
+            },
+        };
+        let fees = [FeeTerms {
+            version: 1,
+            bps: 2,
+            cap: 200_000,
+        }];
+        let result = batch_with_fees_dynamic(&classes, &[request.clone()], 1, &fees).unwrap();
+        let mut legacy_request = request;
+        legacy_request.operation = Operation::Deposit {
+            to: 0,
+            amount: 1_000_000,
+            min_units: 1,
+        };
+        let expected = batch_with_fees(&classes[..1], &[legacy_request], 1, &fees).unwrap();
+        assert_eq!(result.classes[255], expected.classes[0]);
+        assert_eq!(result.fees, expected.fees);
+        assert_eq!(result.receipts, expected.receipts);
+        assert_eq!(result.accepted_deposits, expected.accepted_deposits);
+        assert_eq!(result.residual, expected.residual);
+        assert_eq!(result.payable, expected.payable);
+        assert_eq!(result.refunds, expected.refunds);
+    }
 }

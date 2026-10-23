@@ -157,7 +157,11 @@ impl Harness {
             solana_sdk::compute_budget::ComputeBudgetInstruction::set_compute_unit_limit(1_400_000),
             solana_sdk::compute_budget::ComputeBudgetInstruction::set_compute_unit_price(1),
         ];
-        if name == "seal_methodology" {
+        let has_heap = instructions.iter().any(|instruction| instruction.program_id == solana_sdk::compute_budget::id() && instruction.data.first() == Some(&1));
+        let dynamic_pool = instructions.iter().flat_map(|instruction| &instruction.accounts).any(|meta| self.svm.get_account(&meta.pubkey).is_some_and(|account| {
+            account.owner == cox::ID && account.data.len() >= 10 && account.data[..8] == <cox::Pool as anchor_lang::Discriminator>::DISCRIMINATOR[..] && account.data[8..10] == 5u16.to_le_bytes()
+        }));
+        if !has_heap && (name == "seal_methodology" || dynamic_pool) {
             budgeted.push(
                 solana_sdk::compute_budget::ComputeBudgetInstruction::request_heap_frame(262_144),
             );

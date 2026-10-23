@@ -79,6 +79,7 @@ fn bindings(universe: &UniverseSnapshot, values: &[Binding], previous: bool) -> 
                 })
             || binding.pro_feed_id == 0
             || binding.basic_class_id >= 256
+            || binding.basic_class_id == 30
             || binding.epoch_asset_id >= 256
             || binding.epoch_feed_id == [0; 32]
             || !stable.insert(&binding.stable_asset_id)

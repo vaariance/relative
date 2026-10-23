@@ -11,12 +11,12 @@ fn definition(i: usize) -> AssetDefinition {
     let alphabet = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
     AssetDefinition {
         stable_asset_id: format!("asset-{i}"),
-        token_mint: format!(
+        token_mint: Some(format!(
             "{}{}{}",
             "1".repeat(30),
             alphabet[i / alphabet.len()] as char,
             alphabet[i % alphabet.len()] as char
-        ),
+        )),
         exposure_group: format!("underlying-{i}"),
         feed: FeedIdentity::Pro {
             price_feed_id: 100 + i as u64,
@@ -100,7 +100,7 @@ fn identity_binds_all_asset_fields_and_feed_namespace() {
     value.stable_asset_id = "different".into();
     variants.push(value);
     let mut value = original.clone();
-    value.token_mint = "2".repeat(32);
+    value.token_mint = Some("2".repeat(32));
     variants.push(value);
     let mut value = original.clone();
     value.exposure_group = "other-underlying".into();
@@ -222,7 +222,7 @@ fn evidence_is_validated_at_every_transition() {
             100_000,
             &policy()
         ),
-        Err(Error::StaleValidation)
+        Err(Error::PrematureActivation)
     );
 }
 
@@ -269,7 +269,7 @@ fn malformed_identity_and_feed_values_fail_explicitly() {
     }
     for mint in ["0".repeat(32), "1".repeat(31), "1".repeat(45)] {
         let mut asset = definition(0);
-        asset.token_mint = mint;
+        asset.token_mint = Some(mint);
         assert_eq!(candidate_asset(asset), Err(Error::InvalidAssetIdentity));
     }
     for feed in [
@@ -408,14 +408,14 @@ fn full_universe_capacity_is_distinct_from_thirty_member_baskets() {
         activate_universe(None, &[scheduled(0, 14_400)], 14_400, &policy()),
         Err(Error::UniverseCapacityExceeded)
     );
-    let additions = (0..256).map(|i| scheduled(i, 14_400)).collect::<Vec<_>>();
-    limited.max_assets = 256;
+    let additions = (0..255).map(|i| scheduled(i, 14_400)).collect::<Vec<_>>();
+    limited.max_assets = 255;
     assert_eq!(
         activate_universe(None, &additions, 14_400, &limited)
             .unwrap()
             .assets
             .len(),
-        256
+        255
     );
 }
 
@@ -526,4 +526,210 @@ fn inclusion_preparation_rejects_rebinding_guessed_origins_and_duplicate_class_i
     let mut request = transition_request();
     request.next.predecessor_digest = None;
     assert!(transition::prepare(request).is_err());
+}
+
+fn price_definition(i: usize) -> AssetDefinition {
+    let mut asset = definition(i);
+    asset.token_mint = None;
+    asset
+}
+
+#[test]
+fn price_only_identity_uses_explicit_v2_domains_and_null_mint() {
+    let definition = price_definition(0);
+    let digest = asset_identity_digest(&definition).unwrap();
+    let expected = serde_json::json!([
+        "RELATIVE/ASSET/V2",
+        "asset-0",
+        null,
+        "underlying-0",
+        ["pyth-pro", 100]
+    ]);
+    use sha2::{Digest, Sha256};
+    assert_eq!(digest, hex::encode(Sha256::digest(expected.to_string())));
+    let encoded = serde_json::to_value(&definition).unwrap();
+    assert!(encoded["tokenMint"].is_null());
+    assert_eq!(
+        serde_json::from_value::<AssetDefinition>(encoded).unwrap(),
+        definition
+    );
+    assert_ne!(digest, asset_identity_digest(&self::definition(0)).unwrap());
+    let universe = activate_universe(
+        None,
+        &[
+            scheduled_definition(price_definition(0), 14_400),
+            scheduled_definition(price_definition(1), 14_400),
+        ],
+        14_400,
+        &policy(),
+    )
+    .unwrap();
+    assert_snapshot(&universe).unwrap();
+    let canonical: serde_json::Value = serde_json::from_str(&universe.canonical).unwrap();
+    assert_eq!(canonical[0], "RELATIVE/UNIVERSE/V2");
+    assert!(canonical[5][0][1].is_null());
+    let restored = serde_json::from_slice(&serde_json::to_vec(&universe).unwrap()).unwrap();
+    assert_snapshot(&restored).unwrap();
+    assert_eq!(universe, restored);
+    let mut spoofed = universe;
+    spoofed.canonical = spoofed
+        .canonical
+        .replace("RELATIVE/UNIVERSE/V2", "RELATIVE/UNIVERSE/V1");
+    spoofed.digest = hex::encode(Sha256::digest(spoofed.canonical.as_bytes()));
+    assert_eq!(assert_snapshot(&spoofed), Err(Error::InvalidUniverseDigest));
+}
+
+#[test]
+fn price_only_candidates_still_require_bound_validation_and_approval() {
+    let definition = price_definition(0);
+    let candidate = candidate_asset(definition.clone()).unwrap();
+    let wrong_evidence = evidence(&self::definition(0));
+    assert_eq!(
+        validate_candidate(candidate, wrong_evidence, 0, &policy()),
+        Err(Error::InvalidValidationEvidence)
+    );
+    assert_eq!(
+        approve_asset(validated(definition), "invalid".into(), 0, &policy()),
+        Err(Error::InvalidApproval)
+    );
+}
+
+#[test]
+fn price_only_universes_preserve_all_non_mint_duplicate_checks() {
+    let original = price_definition(0);
+    for dimension in 0..3 {
+        let mut duplicate = price_definition(1);
+        match dimension {
+            0 => duplicate.stable_asset_id = original.stable_asset_id.clone(),
+            1 => duplicate.exposure_group = original.exposure_group.clone(),
+            _ => duplicate.feed = original.feed.clone(),
+        }
+        assert_eq!(
+            activate_universe(
+                None,
+                &[
+                    scheduled_definition(original.clone(), 14_400),
+                    scheduled_definition(duplicate, 14_400),
+                ],
+                14_400,
+                &policy()
+            ),
+            Err(Error::DuplicateAssetExposure)
+        );
+    }
+    for invalid_mint in ["".to_string(), "0".repeat(32), "not-a-solana-mint".into()] {
+        let mut definition = original.clone();
+        definition.token_mint = Some(invalid_mint);
+        assert_eq!(
+            candidate_asset(definition),
+            Err(Error::InvalidAssetIdentity)
+        );
+    }
+}
+
+#[test]
+fn minted_v1_universe_can_add_price_only_instruments_without_rewriting_history() {
+    let previous = initial();
+    let previous_bytes = serde_json::to_vec(&previous).unwrap();
+    let next = activate_universe(
+        Some(&previous),
+        &[scheduled_definition(price_definition(2), 28_800)],
+        28_800,
+        &policy(),
+    )
+    .unwrap();
+    assert_eq!(next.predecessor_digest.as_ref(), Some(&previous.digest));
+    assert_eq!(&next.assets[..2], previous.assets.as_slice());
+    assert!(next.canonical.starts_with("[\"RELATIVE/UNIVERSE/V2\","));
+    assert_eq!(serde_json::to_vec(&previous).unwrap(), previous_bytes);
+    assert_snapshot(&next).unwrap();
+    assert_snapshot(&previous).unwrap();
+    assert_eq!(
+        freeze_epoch_universe(&[previous.clone(), next], 14_400)
+            .unwrap()
+            .universe,
+        previous
+    );
+}
+
+#[test]
+fn inclusion_preparation_accepts_price_only_assets_without_bypassing_runtime_blockers() {
+    use relative_methodology::transition::{self, Blocker};
+    let previous = activate_universe(
+        None,
+        &[
+            scheduled_definition(price_definition(0), 14_400),
+            scheduled_definition(price_definition(1), 14_400),
+        ],
+        14_400,
+        &policy(),
+    )
+    .unwrap();
+    let next = activate_universe(
+        Some(&previous),
+        &[scheduled_definition(price_definition(2), 28_800)],
+        28_800,
+        &policy(),
+    )
+    .unwrap();
+    let mut request = transition_request();
+    request.previous = previous;
+    request.next = next;
+    let preparation = transition::prepare(request).unwrap();
+    assert_eq!(preparation.reference_capture_required, vec!["asset-2"]);
+    assert!(preparation.blockers.contains(&Blocker::BasicDynamicRoster));
+    assert!(preparation
+        .blockers
+        .contains(&Blocker::VerifiedActivationPriceCapture));
+    transition::validate(&preparation).unwrap();
+}
+
+#[test]
+fn missed_activation_requires_a_new_schedule_and_capacity_reserves_crypto() {
+    assert_eq!(MAX_UNIVERSE_ASSETS, 255);
+    assert_eq!(
+        activate_universe(
+            None,
+            &[scheduled(0, 14_400), scheduled(1, 14_400)],
+            14_401,
+            &policy()
+        ),
+        Err(Error::PrematureActivation)
+    );
+    let mut invalid = policy();
+    invalid.max_assets = 256;
+    assert_eq!(
+        activate_universe(None, &[], 0, &invalid),
+        Err(Error::InvalidInclusionPolicy)
+    );
+    let mut request = transition_request();
+    request.next_bindings[2].basic_class_id = 30;
+    assert_eq!(
+        relative_methodology::transition::prepare(request),
+        Err(relative_methodology::transition::Error::InvalidBinding)
+    );
+}
+
+#[test]
+fn validation_authority_has_an_explicit_utf8_byte_bound_without_truncation() {
+    let definition = definition(0);
+    let mut evidence = evidence(&definition);
+    evidence.source_authority = "é".repeat(128);
+    assert_eq!(evidence.source_authority.len(), MAX_SOURCE_AUTHORITY_BYTES);
+    validate_candidate(
+        candidate_asset(definition.clone()).unwrap(),
+        evidence.clone(),
+        0,
+        &policy(),
+    )
+    .unwrap();
+    evidence.source_authority.push('x');
+    assert_eq!(
+        evidence.source_authority.len(),
+        MAX_SOURCE_AUTHORITY_BYTES + 1
+    );
+    assert_eq!(
+        validate_candidate(candidate_asset(definition).unwrap(), evidence, 0, &policy()),
+        Err(Error::InvalidValidationEvidence)
+    );
 }

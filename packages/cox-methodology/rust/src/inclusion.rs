@@ -3,7 +3,8 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 
-pub const MAX_UNIVERSE_ASSETS: usize = 256;
+pub const MAX_UNIVERSE_ASSETS: usize = 255;
+pub const MAX_SOURCE_AUTHORITY_BYTES: usize = 256;
 pub const EPOCH_SECONDS: u64 = 14_400;
 pub const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 pub const METHODOLOGY: &str = "GEOMETRIC_EQUAL_WEIGHT_V1";
@@ -26,7 +27,7 @@ pub enum FeedIdentity {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AssetDefinition {
     pub stable_asset_id: String,
-    pub token_mint: String,
+    pub token_mint: Option<String>,
     pub exposure_group: String,
     pub feed: FeedIdentity,
 }
@@ -160,7 +161,10 @@ fn base58_identity(value: &str) -> bool {
 fn definition_checked(asset: &AssetDefinition) -> Result<(), Error> {
     if !identifier(&asset.stable_asset_id)
         || !identifier(&asset.exposure_group)
-        || !base58_identity(&asset.token_mint)
+        || asset
+            .token_mint
+            .as_ref()
+            .is_some_and(|mint| !base58_identity(mint))
     {
         return Err(Error::InvalidAssetIdentity);
     }
@@ -184,7 +188,11 @@ pub fn asset_identity_digest(asset: &AssetDefinition) -> Result<String, Error> {
     definition_checked(asset)?;
     Ok(hash(
         &json!([
-            "RELATIVE/ASSET/V1",
+            if asset.token_mint.is_some() {
+                "RELATIVE/ASSET/V1"
+            } else {
+                "RELATIVE/ASSET/V2"
+            },
             asset.stable_asset_id,
             asset.token_mint,
             asset.exposure_group,
@@ -210,6 +218,7 @@ fn evidence_at(
     if evidence.asset_digest != asset_identity_digest(asset)?
         || !valid_digest(&evidence.source_fact_digest)
         || !valid_digest(&evidence.assessment_digest)
+        || evidence.source_authority.len() > MAX_SOURCE_AUTHORITY_BYTES
         || evidence
             .source_authority
             .trim_matches(js_whitespace)
@@ -300,7 +309,10 @@ fn unique_assets(assets: &[ActiveAsset]) -> Result<(), Error> {
     for asset in assets {
         let def = &asset.definition;
         if !ids.insert(&def.stable_asset_id)
-            || !mints.insert(&def.token_mint)
+            || def
+                .token_mint
+                .as_ref()
+                .is_some_and(|mint| !mints.insert(mint))
             || !groups.insert(&def.exposure_group)
             || !feeds.insert(feed_tuple(&def.feed).to_string())
         {
@@ -347,7 +359,14 @@ fn snapshot(
         ]));
     }
     let canonical = json!([
-        "RELATIVE/UNIVERSE/V1",
+        if assets
+            .iter()
+            .all(|asset| asset.definition.token_mint.is_some())
+        {
+            "RELATIVE/UNIVERSE/V1"
+        } else {
+            "RELATIVE/UNIVERSE/V2"
+        },
         version,
         effective_at,
         predecessor_digest,
@@ -414,7 +433,7 @@ pub fn activate_universe(
         timestamp(approved.approved_at)?;
         timestamp(asset.scheduled_at)?;
         timestamp(asset.activates_at)?;
-        if asset.activates_at > at
+        if asset.activates_at != at
             || asset.scheduled_at >= asset.activates_at
             || approved.approved_at > asset.scheduled_at
             || asset.activates_at - asset.scheduled_at < policy.minimum_notice_seconds

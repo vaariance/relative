@@ -7,7 +7,8 @@ rust-version = "1.84"
 crate-type = ["cdylib", "lib"]
 name = "cox"
 [features]
-default = []
+default = ["custom-heap"]
+custom-heap = []
 devnet-collateral = []
 no-entrypoint = []
 no-idl = []
