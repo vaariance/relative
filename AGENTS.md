@@ -1462,3 +1462,11 @@ another agent needs to know.
 - **Rules for agents:** $CRYPTO is the benchmark and one holdable class, not a required step into or out of a coin. Transactions still come from the app API; the web app does not import `@cox/client/swap`.
 - **Open:** No direct sale to USDC or swap into a coin class has been signed with a real wallet. Not deployed to Vercel.
 - **Refs:** commit `a106a11`, `apps/web/README.md` (Swap, buy and sell).
+
+### 2026-10-23 · Godwin (Claude Code) · Faucet page grants 20 tUSDC
+
+- **Area:** `apps/web` (`src/app/faucet-actions.ts`, `src/components/faucet-panel.tsx`, `src/lib/faucet.ts`).
+- **What:** At Peter's request, step 3 of the Faucet page is split in two. Step 3, "Get 20 tUSDC", mints 20 tUSDC (`5rpGrekf…wV3X`) to the connected wallet from a server action signed by `TUSDC_FAUCET_SECRET_KEY`, creating its token account if needed. Step 4 is the Circle USDC link. Godwin decided each wallet can claim twice in any 24 hours. Each grant carries the memo `relative-faucet:<wallet>`, and the limit is counted from the faucet key's last 1,000 transactions on chain, so it needs no database. The balances box shows tUSDC. 58 web tests and the type check pass; the page was checked in the dev server without a wallet.
+- **Rules for agents:** The faucet key must never be the registry admin key (`4rCo36GY…Pp9N`, tUSDC's mint authority today) and must never get a `NEXT_PUBLIC_` name. A claim refuses to send unless the key is tUSDC's mint authority.
+- **Open:** Peter: a faucet-only key that holds tUSDC's mint authority, funded with devnet SOL; Godwin sets it on Vercel before deploying. No claim has been sent yet. The site still trades only USDC, so tUSDC from the faucet cannot be used on Buy or Swap until that changes.
+- **Refs:** commit `39f94cf`, `apps/web/README.md` (Faucet page, Secrets).
