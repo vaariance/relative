@@ -1,8 +1,8 @@
 "use server";
 
-import { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
+import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
 import bs58 from "bs58";
-import { FAUCET_CLAIMS_PER_DAY, FAUCET_GRANT, TEST_COLLATERAL } from "@/lib/config";
+import { FAUCET_CLAIMS_PER_DAY, FAUCET_GRANT, MIN_GAS_SOL, TEST_COLLATERAL } from "@/lib/config";
 import { type ClaimAllowance, claimAllowance, faucetMemo } from "@/lib/faucet";
 import type { Outcome } from "@/lib/requests";
 
@@ -40,13 +40,21 @@ function busy(error: unknown): boolean {
   return /429|Too Many/i.test(message);
 }
 
-export async function faucetClaims(owner: string): Promise<Outcome<ClaimAllowance | null>> {
+export interface FaucetStatus {
+  claims: ClaimAllowance | null;
+  sol: number;
+}
+
+const MIN_GAS_LAMPORTS = Math.round(MIN_GAS_SOL * LAMPORTS_PER_SOL);
+
+export async function faucetStatus(owner: string): Promise<Outcome<FaucetStatus>> {
   try {
-    new PublicKey(owner);
+    const key = new PublicKey(owner);
     const faucet = faucetKey();
-    return { ok: true, value: faucet ? await allowanceFor(faucet.publicKey, owner) : null };
+    const [lamports, claims] = await Promise.all([connection.getBalance(key), faucet ? allowanceFor(faucet.publicKey, owner) : Promise.resolve(null)]);
+    return { ok: true, value: { claims, sol: lamports / LAMPORTS_PER_SOL } };
   } catch (error) {
-    return { ok: false, code: "UNAVAILABLE", message: busy(error) ? "The devnet connection is busy. Please try again in a moment." : "Your remaining claims could not be read." };
+    return { ok: false, code: "UNAVAILABLE", message: busy(error) ? "The devnet connection is busy. Please try again in a moment." : "Your wallet could not be read." };
   }
 }
 
@@ -62,6 +70,9 @@ export async function claimTestTokens(owner: string): Promise<Outcome<{ signatur
   if (claiming.has(owner)) return { ok: false, code: "RATE_LIMITED", message: "Your last claim is still being sent." };
   claiming.add(owner);
   try {
+    if ((await connection.getBalance(recipient)) < MIN_GAS_LAMPORTS) {
+      return { ok: false, code: "NO_GAS", message: `Get at least ${MIN_GAS_SOL} devnet SOL for network fees first.` };
+    }
     const allowance = await allowanceFor(faucet.publicKey, owner);
     if (allowance.left === 0) {
       const next = allowance.nextAt === null ? "tomorrow" : `after ${new Date(allowance.nextAt * 1000).toUTCString().slice(17, 22)} UTC`;

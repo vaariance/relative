@@ -1,10 +1,9 @@
 "use client";
 
 import { Check, Copy, ExternalLink } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
-import { claimTestTokens, faucetClaims } from "@/app/faucet-actions";
-import { CIRCLE_FAUCET_URL, FAUCET_CLAIMS_PER_DAY, FAUCET_GRANT, SOL_FAUCET_URL, TEST_COLLATERAL } from "@/lib/config";
-import type { ClaimAllowance } from "@/lib/faucet";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { type FaucetStatus, claimTestTokens, faucetStatus } from "@/app/faucet-actions";
+import { CIRCLE_FAUCET_URL, FAUCET_CLAIMS_PER_DAY, FAUCET_GRANT, MIN_GAS_SOL, SOL_FAUCET_URL, TEST_COLLATERAL } from "@/lib/config";
 import { openLogin, useSigner } from "./signer";
 import { useSnackbar } from "./snackbar";
 
@@ -47,7 +46,9 @@ export function FaucetPanel() {
   const { address } = useSigner();
   const [mounted, setMounted] = useState(false);
   const [picked, setPicked] = useState<TokenId>("tusdc");
-  const [claims, setClaims] = useState<ClaimAllowance | null>(null);
+  const [status, setStatus] = useState<FaucetStatus | null>(null);
+  const [checked, setChecked] = useState<string | null>(null);
+  const steered = useRef<string | null>(null);
   const { fail, show: notify } = useSnackbar();
   const [claiming, setClaiming] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -56,16 +57,36 @@ export function FaucetPanel() {
   useEffect(() => setMounted(true), []);
 
   const refresh = useCallback(async () => {
-    if (!owner) return setClaims(null);
-    const result = await faucetClaims(owner);
-    setClaims(result.ok ? result.value : null);
+    if (!owner) {
+      setStatus(null);
+      setChecked(null);
+      return;
+    }
+    const result = await faucetStatus(owner);
+    setStatus(result.ok ? result.value : null);
+    setChecked(owner);
   }, [owner]);
 
   useEffect(() => {
+    setStatus(null);
     void refresh();
+    const again = () => void refresh();
+    window.addEventListener("focus", again);
+    return () => window.removeEventListener("focus", again);
   }, [refresh]);
 
+  const claims = status?.claims ?? null;
   const spent = claims !== null && claims.left === 0;
+  const checking = owner !== null && checked !== owner;
+  const hasGas = status !== null && status.sol >= MIN_GAS_SOL;
+  const needsGas = owner !== null && !checking && !hasGas;
+  const locked = picked !== "sol" && owner !== null && !hasGas;
+
+  useEffect(() => {
+    if (!needsGas || !owner || steered.current === owner) return;
+    steered.current = owner;
+    setPicked("sol");
+  }, [needsGas, owner]);
 
   const copy = async () => {
     if (!owner) return false;
@@ -91,8 +112,15 @@ export function FaucetPanel() {
   };
 
   const outside = picked === "sol" ? SOL_FAUCET_URL : picked === "usdc" ? CIRCLE_FAUCET_URL : null;
-  const note =
-    picked === "tusdc"
+  const note = locked
+    ? checking
+      ? "Checking your SOL balance."
+      : status === null
+        ? "Your SOL balance could not be checked. Please try again shortly."
+        : `Get at least ${MIN_GAS_SOL} devnet SOL for network fees first. Pick SOL above.`
+    : picked === "sol" && needsGas && status !== null
+      ? `You have ${status.sol.toFixed(4)} SOL. Get at least ${MIN_GAS_SOL} SOL, then come back for collateral.`
+      : picked === "tusdc"
       ? owner && claims !== null
         ? spent
           ? `No claims left today. Next claim after ${claims.nextAt === null ? "24 hours" : clock(claims.nextAt)}.`
@@ -122,6 +150,7 @@ export function FaucetPanel() {
             >
               <TokenIcon token={token} size={48} />
               <span className="text-base font-semibold">{token.symbol}</span>
+              {needsGas && token.id === "sol" && <span className="rounded-pill bg-accent px-2 py-0.5 text-[10px] font-semibold text-accent-ink">START HERE</span>}
               <span className="hidden text-xs text-muted sm:block">{token.caption}</span>
             </button>
           );
@@ -155,6 +184,8 @@ export function FaucetPanel() {
         <div className="flex flex-col gap-2">
           {!owner ? (
             <button type="button" onClick={openLogin} className={primary}>Connect wallet</button>
+          ) : locked ? (
+            <button type="button" disabled className={primary}>{checking ? "Checking" : "Get SOL first"}</button>
           ) : outside ? (
             <a href={outside} target="_blank" rel="noreferrer" onClick={() => void copy()} className={primary}>
               {picked === "sol" ? "Open the Solana faucet" : "Open the Circle faucet"} <ExternalLink size={14} aria-hidden="true" />

@@ -113,7 +113,13 @@ The Faucet page follows the layout of Circle's faucet: pick a token (tUSDC,
 USDC or SOL), see the network (Solana Devnet) and the connected wallet's
 address, then press one button. tUSDC is sent from Relative's own faucet; USDC
 and SOL open Circle's and Solana's faucets with the address copied. tUSDC and
-USDC are both collateral; SOL pays network fees. The
+USDC are both collateral; SOL pays network fees.
+
+A wallet must hold at least 0.01 devnet SOL (`MIN_GAS_SOL`) before it can get
+collateral. Below that, the page opens on the SOL card marked "Start here", and
+the tUSDC and USDC buttons are locked. The claim server action checks the
+balance again, so it cannot be bypassed. The balance is read again whenever
+the tab gets focus, so returning from the Solana faucet unlocks the page. The
 wallet's devnet SOL, USDC and tUSDC balances are in the wallet menu, read in
 one call each time it opens.
 
