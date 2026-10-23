@@ -1,7 +1,7 @@
 import "server-only";
 import { FIXTURE_DEMO_WALLET } from "./config";
 import { COINGECKO_IDS } from "./logos";
-import { type CoxAsset, type CoxDeployment, type CoxStatus, type CryptoComposition, type Portfolio, type Preview, type Publication, CoxApiError, createCoxApiClient } from "@eox/app-api";
+import { type CoxAsset, type CoxDeployment, type CoxStatus, type CryptoComposition, type EpochOverview, type Portfolio, type Preview, type Publication, CoxApiError, createCoxApiClient } from "@eox/app-api";
 
 const HISTORY = 1440;
 const PAGE = 100;
@@ -32,6 +32,14 @@ export async function getStatus(): Promise<CoxStatus> {
 export async function getPreview(): Promise<Preview | null> {
   try {
     return (await api.preview()).data;
+  } catch {
+    return null;
+  }
+}
+
+export async function getEpochs(): Promise<EpochOverview | null> {
+  try {
+    return (await api.epochs()).data;
   } catch {
     return null;
   }

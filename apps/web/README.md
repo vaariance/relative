@@ -130,6 +130,32 @@ memo `relative-faucet:<wallet>`, and the limit is counted from the faucet key's
 recent transactions on chain, so it holds across server instances without a
 database.
 
+## Epochs page
+
+`/epochs` is the four-hour prediction game run by the separate Epoch program
+(`packages/cox-epoch`), read through the app API's `/v1/epochs` routes. A user
+picks one coin and stakes USDC while a round is live; at the close, coins that
+rose against $CRYPTO share the pot by their share of the total gains, weighted
+by stake. If no coin rose, every stake is returned in full.
+
+- **Rounds row:** each round from `GET /v1/epochs` as a card (Next, Live,
+  Closed, Settled or Refunded) with its window, countdown, pot and entries.
+- **Board:** each coin's move against $CRYPTO since the round opened, and its
+  share of all the gains, which is what an entry on that coin would score if
+  the round ended now. The opening values come from `/v1/preview/history` at
+  the open; live values come from the previews; a settled round uses its
+  closing references. The Epoch program stores references on a base of 1, so
+  they are multiplied by 100 to compare with the previews.
+- **Entry:** pick a coin (or tap one on the board) and a stake; the fee is
+  2 bps capped at 0.20 USDC. Built with `POST /v1/transactions/epoch-entry`,
+  sending all 30 tickers as the basket.
+- **Your entries:** the wallet's lots from `GET /v1/epochs/:opensAt/lots`,
+  read every 20 seconds, with score, payout and a withdraw button
+  (`POST /v1/transactions/epoch-withdraw`).
+
+When the API sends an empty `universe` for a round, the page takes the coin
+list from the closing references, or else from `/v1/assets`.
+
 ## Gain or loss
 
 The Portfolio page and each "Your position" box show what a position cost,

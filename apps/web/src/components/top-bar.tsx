@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, ArrowLeftRight, BarChart3, Droplets, Home, PanelLeftClose, PanelLeftOpen, Wallet, type LucideIcon } from "lucide-react";
+import { Activity, ArrowLeftRight, BarChart3, Droplets, Timer, Home, PanelLeftClose, PanelLeftOpen, Wallet, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -18,6 +18,7 @@ const main: Item[] = [
   { href: "/crypto", label: "$CRYPTO", icon: Activity },
   { href: "/portfolio", label: "Portfolio", icon: Wallet },
   { href: "/swap", label: "Swap", icon: ArrowLeftRight },
+  { href: "/epochs", label: "Epochs", icon: Timer },
 ];
 
 const more: Item[] = [

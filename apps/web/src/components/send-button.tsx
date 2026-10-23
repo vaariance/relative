@@ -26,6 +26,8 @@ function encode(bytes: Uint8Array): string {
 function done(built: UnsignedTransaction): { title: string; text: string } {
   if (built.operation === "cancel") return { title: "Request cancelled", text: "It will not be filled." };
   if (built.operation === "refund") return { title: "Refund sent", text: "The money is on its way back to your wallet." };
+  if (built.operation === "epoch-entry") return { title: "Entry placed", text: "It starts from the next price, within a few seconds." };
+  if (built.operation === "epoch-withdraw") return { title: "Withdrawal sent", text: `The ${COLLATERAL.symbol} is on its way to your wallet.` };
   if (built.operation === "withdraw") return { title: "Withdrawal sent", text: `The ${COLLATERAL.symbol} is on its way to your wallet.` };
   return { title: "Order placed", text: "It fills at the next price update, usually within a minute." };
 }
@@ -40,9 +42,10 @@ interface SendButtonProps {
   hideSuccess?: boolean;
   describe?: string;
   trading?: boolean;
+  onDone?: () => void;
 }
 
-export function SendButton({ intent, label, connectLabel, problem = null, className, quiet = false, describe, trading = false }: SendButtonProps) {
+export function SendButton({ intent, label, connectLabel, problem = null, className, quiet = false, describe, trading = false, onDone }: SendButtonProps) {
   const { live, owner, market, refresh } = useAccount();
   const { sign } = useSigner();
   const { show, fail } = useSnackbar();
@@ -74,6 +77,7 @@ export function SendButton({ intent, label, connectLabel, problem = null, classN
     if (submission.state === "failed") fail(humanError("TRANSACTION_REJECTED", submission.error ?? ""), "The network refused it");
     if (submission.state === "expired") fail("It was not picked up in time. Nothing moved. Please try again.", "Timed out");
     await refresh();
+    onDone?.();
   };
 
   const send = async () => {
@@ -95,6 +99,7 @@ export function SendButton({ intent, label, connectLabel, problem = null, classN
       const message = done(built.value);
       const trade = built.value.operation === "deposit" || built.value.operation === "switch" || built.value.operation === "redeem";
       show({ tone: "good", title: message.title, text: describe ?? message.text, link: trade ? { href: "/portfolio", label: "View portfolio" } : undefined });
+      onDone?.();
       void track(submitted.value);
     } catch (error) {
       fail(walletError(error));

@@ -13,7 +13,9 @@ export type Intent =
   | { operation: "redeem"; fromClass: string; units: string; minimumProceeds: string; expiryBatch: number }
   | { operation: "cancel"; requestId: string }
   | { operation: "refund"; requestId: string }
-  | { operation: "withdraw"; amount: string };
+  | { operation: "withdraw"; amount: string }
+  | { operation: "epoch-entry"; opensAt: number; grossStake: string; basket: string[]; backedAsset: string }
+  | { operation: "epoch-withdraw"; opensAt: number; nonce: string };
 
 export type Outcome<T> = { ok: true; value: T } | { ok: false; code: string; message: string };
 

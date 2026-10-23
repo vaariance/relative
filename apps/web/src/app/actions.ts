@@ -1,6 +1,6 @@
 "use server";
 
-import { CoxApiError, type Portfolio, type Submission, type UnsignedTransaction } from "@eox/app-api";
+import { CoxApiError, type EpochLot, type Portfolio, type Submission, type UnsignedTransaction } from "@eox/app-api";
 import { api } from "@/lib/data";
 import type { Intent, Outcome } from "@/lib/requests";
 
@@ -21,6 +21,13 @@ export async function walletPortfolio(owner: string): Promise<Outcome<Portfolio 
       if (error instanceof CoxApiError && error.code === "UNKNOWN_WALLET") return null;
       throw error;
     }
+  });
+}
+
+export async function walletEpochLots(owner: string, opensAt: readonly number[]): Promise<Outcome<EpochLot[]>> {
+  return attempt(async () => {
+    const lots = await Promise.all(opensAt.map((at) => api.epochLots(at, owner).then((response) => response.data)));
+    return lots.flat();
   });
 }
 
@@ -49,6 +56,10 @@ export async function buildTransaction(owner: string, intent: Intent): Promise<O
         return (await api.buildRefund({ owner, requestId: intent.requestId })).data;
       case "withdraw":
         return (await api.buildWithdraw({ owner, amount: intent.amount })).data;
+      case "epoch-entry":
+        return (await api.buildEpochEntry({ owner, opensAt: intent.opensAt, grossStake: intent.grossStake, basket: intent.basket, backedAsset: intent.backedAsset })).data;
+      case "epoch-withdraw":
+        return (await api.buildEpochWithdraw({ owner, opensAt: intent.opensAt, nonce: intent.nonce })).data;
       default:
         throw new CoxApiError("INVALID_REQUEST", "unknown operation", 0);
     }

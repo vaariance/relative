@@ -18,6 +18,8 @@ const PROGRAM: Array<[RegExp, string]> = [
   [/InvalidCollateral/, `This wallet's ${COLLATERAL.symbol} is not the token the pool uses.`],
   [/AccountNotInitialized|AccountNotFound|user_token|insufficient funds|insufficient lamports|0x1\b/i, `Your wallet does not have enough ${COLLATERAL.symbol}, or has no devnet SOL to pay the network fee. You can get both on the Faucet page.`],
   [/blockhash|expired/i, "That took too long and timed out. Nothing moved. Please try again."],
+  [/EntryLimit/, "This Epoch is full and takes no more entries."],
+  [/WrongPhase/, "This Epoch is not taking entries right now."],
   [/nonce|already in use/i, "Someone else's request landed at the same moment. Please press the button again."],
 ];
 
@@ -28,6 +30,8 @@ const CODES: Record<string, string> = {
   UNKNOWN_WALLET: "This wallet has no activity here yet.",
   TRADING_CLOSED: "Trading is not open right now, so nothing was sent.",
   NO_PUBLICATION: "The market has not published yet. Please try again shortly.",
+  UNKNOWN_EPOCH: "That Epoch could not be found. Please reload the page.",
+  NOT_CONFIGURED: "Epochs are not available right now.",
   INTERNAL_ERROR: "Something went wrong on our side. Nothing was sent. Please try again.",
 };
 
