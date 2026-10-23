@@ -2,10 +2,9 @@
 
 import { Check, Copy, ExternalLink } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type FaucetStatus, claimTestTokens, faucetStatus } from "@/app/faucet-actions";
-import { CIRCLE_FAUCET_URL, FAUCET_CLAIMS_PER_DAY, FAUCET_GRANT, MIN_GAS_SOL, SOL_FAUCET_URL, TEST_COLLATERAL } from "@/lib/config";
+import { type FaucetStatus, faucetStatus } from "@/app/faucet-actions";
+import { CIRCLE_FAUCET_URL, MIN_GAS_SOL, SOL_FAUCET_URL, TEST_COLLATERAL } from "@/lib/config";
 import { openLogin, useSigner } from "./signer";
-import { useSnackbar } from "./snackbar";
 
 type TokenId = "sol" | "tusdc" | "usdc";
 
@@ -18,9 +17,9 @@ interface Token {
 }
 
 const TOKENS: Token[] = [
-  { id: "tusdc", symbol: TEST_COLLATERAL.symbol, caption: "Relative test collateral", icon: "/tokens/usdc.svg", test: true },
   { id: "usdc", symbol: "USDC", caption: "Circle devnet collateral", icon: "/tokens/usdc.svg" },
   { id: "sol", symbol: "SOL", caption: "Network fees", icon: "/tokens/sol.svg" },
+  { id: "tusdc", symbol: TEST_COLLATERAL.symbol, caption: "Relative test token · soon", icon: "/tokens/usdc.svg", test: true },
 ];
 
 const label = "mb-2 block text-sm font-medium";
@@ -38,19 +37,13 @@ function TokenIcon({ token, size }: { token: Token; size: number }) {
   );
 }
 
-function clock(seconds: number): string {
-  return `${new Date(seconds * 1000).toUTCString().slice(17, 22)} UTC`;
-}
-
 export function FaucetPanel() {
   const { address } = useSigner();
   const [mounted, setMounted] = useState(false);
-  const [picked, setPicked] = useState<TokenId>("tusdc");
+  const [picked, setPicked] = useState<TokenId>("usdc");
   const [status, setStatus] = useState<FaucetStatus | null>(null);
   const [checked, setChecked] = useState<string | null>(null);
   const steered = useRef<string | null>(null);
-  const { fail, show: notify } = useSnackbar();
-  const [claiming, setClaiming] = useState(false);
   const [copied, setCopied] = useState(false);
   const owner = mounted ? address : null;
 
@@ -75,12 +68,10 @@ export function FaucetPanel() {
     return () => window.removeEventListener("focus", again);
   }, [refresh]);
 
-  const claims = status?.claims ?? null;
-  const spent = claims !== null && claims.left === 0;
   const checking = owner !== null && checked !== owner;
   const hasGas = status !== null && status.sol >= MIN_GAS_SOL;
   const needsGas = owner !== null && !checking && !hasGas;
-  const locked = picked !== "sol" && owner !== null && !hasGas;
+  const locked = picked === "usdc" && owner !== null && !hasGas;
 
   useEffect(() => {
     if (!needsGas || !owner || steered.current === owner) return;
@@ -101,16 +92,6 @@ export function FaucetPanel() {
     }
   };
 
-  const claim = async () => {
-    if (!owner || claiming) return;
-    setClaiming(true);
-    const result = await claimTestTokens(owner);
-    setClaiming(false);
-    if (!result.ok) return fail(result.message, `${TEST_COLLATERAL.symbol} not sent`);
-    notify({ tone: "good", title: `${FAUCET_GRANT} ${TEST_COLLATERAL.symbol} sent`, link: { href: `https://explorer.solana.com/tx/${result.value.signature}?cluster=devnet`, label: "View on explorer", external: true } });
-    void refresh();
-  };
-
   const outside = picked === "sol" ? SOL_FAUCET_URL : picked === "usdc" ? CIRCLE_FAUCET_URL : null;
   const note = locked
     ? checking
@@ -121,11 +102,7 @@ export function FaucetPanel() {
     : picked === "sol" && needsGas && status !== null
       ? `You have ${status.sol.toFixed(4)} SOL. Get at least ${MIN_GAS_SOL} SOL, then come back for collateral.`
       : picked === "tusdc"
-      ? owner && claims !== null
-        ? spent
-          ? `No claims left today. Next claim after ${claims.nextAt === null ? "24 hours" : clock(claims.nextAt)}.`
-          : `Sends ${FAUCET_GRANT} ${TEST_COLLATERAL.symbol} to your wallet. ${claims.left} of ${FAUCET_CLAIMS_PER_DAY} claims left today.`
-        : `Sends ${FAUCET_GRANT} ${TEST_COLLATERAL.symbol} to your wallet. ${FAUCET_CLAIMS_PER_DAY} claims a day.`
+        ? `Free ${TEST_COLLATERAL.symbol} claims open once the faucet service is ready. Until then, get devnet USDC from Circle.`
       : picked === "usdc"
         ? "Opens Circle's faucet with your address copied. Choose USDC and Solana Devnet, then paste it."
         : "Opens Solana's faucet with your address copied. Paste it there. Every trade costs a tiny fee in SOL.";
@@ -133,7 +110,7 @@ export function FaucetPanel() {
   return (
     <div className="flex flex-col gap-8">
       <p className="max-w-xl text-base text-muted">
-        Get test collateral and devnet SOL to try Relative for free. {TEST_COLLATERAL.symbol} and USDC both work as collateral; you also need a little SOL for network fees.
+        Get devnet USDC, plus a little devnet SOL for network fees, to try Relative for free. Relative's own test token, {TEST_COLLATERAL.symbol}, will be claimable here soon.
       </p>
 
       <div role="radiogroup" aria-label="Token" className="grid grid-cols-3 gap-3">
@@ -182,18 +159,18 @@ export function FaucetPanel() {
         </div>
 
         <div className="flex flex-col gap-2">
-          {!owner ? (
+          {picked === "tusdc" ? (
+            <button type="button" disabled className={primary}>{TEST_COLLATERAL.symbol} claims not open yet</button>
+          ) : !owner ? (
             <button type="button" onClick={openLogin} className={primary}>Connect wallet</button>
           ) : locked ? (
             <button type="button" disabled className={primary}>{checking ? "Checking" : "Get SOL first"}</button>
-          ) : outside ? (
-            <a href={outside} target="_blank" rel="noreferrer" onClick={() => void copy()} className={primary}>
-              {picked === "sol" ? "Open the Solana faucet" : "Open the Circle faucet"} <ExternalLink size={14} aria-hidden="true" />
-            </a>
           ) : (
-            <button type="button" onClick={() => void claim()} disabled={claiming || spent} className={primary}>
-              {claiming ? "Sending" : `Send ${FAUCET_GRANT} ${TEST_COLLATERAL.symbol}`}
-            </button>
+            outside && (
+              <a href={outside} target="_blank" rel="noreferrer" onClick={() => void copy()} className={primary}>
+                {picked === "sol" ? "Open the Solana faucet" : "Open the Circle faucet"} <ExternalLink size={14} aria-hidden="true" />
+              </a>
+            )
           )}
           <p className="num text-center text-xs text-muted">{note}</p>
         </div>

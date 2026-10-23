@@ -28,9 +28,8 @@ Open <http://localhost:3100> for the landing page, or <http://localhost:3100/mar
 | Secret | Purpose |
 | --- | --- |
 | `COINGECKO_API_KEY` | CoinGecko Demo API key, sent as `x-cg-demo-api-key` when coin logos are looked up once a day. Optional: without it the lookup uses CoinGecko's keyless access, which has a lower shared limit. |
-| `TUSDC_FAUCET_SECRET_KEY` | Solana secret key (base58, or the CLI's JSON array) of the faucet key that is the mint authority of tUSDC. Needs a little devnet SOL: it pays each claim's fee and opens new wallets' tUSDC accounts. Without it, or if it is not the mint authority, a claim answers that the faucet is not available. |
 
-Treat these as secrets, not as configuration. Store them as Sensitive environment variables on the host and in the untracked `.env.local` for local work. Never commit them, never log them, and never give them a `NEXT_PUBLIC_` name. `COINGECKO_API_KEY` is read only in `src/lib/data.ts`, which is marked server-only; `TUSDC_FAUCET_SECRET_KEY` is read only in the server actions in `src/app/faucet-actions.ts`.
+Treat this as a secret, not as configuration. Store it as a Sensitive environment variable on the host and in the untracked `.env.local` for local work. Never commit it, never log it, and never give it a `NEXT_PUBLIC_` name. It is read only in `src/lib/data.ts`, which is marked server-only so it cannot be bundled for browsers.
 
 The browser RPC and API deployment must target the same network. Private infrastructure credentials must not be supplied through `NEXT_PUBLIC_*` variables.
 
@@ -109,26 +108,17 @@ fresh class has a unit value of 1. Requests are still sent in exact quanta.
 
 ## Faucet page
 
-The Faucet page follows the layout of Circle's faucet: pick a token (tUSDC,
-USDC or SOL), see the network (Solana Devnet) and the connected wallet's
-address, then press one button. tUSDC is sent from Relative's own faucet; USDC
-and SOL open Circle's and Solana's faucets with the address copied. tUSDC and
-USDC are both collateral; SOL pays network fees.
+The Faucet page follows the layout of Circle's faucet: pick a token (USDC, SOL
+or tUSDC), see the network (Solana Devnet) and the connected wallet's address,
+then press one button. USDC and SOL open Circle's and Solana's faucets with the
+address copied. The Circle button stays locked until the wallet holds at least
+0.01 devnet SOL (`MIN_GAS_SOL`); below that the page opens on SOL. The balance
+is read again whenever the tab gets focus.
 
-A wallet must hold at least 0.01 devnet SOL (`MIN_GAS_SOL`) before it can get
-collateral. Below that, the page opens on the SOL card marked "Start here", and
-the tUSDC and USDC buttons are locked. The claim server action checks the
-balance again, so it cannot be bypassed. The balance is read again whenever
-the tab gets focus, so returning from the Solana faucet unlocks the page. The
-wallet's devnet SOL, USDC and tUSDC balances are in the wallet menu, read in
-one call each time it opens.
-
-"Get 20 tUSDC" mints 20 tUSDC (`5rpGrekf…wV3X`) to the wallet from a server
-action signed by `TUSDC_FAUCET_SECRET_KEY`, creating the wallet's token account
-if needed. Each wallet can claim twice in any 24 hours. Every grant carries the
-memo `relative-faucet:<wallet>`, and the limit is counted from the faucet key's
-recent transactions on chain, so it holds across server instances without a
-database.
+tUSDC claims are not open yet. They will come from the faucet service Peter
+and Joel are building (a signed ownership message, then a grant from a
+dedicated faucet wallet through Joel's app API). The web app holds no faucet
+key and mints nothing.
 
 ## Epochs page
 
