@@ -42,7 +42,8 @@ The public demonstration endpoint is <https://fixture-api.getrelative.trade>. It
 | `COX_PUBLICATION_ARCHIVE_GCS` | `gs://bucket/prefix/` of content-addressed `<sequence>/<sha256>.json` records; use instead of the directory | Unset |
 | `COX_PREVIEW_GCS` | `gs://bucket/prefix/` of the publisher's per-second `<unix seconds>.json` preview records; unset disables the preview routes | Unset |
 | `APP_API_POST_LIMIT_PER_MINUTE` | Transaction requests per client per minute; 429 `RATE_LIMITED` with `Retry-After` beyond it | `30` |
-| `APP_API_TRUST_FORWARDED_FOR` | `true` behind Cloud Run: the client is the last `X-Forwarded-For` entry | Unset |
+| `APP_API_TRUST_FORWARDED_FOR` | `true` behind the gateway and Cloud Run: the client is the first `X-Forwarded-For` entry, which the gateway sets to the visitor's address | Unset |
+| `APP_API_GATEWAY_SECRET` | When set, the first entry is trusted only on requests whose `x-relative-gateway` header matches; other requests count under the last entry, the address Google saw | Unset |
 | `APP_API_HISTORY_GCS` | `gs://bucket/prefix/` for sealed history segments shared by every instance | `<state dir>/history-<pool>/` |
 | `APP_API_SUBMISSIONS_FIRESTORE_PROJECT` | Google Cloud project whose Firestore holds submission tracking, shared by every instance | Unset: `<state dir>/submissions-<pool>.json` |
 | `APP_API_SUBMISSIONS_FIRESTORE_DATABASE` | Firestore database for submissions; use one of its own so the service account cannot reach other data | `(default)` |
@@ -186,7 +187,7 @@ The faucet gives a wallet 100 rlUSD, the devnet test token `5rpGrekfBLHdF8PD8eKL
 
 A claim's `state` is `reserved`, `signed`, `submitted`, `confirmed` or `failed`; `signature` links to the grant on an explorer. A failed claim moved nothing and does not count against the wallet.
 
-- **Limits:** one claim per wallet every 24 hours, 3 per visitor network address and 50 in total per UTC day (`COX_FAUCET_COOLDOWN_SECONDS`, `COX_FAUCET_IP_DAILY`, `COX_FAUCET_GLOBAL_DAILY`). The address is the first `X-Forwarded-For` entry, which the gateway sets to the visitor's address.
+- **Limits:** one claim per wallet every 24 hours, 3 per visitor network address and 50 in total per UTC day (`COX_FAUCET_COOLDOWN_SECONDS`, `COX_FAUCET_IP_DAILY`, `COX_FAUCET_GLOBAL_DAILY`). The address is the same client address as the transaction limit (see `APP_API_TRUST_FORWARDED_FOR` and `APP_API_GATEWAY_SECRET`).
 - **Errors:** `FAUCET_DISABLED` (409), `CHALLENGE_INVALID` (401), `FAUCET_COOLDOWN` and `FAUCET_LIMITED` (429, with `retry-after`), `FAUCET_BUSY` (409, an earlier claim is still confirming), `FAUCET_EMPTY` and `FAUCET_UNAVAILABLE` (503), `NOT_CONFIGURED` (409, no faucet on this deployment).
 - **Shared ledger:** challenges, wallet cooldowns, daily budgets and claims live in Firestore (`APP_API_SUBMISSIONS_FIRESTORE_PROJECT` and `_DATABASE`, collections `coxFaucetChallenges`, `coxFaucetWallets`, `coxFaucetBudgets`, `coxFaucetClaims`). One transaction uses the challenge, starts the cooldown and counts the budgets, so two instances cannot both grant to one wallet.
 - **Signing:** the grant comes from `devnetFaucetInstructions` in `@cox/client/faucet`, is simulated, then signed by the `devnet-faucet` signer role (`COX_FAUCET_SIGNER_URL`, `COX_FAUCET_SIGNER_AUDIENCE`, `COX_FAUCET_ADDRESS`) with an expiry of 60 seconds. The signed bytes are saved before they are sent. If sending or confirming is unclear, the claim stays open until the chain shows the grant landed, failed or can no longer land; only then can the wallet claim again. Nothing checks wallets on a timer.
