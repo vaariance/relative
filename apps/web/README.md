@@ -22,6 +22,7 @@ Open <http://localhost:3100> for the landing page, or <http://localhost:3100/mar
 | `COX_DEMO_WALLET` | Portfolio wallet used with fixture data. Defaults to the first fixture wallet; ignored in live mode. |
 | `NEXT_PUBLIC_SOLANA_RPC_URL` | Browser wallet-adapter RPC. Defaults to public Solana devnet. This value is exposed to browsers; use only an endpoint intended for public client access. |
 | `NEXT_PUBLIC_PRIVY_APP_ID` | Privy app ID. When set, Log in opens Privy with Google and Solana wallets, Google users get a Privy Solana wallet, and Privy wallets sign without a confirmation window. Unset, the app connects browser wallets through wallet-adapter. The ID is public by design; never put the Privy app secret in a `NEXT_PUBLIC_` variable. The Privy app must allow Google and Solana wallet login and the site's origin. |
+| `EPOCHS_ENABLED` | Set to `true` to show the Epochs game at `/epochs`. Anything else, or unset, shows a "Coming soon" card instead and makes no Epoch API calls. Off by default everywhere, including local development; set it only in an environment where Epochs should be tested, such as a Vercel Preview deployment or your own `.env.local`. Read on the server at request time, so changing it needs a redeploy or a dev-server restart, not a rebuild of the code. |
 
 ### Secrets
 
@@ -121,6 +122,8 @@ dedicated faucet wallet through Joel's app API). The web app holds no faucet
 key and mints nothing.
 
 ## Epochs page
+
+The page is behind `EPOCHS_ENABLED` (see Configuration); without it, `/epochs` shows "Coming soon".
 
 `/epochs` is the four-hour prediction game run by the separate Epoch program
 (`packages/cox-epoch`), read through the app API's `/v1/epochs` routes. A user

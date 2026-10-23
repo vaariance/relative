@@ -13,3 +13,7 @@ export const SOL_FAUCET_URL = "https://faucet.solana.com";
 
 export const TEST_COLLATERAL = { symbol: "tUSDC", name: "test USDC", mint: "5rpGrekfBLHdF8PD8eKLzXQPPmhyF7FCKeE1VA5CwV3X", decimals: 6 };
 export const MIN_GAS_SOL = 0.01;
+
+export function epochsEnabled(): boolean {
+  return process.env.EPOCHS_ENABLED?.trim().toLowerCase() === "true";
+}
