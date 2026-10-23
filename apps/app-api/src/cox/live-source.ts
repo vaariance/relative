@@ -136,7 +136,7 @@ export class LiveCoxSource implements CoxSource {
     const methodology = await reader.methodology(pool.methodology);
     if (!methodology.sealed) throw new Error("PoolMethodologyNotSealed");
     const manifest = parseManifest(methodology);
-    if (manifest.assets.length + 1 !== pool.classes.length || manifest.origin !== Number(pool.origin.toString())) throw new Error("PoolManifestMismatch");
+    if (manifest.classes.length !== pool.classes.length || manifest.origin !== Number(pool.origin.toString())) throw new Error("PoolManifestMismatch");
     const mint = await options.connection.getAccountInfo(pool.collateralMint, "finalized");
     if (!mint || mint.data.length <= MINT_DECIMALS_OFFSET) throw new Error("CollateralMintMissing");
     const log = await PublicationHistory.open({ ...options.history, identity: { program: options.program.programId.toBase58(), pool: reader.pdas.pool(options.poolId).toBase58() } });
@@ -351,11 +351,11 @@ export class LiveCoxSource implements CoxSource {
 
   async assets(): Promise<CoxAsset[]> {
     const latest = this.log.latest();
-    return this.manifest.assets.map((asset, classIndex) => {
-      const price = latest?.prices[classIndex] ?? null;
+    return this.manifest.assets.map((asset, position) => {
+      const price = latest?.prices[position] ?? null;
       return {
         assetId: asset.assetId,
-        classIndex,
+        classIndex: asset.classIndex,
         name: asset.assetId,
         venues: asset.venues,
         latest: latest && price ? { sequence: latest.identity.sequence, batch: latest.identity.batch, priceE8: price.priceE8, venue: price.venue, step: price.step, tradeAgeMinutes: price.tradeAgeMinutes } : null,

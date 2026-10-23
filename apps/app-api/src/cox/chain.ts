@@ -23,6 +23,8 @@ export interface ManifestAsset {
   weightNumerator: string;
   weightDenominator: string;
   pythFeedId: number | null;
+  classIndex: number;
+  epochId: number | null;
 }
 
 export interface Manifest {
@@ -30,8 +32,21 @@ export interface Manifest {
   version: string;
   sealed: boolean;
   assets: ManifestAsset[];
+  classes: string[];
+  cryptoClass: number;
   origin: number;
   mode: PoolMode;
+}
+
+export function classTable(assets: readonly ManifestAsset[], cryptoClass: number): string[] {
+  const size = Math.max(cryptoClass, ...assets.map((a) => a.classIndex)) + 1;
+  const classes: (string | undefined)[] = Array.from({ length: size }, () => undefined);
+  for (const [index, id] of [...assets.map((a) => [a.classIndex, a.assetId] as const), [cryptoClass, CRYPTO_CLASS] as const]) {
+    if (!Number.isSafeInteger(index) || index < 0 || classes[index] !== undefined) throw new Error("ManifestClassesInvalid");
+    classes[index] = id;
+  }
+  if (classes.some((id) => id === undefined)) throw new Error("ManifestClassesInvalid");
+  return classes as string[];
 }
 
 export type ChainPublication = ReturnType<typeof checkedPublication>;
@@ -119,8 +134,10 @@ function parseAdaptiveManifest(account: MethodologyAccount): Manifest {
     weightNumerator: "1",
     weightDenominator: String(roster.length),
     pythFeedId: feeds[i]!,
+    classIndex: i,
+    epochId: id,
   }));
-  return { digest: hex(account.digest), version, sealed: account.sealed, assets, origin: originSeconds, mode: "adaptive" };
+  return { digest: hex(account.digest), version, sealed: account.sealed, assets, classes: classTable(assets, assets.length), cryptoClass: assets.length, origin: originSeconds, mode: "adaptive" };
 }
 
 export function parseManifest(account: MethodologyAccount): Manifest {
@@ -129,21 +146,21 @@ export function parseManifest(account: MethodologyAccount): Manifest {
   if (!Array.isArray(canonical) || canonical[0] !== "COX/METHODOLOGY/V1" || typeof canonical[1] !== "string") throw new Error("ManifestDomainInvalid");
   const tuples = canonical[4];
   if (!Array.isArray(tuples) || tuples.length !== account.roster.length) throw new Error("ManifestRosterInvalid");
-  const assets = tuples.map((tuple: unknown): ManifestAsset => {
+  const assets = tuples.map((tuple: unknown, classIndex): ManifestAsset => {
     if (!Array.isArray(tuple) || tuple.length !== 7) throw new Error("ManifestAssetInvalid");
     const [assetId, krakenWs, krakenRest, coinbase, bybit, numerator, denominator] = tuple as unknown[];
     if (typeof assetId !== "string" || !ASSET_ID.test(assetId) || assetId === CRYPTO_CLASS) throw new Error("ManifestAssetInvalid");
     if (typeof numerator !== "string" || typeof denominator !== "string" || !WEIGHT.test(numerator) || !WEIGHT.test(denominator)) throw new Error("ManifestWeightInvalid");
-    return { assetId, venues: { krakenWs: symbol(krakenWs), krakenRest: symbol(krakenRest), coinbase: symbol(coinbase), bybit: symbol(bybit) }, weightNumerator: numerator, weightDenominator: denominator, pythFeedId: null };
+    return { assetId, venues: { krakenWs: symbol(krakenWs), krakenRest: symbol(krakenRest), coinbase: symbol(coinbase), bybit: symbol(bybit) }, weightNumerator: numerator, weightDenominator: denominator, pythFeedId: null, classIndex, epochId: null };
   });
   if (new Set(assets.map((a) => a.assetId)).size !== assets.length) throw new Error("ManifestAssetDuplicate");
   const origin = Number(account.origin.toString());
   if (!Number.isSafeInteger(origin) || origin % 60 !== 0) throw new Error("ManifestOriginInvalid");
-  return { digest: hex(account.digest), version: canonical[1], sealed: account.sealed, assets, origin, mode: "minute" };
+  return { digest: hex(account.digest), version: canonical[1], sealed: account.sealed, assets, classes: classTable(assets, assets.length), cryptoClass: assets.length, origin, mode: "minute" };
 }
 
 export function classIds(manifest: Manifest): string[] {
-  return [...manifest.assets.map((a) => a.assetId), CRYPTO_CLASS];
+  return manifest.classes;
 }
 
 function venue(code: number): PriceVenue {
@@ -246,7 +263,7 @@ export function toPublication(publication: ChainPublication, batch: BatchAccount
     })),
     benchmarkGross: null,
     benchmark: text(state.benchmark),
-    references: context.manifest.assets.map((a, i) => ({ assetId: a.assetId, gross: null, reference: text(state.references[i]!) })),
+    references: context.manifest.assets.map((a) => ({ assetId: a.assetId, gross: null, reference: text(state.references[a.classIndex]!) })),
     classes: ids.map((classId, i) => {
       const c = state.classes[i]!;
       const fixed = batch ? batch.fixed[i]! : null;

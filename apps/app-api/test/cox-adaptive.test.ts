@@ -3,7 +3,7 @@ import anchor from "@coral-xyz/anchor";
 import type { Methodology, Pool, Registry } from "@cox/client";
 import type { ChainPublication } from "../src/cox/chain.js";
 import { describe, expect, it } from "vitest";
-import { classIds, parseManifest, toPublication } from "../src/cox/chain.js";
+import { classIds, classTable, parseManifest, toPublication, type Manifest } from "../src/cox/chain.js";
 import { feesMigrated, tradingStatus } from "../src/cox/live-source.js";
 
 const ORIGIN = 1_792_623_921n;
@@ -113,5 +113,38 @@ describe("adaptive publications", () => {
     const result = toPublication(publication, null, { program: "p", poolId: "2", manifest, predecessorBatch: 0, finalization: { transaction: null, slot: 1, finalized: false } });
     expect(result.identity).toMatchObject({ sequence: 1, batch: 43_320, predecessorBatch: 0, missedBatches: [] });
     expect(result.prices.map((p) => [p.venue, p.step])).toEqual([["pyth", 0], ["pyth", 0]]);
+  });
+});
+
+describe("class table", () => {
+  const asset = (assetId: string, classIndex: number) => ({ assetId, classIndex, epochId: null, venues: { krakenWs: null, krakenRest: null, coinbase: null, bybit: null }, weightNumerator: "1", weightDenominator: "3", pythFeedId: null });
+
+  it("places CRYPTO at its own class and an added asset after it", () => {
+    expect(classTable([asset("BTC", 0), asset("ETH", 1), asset("LIT", 3)], 2)).toEqual(["BTC", "ETH", "CRYPTO", "LIT"]);
+  });
+
+  it("refuses a gap or two entries for one class", () => {
+    expect(() => classTable([asset("BTC", 0), asset("LIT", 3)], 1)).toThrow("ManifestClassesInvalid");
+    expect(() => classTable([asset("BTC", 0), asset("ETH", 1)], 1)).toThrow("ManifestClassesInvalid");
+  });
+
+  it("reads each asset's reference from its own class", () => {
+    const assets = [asset("BTC", 0), asset("ETH", 1), asset("LIT", 3)];
+    const manifest: Manifest = { digest: "00".repeat(32), version: "v", sealed: true, assets, classes: classTable(assets, 2), cryptoClass: 2, origin: Number(ORIGIN), mode: "adaptive" };
+    const n = (value: number | bigint) => new anchor.BN(value.toString());
+    const side = { preBacking: n(0), preUnits: n(0), postBacking: n(0), postUnits: n(0) };
+    const publication = {
+      prices: assets.map(() => ({ priceE8: n(100), venue: 3, step: 0, candleStart: n(0), tradeAgeMinutes: 0 })),
+      stateDigest: [...Buffer.alloc(32, 1)],
+      committedAt: n(ORIGIN),
+      state: {
+        prices: [n(100), n(100), n(100)], sequence: 1n, batch: 1n, cutoff: ORIGIN, manifest: [...Buffer.alloc(32)], snapshot: [...Buffer.alloc(32)], benchmark: 1n,
+        references: [10n, 11n, 100n, 13n], classes: [side, side, side, side], active: 0n, pending: 0n, payable: 0n, residual: 0n,
+        executed: 0, rejected: 0, receiptRoot: [...Buffer.alloc(32)], feeState: null,
+      },
+    } as unknown as ChainPublication;
+    const result = toPublication(publication, null, { program: "p", poolId: "2", manifest, predecessorBatch: 0, finalization: { transaction: null, slot: 1, finalized: false } });
+    expect(result.references.map((r) => [r.assetId, r.reference])).toEqual([["BTC", "10"], ["ETH", "11"], ["LIT", "13"]]);
+    expect(result.classes.map((c) => c.classId)).toEqual(["BTC", "ETH", "CRYPTO", "LIT"]);
   });
 });
