@@ -1476,3 +1476,10 @@ another agent needs to know.
 - **Area:** `apps/web` (`faucet-panel.tsx`, `wallet-button.tsx`, `src/app/faucet-actions.ts`).
 - **What:** At Godwin's request the Faucet page no longer has a balances card. The wallet menu (connected state) shows devnet SOL, USDC and tUSDC, read in one `getMultipleAccountsInfo` call whenever the menu opens. The server action `faucetBalances` is replaced by `faucetClaims`, which returns only the claims left. Qualifies the balances part of Godwin's 2026-10-23 "Faucet page grants 20 tUSDC" entry. 58 web tests and the type check pass; the wallet menu was not checked with a connected wallet.
 - **Refs:** commit `946a6cb`.
+
+### 2026-10-23 · Godwin (Claude Code) · Faucet test collateral as one step
+
+- **Area:** `apps/web` (`faucet-panel.tsx`).
+- **What:** At Godwin's request the Faucet page has three steps. Step 3, "Get test collateral", offers tUSDC (the 20-token claim) and devnet USDC (link to Circle's faucet) side by side, saying both work as collateral for testing. Supersedes the separate steps 3 and 4 in Godwin's 2026-10-23 "Faucet page grants 20 tUSDC" entry.
+- **Open:** The page says tUSDC works for testing, but Buy and Swap still send only USDC. Until they accept tUSDC again, tUSDC can only be used outside the site.
+- **Refs:** commit `8a1a425`.
