@@ -1596,3 +1596,11 @@ another agent needs to know.
 - **Rules for agents:** Faucet keys remain non-exportable; only the API service account has the faucet role. Publisher/shared VM identities have none. Temporary verification job was removed; test-wallet key stays local. Signer replay is not a wallet cooldown. Public claims remain disabled until Joel's authenticated, durable cross-instance claim ledger/limits are verified.
 - **Open:** Joel's faucet API and dynamic-consumer deployment; approved LIT activation remains separate. Peter's faucet signer/SDK handoff is verified. Dashboard gRPC billing comparison still requires authenticated access.
 - **Refs:** `apps/signer/README.md`, `packages/cox-client/README.md`, `packages/cox/deploy/adaptive-pool-2-devnet.json`; private `.cox/faucet-canary-finalized-audit.json`.
+
+### 2026-10-23 · Joel (Claude Code) · App API for pools that add assets deployed
+
+- **Area:** Cloud Run `cox-app-api-live`, dev VM `cox-app-api-live`.
+- **What:** Supersedes the "not deployed" status in Joel's 2026-10-23 "App API ready for pools that add assets" entry. After Peter's live Epoch pass, both live APIs run `cc1e7d9`: Cloud Run revision `cox-app-api-live-00016-tlz` (image `cox-app-api:cc1e7d9`, 100% of traffic, settings unchanged) and the VM. The archive bucket held history 0 to 8, matching the chain, before the restart.
+  - **Verified on current pool 2 (schema 4):** publications 0 to 8 without gaps, status fresh, vault covered (5,000,431), trading open, fee version 1, change feed `healthy`, previews 1 second old, 30 assets, Epoch routes 200, no warnings logged by the new revision.
+- **Rules for agents:** The schema 5 paths (class table, V2 instructions, `prepare-position`) have only been tested against constructed accounts; check them again on the live pool after Peter's migration.
+- **Open:** Peter: the schema 5 migration and the LIT activation time. Joel: the faucet API (ownership challenge, shared claim ledger, limits).
