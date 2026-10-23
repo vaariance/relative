@@ -512,7 +512,7 @@ function EntryCard({ lot, epoch, decimals, onSent }: { lot: EpochLot; epoch: Epo
   const tag = view.group === "withdrawable" ? "border-accent text-accent" : view.group === "pending" ? "border-warn text-warn" : view.group === "active" ? "border-up text-up" : "border-line text-muted";
 
   return (
-    <li className="flex flex-col gap-3 px-4 py-4">
+    <li className="flex flex-col gap-3 py-4">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <span className="flex items-center gap-2">
           <CoinIcon id={lot.backedAsset} size={28} />
@@ -572,9 +572,9 @@ function MyEntries({ epochs, lots, decimals, onSent }: { epochs: Epoch[]; lots: 
   const tabs: { id: LotGroup | "all"; label: string }[] = [{ id: "all", label: "All" }, ...GROUPS];
 
   return (
-    <section className={`${panel} flex min-w-0 flex-col`}>
-      <h2 className="px-4 pt-4 text-sm font-semibold">My entries</h2>
-      <div role="tablist" aria-label="Filter entries" className="flex gap-1 overflow-x-auto px-3 pb-3 pt-3 [mask-image:linear-gradient(to_right,black_85%,transparent)] [scrollbar-width:none]">
+    <section className="flex min-w-0 flex-col">
+      <div className="mb-5 border-t border-dashed border-line" />
+      <div role="tablist" aria-label="Filter entries" className="flex gap-1 overflow-x-auto pb-2 [mask-image:linear-gradient(to_right,black_85%,transparent)] [scrollbar-width:none]">
         {tabs.map((item) => {
           const on = filter === item.id;
           return (
@@ -591,17 +591,16 @@ function MyEntries({ epochs, lots, decimals, onSent }: { epochs: Epoch[]; lots: 
           );
         })}
       </div>
-      <div className="border-t border-dashed border-line" />
       {!owner ? (
-        <p className="p-4 text-sm text-muted">Connect a wallet to see your entries.</p>
+        <p className="py-4 text-sm text-muted">Connect a wallet to see your entries.</p>
       ) : shown.length === 0 ? (
-        <p className="p-4 text-sm text-muted">{lots.length === 0 ? "No entries yet. Create one while an Epoch is open." : "No entries in this group."}</p>
+        <p className="py-4 text-sm text-muted">{lots.length === 0 ? "No entries yet. Create one while an Epoch is open." : "No entries in this group."}</p>
       ) : (
         grouped.map((opensAt) => {
           const epoch = byOpen.get(opensAt) ?? null;
           return (
             <div key={opensAt}>
-              <div className="num px-4 pt-3 text-[11px] uppercase tracking-wider text-muted">{epoch ? windowText(epoch) : `Epoch ${utcTime(opensAt)} UTC`}</div>
+              <div className="num pt-3 text-[11px] uppercase tracking-wider text-muted">{epoch ? windowText(epoch) : `Epoch ${utcTime(opensAt)} UTC`}</div>
               <ul className="divide-y divide-line">
                 {shown.filter((item) => item.lot.epochOpensAt === opensAt).map((item) => (
                   <EntryCard key={item.lot.address} lot={item.lot} epoch={item.epoch} decimals={decimals} onSent={onSent} />
