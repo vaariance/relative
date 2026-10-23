@@ -1387,3 +1387,10 @@ another agent needs to know.
 ### 2026-10-23 · Godwin (Claude Code) · Correction: web test count
 
 - **What:** Corrects the 2026-10-23 "Web app offers only USDC" entry: 51 web tests pass, not 47. Nothing else in that entry changes.
+
+### 2026-10-23 · Godwin (Claude Code) · Market charts move the current minute live
+
+- **Area:** `apps/web` (`src/lib/estimate.ts`, `src/components/asset-chart.tsx`, `src/components/live.tsx`).
+- **What:** Godwin decided market charts should work like an exchange chart. Finished minutes stay one fixed point each, and the minute in progress follows every new preview (`withLiveMinute`). The end of the line and the last candle therefore move every second and always match the figure on the card. Card and Markets sparklines draw finished minutes plus the latest value. Supersedes the "market line charts move once a minute" rule in Godwin's 2026-10-23 "Web app on pool 2 with live estimates; deployed" and "Web app charts open filled from preview history" entries. Verified in the dev server against the live API: on the ETH price chart the last value changed every 1–2 seconds within one minute and matched the Price card each time, in line and candle mode. 54 web tests and the type check pass. Not deployed to Vercel.
+- **Rules for agents:** Never rewrite a finished minute; only the minute in progress may change. Do not fetch anything extra for this: it reuses the previews the stream already delivers.
+- **Refs:** commit `c113255`.
