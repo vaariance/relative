@@ -2,7 +2,7 @@
 
 import { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
 import bs58 from "bs58";
-import { CIRCLE_DEVNET_USDC, FAUCET_CLAIMS_PER_DAY, FAUCET_GRANT, TEST_COLLATERAL } from "@/lib/config";
+import { FAUCET_CLAIMS_PER_DAY, FAUCET_GRANT, TEST_COLLATERAL } from "@/lib/config";
 import { type ClaimAllowance, claimAllowance, faucetMemo } from "@/lib/faucet";
 import type { Outcome } from "@/lib/requests";
 
@@ -13,20 +13,8 @@ const HISTORY_LIMIT = 1000;
 const connection = new Connection(process.env.COX_RPC_URL ?? "https://api.devnet.solana.com", "confirmed");
 const claiming = new Set<string>();
 
-export interface FaucetBalances {
-  lamports: string;
-  usdc: string;
-  testUsdc: string;
-  claims: ClaimAllowance | null;
-}
-
 function tokenAccountOf(owner: PublicKey, mint: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync([owner.toBuffer(), TOKEN_PROGRAM.toBuffer(), mint.toBuffer()], ASSOCIATED_TOKEN_PROGRAM)[0];
-}
-
-async function tokenBalance(owner: PublicKey, mint: string): Promise<bigint> {
-  const info = await connection.getAccountInfo(tokenAccountOf(owner, new PublicKey(mint)));
-  return info && info.owner.equals(TOKEN_PROGRAM) && info.data.length === 165 ? info.data.readBigUInt64LE(64) : 0n;
 }
 
 function faucetKey(): Keypair | null {
@@ -52,19 +40,13 @@ function busy(error: unknown): boolean {
   return /429|Too Many/i.test(message);
 }
 
-export async function faucetBalances(owner: string): Promise<Outcome<FaucetBalances>> {
+export async function faucetClaims(owner: string): Promise<Outcome<ClaimAllowance | null>> {
   try {
-    const key = new PublicKey(owner);
+    new PublicKey(owner);
     const faucet = faucetKey();
-    const [lamports, usdc, testUsdc, claims] = await Promise.all([
-      connection.getBalance(key),
-      tokenBalance(key, CIRCLE_DEVNET_USDC),
-      tokenBalance(key, TEST_COLLATERAL.mint),
-      faucet ? allowanceFor(faucet.publicKey, owner) : Promise.resolve(null),
-    ]);
-    return { ok: true, value: { lamports: lamports.toString(), usdc: usdc.toString(), testUsdc: testUsdc.toString(), claims } };
+    return { ok: true, value: faucet ? await allowanceFor(faucet.publicKey, owner) : null };
   } catch (error) {
-    return { ok: false, code: "UNAVAILABLE", message: busy(error) ? "The devnet connection is busy. Please try again in a moment." : "The balances could not be read." };
+    return { ok: false, code: "UNAVAILABLE", message: busy(error) ? "The devnet connection is busy. Please try again in a moment." : "Your remaining claims could not be read." };
   }
 }
 

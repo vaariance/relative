@@ -110,9 +110,9 @@ fresh class has a unit value of 1. Requests are still sent in exact quanta.
 ## Faucet page
 
 The Faucet page shows the connected wallet's address, links to Solana's devnet
-SOL faucet, grants test tokens, links to Circle's devnet USDC faucet, and reads
-the wallet's devnet SOL, USDC and tUSDC balances (`COX_RPC_URL`, default
-public devnet).
+SOL faucet, grants test tokens and links to Circle's devnet USDC faucet. The
+wallet's devnet SOL, USDC and tUSDC balances are in the wallet menu, read in
+one call each time it opens.
 
 "Get 20 tUSDC" mints 20 tUSDC (`5rpGrekf…wV3X`) to the wallet from a server
 action signed by `TUSDC_FAUCET_SECRET_KEY`, creating the wallet's token account

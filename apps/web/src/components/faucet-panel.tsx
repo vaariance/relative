@@ -1,10 +1,10 @@
 "use client";
 
-import { Check, Copy, ExternalLink, RefreshCw } from "lucide-react";
+import { Check, Copy, ExternalLink } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { type FaucetBalances, claimTestTokens, faucetBalances } from "@/app/faucet-actions";
+import { claimTestTokens, faucetClaims } from "@/app/faucet-actions";
 import { CIRCLE_FAUCET_URL, FAUCET_CLAIMS_PER_DAY, FAUCET_GRANT, SOL_FAUCET_URL, TEST_COLLATERAL } from "@/lib/config";
-import { formatAmount } from "@/lib/format";
+import type { ClaimAllowance } from "@/lib/faucet";
 import { useSigner } from "./signer";
 import { useSnackbar } from "./snackbar";
 
@@ -13,16 +13,11 @@ const link = "flex h-11 items-center justify-center gap-2 rounded-pill bg-accent
 const action = `${link} w-full cursor-pointer disabled:cursor-not-allowed disabled:opacity-50`;
 const quiet = "flex h-9 cursor-pointer items-center gap-1.5 rounded-pill border border-line px-3 text-xs transition-colors duration-150 hover:bg-surface-2";
 
-function show(value: string, digits: number, places = 2): string {
-  return formatAmount(Number(BigInt(value)) / 10 ** digits, places);
-}
-
 export function FaucetPanel() {
   const { address } = useSigner();
   const [mounted, setMounted] = useState(false);
-  const [balances, setBalances] = useState<FaucetBalances | null>(null);
+  const [claims, setClaims] = useState<ClaimAllowance | null>(null);
   const { fail, show: notify } = useSnackbar();
-  const [loading, setLoading] = useState(false);
   const [claiming, setClaiming] = useState(false);
   const [copied, setCopied] = useState(false);
   const owner = mounted ? address : null;
@@ -30,19 +25,15 @@ export function FaucetPanel() {
   useEffect(() => setMounted(true), []);
 
   const refresh = useCallback(async () => {
-    if (!owner) return setBalances(null);
-    setLoading(true);
-    const result = await faucetBalances(owner);
-    setLoading(false);
-    if (result.ok) setBalances(result.value);
-    if (!result.ok) fail(result.message, "Balances not loaded");
-  }, [owner, fail]);
+    if (!owner) return setClaims(null);
+    const result = await faucetClaims(owner);
+    setClaims(result.ok ? result.value : null);
+  }, [owner]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  const claims = balances?.claims ?? null;
   const spent = claims !== null && claims.left === 0;
 
   const claim = async () => {
@@ -112,25 +103,6 @@ export function FaucetPanel() {
         <a href={CIRCLE_FAUCET_URL} target="_blank" rel="noreferrer" className={`${link} mt-3`}>
           Open the Circle faucet <ExternalLink size={14} aria-hidden="true" />
         </a>
-      </section>
-
-      <section className={card}>
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-medium">Your devnet balances</h2>
-          <button type="button" onClick={() => void refresh()} disabled={!owner || loading} className={`${quiet} ${!owner || loading ? "opacity-50" : ""}`}>
-            <RefreshCw size={14} aria-hidden="true" />
-            {loading ? "Checking" : "Check again"}
-          </button>
-        </div>
-        {!owner && <p className="mt-3 text-sm text-muted">Connect a wallet to see its balances.</p>}
-        {owner && balances && (
-          <dl className="mt-3 flex flex-col gap-2 text-sm">
-            <div className="flex justify-between"><dt className="text-muted">Devnet SOL</dt><dd className="num">{show(balances.lamports, 9, 4)}</dd></div>
-            <div className="flex justify-between"><dt className="text-muted">Devnet USDC</dt><dd className="num">{show(balances.usdc, 6)}</dd></div>
-            <div className="flex justify-between"><dt className="text-muted">{TEST_COLLATERAL.symbol}</dt><dd className="num">{show(balances.testUsdc, TEST_COLLATERAL.decimals)}</dd></div>
-          </dl>
-        )}
-        <p className="mt-3 text-xs text-muted">A faucet can take up to a minute to arrive. Press Check again after sending.</p>
       </section>
     </div>
   );

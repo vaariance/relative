@@ -4,13 +4,33 @@ import { WalletReadyState, type WalletName } from "@solana/wallet-adapter-base";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { Check, Copy, LogOut, Wallet, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { shortAddress } from "@/lib/address";
+import { CIRCLE_DEVNET_USDC, TEST_COLLATERAL } from "@/lib/config";
+import { formatAmount } from "@/lib/format";
 import { walletError } from "@/lib/errors";
 import { onLogin, useSigner } from "./signer";
 import { useSnackbar } from "./snackbar";
 
 const primary = "flex h-10 cursor-pointer items-center gap-2 whitespace-nowrap rounded-pill bg-accent px-3 text-sm font-medium text-accent-ink transition-opacity duration-150 hover:opacity-90 sm:px-4";
+const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const ASSOCIATED_TOKEN_PROGRAM = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+
+interface Balances {
+  sol: number;
+  usdc: number;
+  testUsdc: number;
+}
+
+function tokenAccountOf(owner: PublicKey, mint: string): PublicKey {
+  return PublicKey.findProgramAddressSync([owner.toBuffer(), TOKEN_PROGRAM.toBuffer(), new PublicKey(mint).toBuffer()], ASSOCIATED_TOKEN_PROGRAM)[0];
+}
+
+function tokenAmount(info: { owner: PublicKey; data: Uint8Array } | null, decimals: number): number {
+  if (!info || !info.owner.equals(TOKEN_PROGRAM) || info.data.length !== 165) return 0;
+  return Number(new DataView(info.data.buffer, info.data.byteOffset, info.data.byteLength).getBigUint64(64, true)) / 10 ** decimals;
+}
+
 const row = "flex h-11 w-full cursor-pointer items-center gap-3 rounded-control px-3 text-left text-sm transition-colors duration-150 hover:bg-surface-2";
 
 export function WalletButton() {
@@ -21,7 +41,7 @@ export function WalletButton() {
   const dialog = useRef<HTMLDialogElement>(null);
   const [chosen, setChosen] = useState<WalletName | null>(null);
   const { fail } = useSnackbar();
-  const [balance, setBalance] = useState<number | null>(null);
+  const [balances, setBalances] = useState<Balances | null>(null);
   const [copied, setCopied] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -40,14 +60,14 @@ export function WalletButton() {
     if (connected) dialog.current?.close();
   }, [connected]);
 
-  useEffect(() => {
-    setBalance(null);
-    if (!signer.address) return;
+  const loadBalances = useCallback(() => {
+    if (!signer.address) return () => undefined;
     let current = true;
+    const owner = new PublicKey(signer.address);
     connection
-      .getBalance(new PublicKey(signer.address))
-      .then((lamports) => {
-        if (current) setBalance(lamports / LAMPORTS_PER_SOL);
+      .getMultipleAccountsInfo([owner, tokenAccountOf(owner, CIRCLE_DEVNET_USDC), tokenAccountOf(owner, TEST_COLLATERAL.mint)])
+      .then(([account, usdc, testUsdc]) => {
+        if (current) setBalances({ sol: (account?.lamports ?? 0) / LAMPORTS_PER_SOL, usdc: tokenAmount(usdc ?? null, 6), testUsdc: tokenAmount(testUsdc ?? null, TEST_COLLATERAL.decimals) });
       })
       .catch(() => undefined);
     return () => {
@@ -55,8 +75,14 @@ export function WalletButton() {
     };
   }, [connection, signer.address]);
 
+  useEffect(() => {
+    setBalances(null);
+    return loadBalances();
+  }, [loadBalances]);
+
   const open = () => {
     if (signer.login) return signer.login();
+    loadBalances();
     dialog.current?.showModal();
   };
 
@@ -113,7 +139,9 @@ export function WalletButton() {
               <div className="flex justify-between"><dt className="text-muted">Wallet</dt><dd>{signer.label}</dd></div>
               {signer.account && <div className="flex justify-between"><dt className="text-muted">Signed in as</dt><dd>{signer.account}</dd></div>}
               <div className="flex justify-between"><dt className="text-muted">Address</dt><dd className="num">{shortAddress(address)}</dd></div>
-              <div className="flex justify-between"><dt className="text-muted">Devnet SOL</dt><dd className="num">{balance === null ? "…" : balance.toFixed(4)}</dd></div>
+              <div className="flex justify-between"><dt className="text-muted">Devnet SOL</dt><dd className="num">{balances === null ? "…" : balances.sol.toFixed(4)}</dd></div>
+              <div className="flex justify-between"><dt className="text-muted">Devnet USDC</dt><dd className="num">{balances === null ? "…" : formatAmount(balances.usdc, 2)}</dd></div>
+              <div className="flex justify-between"><dt className="text-muted">{TEST_COLLATERAL.symbol}</dt><dd className="num">{balances === null ? "…" : formatAmount(balances.testUsdc, 2)}</dd></div>
             </dl>
             <button type="button" onClick={copy} className={row}>
               {copied ? <Check size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}
