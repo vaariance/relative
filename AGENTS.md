@@ -1537,3 +1537,12 @@ another agent needs to know.
 
 - **What:** At Godwin's request, `epochsEnabled` in `apps/web/src/lib/config.ts` returns true whenever `NODE_ENV` is `development` (`pnpm dev`), so Epochs works on a local machine with no setting. Deployed builds still show "Coming soon" unless `EPOCHS_ENABLED=true`. Qualifies Godwin's 2026-10-23 "Epochs page behind EPOCHS_ENABLED" entry, which had local development off by default.
 - **Refs:** commit `5a09164`.
+
+### 2026-10-23 · Godwin (Claude Code) · Epoch page reworked to Peter's design brief (pass 1)
+
+- **Area:** `apps/web` (`epochs-view.tsx`, `src/lib/epoch.ts`).
+- **What:** Pass 1 of Peter's 2026-10-23 "Relative Epoch — comprehensive visual direction" email, on the current API. Removed the share-of-gains odds buttons, the "scores X% if it ended now" hint and the "led the round" card. Added the Basic / Epoch switch, a clock strip (date, UTC window, status, countdown, local close time, previous/next), relative moves since Epoch start labelled as live estimate, paused or closing reference, an entry panel with backed asset, 30-asset basket summary, stake with wallet balance, held fee, net stake and a Review entry step before the wallet, the Net stake pot with queued stake kept apart, the settlement timeline (Closing at zero, not Settled), a How your payout works panel, and My entries with Pending / Active / Withdrawable / History filters and each entry's execution basis. Shows score and payout only when the API supplies them; computes no live payout. Still on only in local development (`pnpm dev`); deployed sites show "Coming soon". Checked with a temporary fake open round at desktop and phone width; no real entry sent.
+- **Open:**
+  - **Joel:** `universe` is still empty in `/v1/epochs`; charts per Epoch and per entry need reference series (one-second preview history only covers an hour); recovery details (void deadline, refund reason) are not in the API.
+  - **Godwin:** pass 2 (chart, entry detail view, basket editor once a universe exceeds 30, design frames if Peter wants them).
+- **Refs:** commit `f81b221`, `apps/web/README.md` (Epochs page).
