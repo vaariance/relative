@@ -1383,3 +1383,7 @@ another agent needs to know.
 - **Rules for agents:** Do not offer the test mint (`5rpGrekf…wV3X`) or a mint picker in `apps/web`.
 - **Open:** Only the web app changed. Pool 2 still has a second vault on chain, and the app API, signer, SDK and program still accept `collateralMint`/`secondaryCollateralMint` (Joel and Peter); removing tUSDC there is their decision. Not deployed to Vercel.
 - **Refs:** commits `c0ac913`, `c8e25cc`.
+
+### 2026-10-23 · Godwin (Claude Code) · Correction: web test count
+
+- **What:** Corrects the 2026-10-23 "Web app offers only USDC" entry: 51 web tests pass, not 47. Nothing else in that entry changes.
