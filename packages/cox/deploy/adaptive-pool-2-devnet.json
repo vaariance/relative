@@ -1519,7 +1519,7 @@
       ]
     },
     "userEntryEndToEndVerified": true,
-    "epochLiveSettlementVerified": false,
+    "epochLiveSettlementVerified": true,
     "basicRoundTripVerification": {
       "network": "solana-devnet",
       "owner": "2aDWjWvQ3nzLq75wn1U6tHwp4Bok7LuWxHSj6KH5wg1h",
@@ -1690,6 +1690,54 @@
       "signature": "2DGd7BpE8A1sQ5385bwopd7G7wfvYQVCqH32tb8v9L3L9jqqG6qie6hWWsUgTLNKbQ966tGerdfJcov4FoYzYkau",
       "finalized": true,
       "destination": "EGrcC2B1LmAmeJtW64SPpW3f7jp6gjFXXhzarzpPzzuV"
+    },
+    "usageAudit20261023": {
+      "scope": "publisher-only; physical Solana HTTP attempts from archived process counters",
+      "quietWindow": {
+        "archiveFromUtc": "2026-10-23T14:01:43.519Z",
+        "archiveToUtc": "2026-10-23T15:01:54.013Z",
+        "httpRequests": 15,
+        "byMethod": {
+          "getMultipleAccounts": 15
+        },
+        "byTrigger": {
+          "safety": 15
+        },
+        "sourceManifests": [
+          "638d8b9195768c6c111dd1086e2c530f66bd6b309a5136ddc09ef1f9432a9ba3",
+          "24815ce6ca6698b37cc3aad6f32c64bc9883adcb16995abd460c284de41ace34"
+        ]
+      },
+      "activeAndEpochClosingWindow": {
+        "archiveFromUtc": "2026-10-23T10:23:44.979Z",
+        "archiveToUtc": "2026-10-23T12:07:25.467Z",
+        "httpRequests": 160,
+        "byTrigger": {
+          "active": 88,
+          "event": 5,
+          "safety": 24,
+          "scheduled": 21,
+          "stream-recovery": 22
+        },
+        "byMethod": {
+          "getMultipleAccounts": 132,
+          "getAccountInfo": 2,
+          "getBlockHeight": 3,
+          "getLatestBlockhash": 4,
+          "getSignatureStatuses": 8,
+          "sendTransaction": 7,
+          "simulateTransaction": 4
+        }
+      },
+      "newSolanaCallsForAudit": 0,
+      "grpcHealthy": true,
+      "grpcBillingMeasured": false,
+      "alchemyDashboardComparisonComplete": false,
+      "limitations": [
+        "Archive times approximate counter-capture times.",
+        "Publisher only; excludes APIs, signer, wallets and operator commands.",
+        "No runtime gRPC billing/byte counters; authenticated dashboard comparison remains open."
+      ]
     }
   },
   "epochReadinessVerification": {
@@ -1873,8 +1921,8 @@
     "epoch": "AnBEd8ne65Jmq5MP2dgqmx2KQHCGEz25kqBsmuzd8kjG",
     "opensAt": 1792742400,
     "closesAt": 1792756800,
-    "status": "both-existing-lots-executed-awaiting-exact-close",
-    "completed": false,
+    "status": "completed-exact-close-candidate-payouts-withdrawn",
+    "completed": true,
     "originalRunnerFailedAtUtc": "2026-10-23T08:05:09.366Z",
     "originalFailure": "Publisher did not execute test entries within five minutes",
     "finalizedAudit": {
@@ -2060,7 +2108,178 @@
       ]
     },
     "checkedAtUtc": "2026-10-23T10:15:50.896Z",
-    "closingAndWithdrawalsVerified": false,
-    "newEntriesSubmittedDuringRecovery": 0
+    "closingAndWithdrawalsVerified": true,
+    "newEntriesSubmittedDuringRecovery": 0,
+    "completedAtUtc": "2026-10-23T12:00:47.873Z",
+    "closingOracleTimestamp": "1792756800",
+    "closingSnapshotId": "5662cb989629483f289a64aa5f7176816fe4e2f36c54a5189a1deb3c958e0764",
+    "closingBenchmark": "94971360270372",
+    "settlementPot": "199960",
+    "totalWeight": "3230207285908680",
+    "finalLedger": {
+      "pendingGross": "0",
+      "activeNet": "0",
+      "heldFees": "0",
+      "claimable": "0",
+      "committedFees": "40",
+      "residual": "1"
+    },
+    "finalCustody": "41",
+    "finalAuditCheckedAtUtc": "2026-10-23T12:02:51.114Z",
+    "candidatePayoutVerified": true,
+    "totalReturned": "199959",
+    "ownerBalanceAfter": "999528",
+    "externalCollateralDelta": "0",
+    "lots": [
+      {
+        "nonce": "0",
+        "score": "6761883418",
+        "weight": "676053104131640",
+        "payout": "41849",
+        "withdrawn": true,
+        "withdrawalSignature": "5WeYKsAQ8U4hX8uYUUvuFB94WrYnWiKSnxmSMNYvYLYNTagQEWvYQfV6YKq92oPcRodTvPmmwpnTkwGVX6p46bHG",
+        "withdrawalFinalizedSlot": 514239360
+      },
+      {
+        "nonce": "1",
+        "score": "25546651148",
+        "weight": "2554154181777040",
+        "payout": "158110",
+        "withdrawn": true,
+        "withdrawalSignature": "cw4GdbFSXe5FJoRB6h2EADaN1tdfTXGmfVJXLW4kSgz4UrNbcYqfFeJJnm5aYqkEG9bxowr32Z23RT8zC9T3BQu",
+        "withdrawalFinalizedSlot": 514239370
+      }
+    ],
+    "originalFailedReportSha256": "9902407225cdbfe6b3c7bd22b11abd61bb9be5773f101e836c423853779b2ce5",
+    "completedReportSha256": "1feff8c4de6ad5f38e6e166196a70aa68ae5de742899ee883e4793cd45746251",
+    "diagnosticRpcCallsSeparateFromPublisher": {
+      "getGenesisHash": 1,
+      "getAccountInfo": 4,
+      "getSignatureStatuses": 3,
+      "getMultipleAccounts": 7,
+      "getLatestBlockhash": 2,
+      "simulateTransaction": 2,
+      "sendTransaction": 2,
+      "getBlockHeight": 2,
+      "getTransaction": 2
+    }
+  },
+  "devnetFaucet": {
+    "status": "funded-prepared-signer-not-deployed",
+    "address": "EXdRi1koWKTW5cdTR8SdUFVWz7vX7h9dyQJtceswA9e1",
+    "sourceTokenAccount": "A6DGt726ydBHKZB1Jcrrz6u2quphDxwJD37irPkLYHNo",
+    "mint": "5rpGrekfBLHdF8PD8eKLzXQPPmhyF7FCKeE1VA5CwV3X",
+    "decimals": 6,
+    "keyVersion": "projects/colosseum-eox/locations/us-central1/keyRings/eox-signing-dev/cryptoKeys/devnet-faucet/cryptoKeyVersions/1",
+    "keyState": "pending",
+    "tokenBudget": "10000000000",
+    "solBudgetLamports": "1250000000",
+    "fundingSignature": "CcT2ndTcC6TuhQGDjYfwrqQv379CvAhNJ2TnQfHVUJAMsN1SkycnfFhpyYN8np3Tn6m5dBDeUzVDb2eDYBT33fv",
+    "fundingFinalized": true,
+    "fundingCompletedAtUtc": "2026-10-23T12:25:46.682Z",
+    "mintAuthorityPreserved": true,
+    "claimTokenAmount": "100000000",
+    "claimMaxSolLamports": "10000000",
+    "walletCooldownSeconds": 86400,
+    "apiCaller": "cox-app-api-live@colosseum-eox.iam.gserviceaccount.com",
+    "sharedVmIdentityAllowed": false,
+    "signerDeployed": false,
+    "publicClaimsEnabled": false,
+    "symbol": "rlUSD",
+    "name": "rlUSD",
+    "metadata": {
+      "address": "HsSpMTWNvyxrBqRhjWXS6ijnQCbxwz4Di9WD9Bzod9AY",
+      "signature": "2XvrqNbPX3nbXAKJMCmUMVMKxjrrBe3Vo1Worcndttod8LEZrsgu49tST6MW4Zvb7PeZas6UoveDM2nu3RVC6mbi",
+      "finalizedAtUtc": "2026-10-23T17:13:58.870Z",
+      "mintStatePreserved": true,
+      "uri": "",
+      "mutable": true
+    },
+    "grantSimulation": {
+      "schema": "relative.devnet-faucet-simulation/v1",
+      "completedAtUtc": "2026-10-23T17:16:08.190Z",
+      "mint": "5rpGrekfBLHdF8PD8eKLzXQPPmhyF7FCKeE1VA5CwV3X",
+      "symbol": "rlUSD",
+      "faucet": "EXdRi1koWKTW5cdTR8SdUFVWz7vX7h9dyQJtceswA9e1",
+      "recipient": "FnGE4muxpRAqp5GckcstPvQEiZfvHvD9ZdfuBZt26fd7",
+      "tokenAmount": "100000000",
+      "solLamports": "10000000",
+      "slot": 514318659,
+      "computeUnits": 19921,
+      "transactionBytes": 444,
+      "simulationPassed": true,
+      "signatureVerification": false,
+      "kmsVerified": false,
+      "submittedTransactions": 0
+    }
+  },
+  "dynamicUpgradeRehearsal": {
+    "capturedStateSha256": "22009a8e9d0ef120d633d5a8cfec7f88e3ef9fc62f2d03b87a83da78292270d7",
+    "clockTimestamp": 1792775622,
+    "contextSlot": 514318053,
+    "genesisCanonicalSha256": "25805ef1d9facced1364c081e0b434162d2e55b5067f63616f2dc1d5e2c2c24c",
+    "genesisHash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+    "liveMigration": false,
+    "liveSignatureProof": false,
+    "pool": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+    "preservedPositions": 2,
+    "preservedRequests": 7,
+    "preservedSequence": 8,
+    "programSha256": "c9b4892051951e53f992100eeae36638dd64de32895a4c31cd5042df7dc0d276",
+    "result": "passed",
+    "schema": "relative.dynamic-captured-rehearsal/v1",
+    "signatureVerification": false,
+    "transactions": [
+      {
+        "computeUnits": 10737,
+        "instruction": "register_dynamic_methodology",
+        "transactionBytes": 369
+      },
+      {
+        "computeUnits": 6910,
+        "instruction": "upload_methodology",
+        "transactionBytes": 901
+      },
+      {
+        "computeUnits": 7061,
+        "instruction": "upload_methodology",
+        "transactionBytes": 901
+      },
+      {
+        "computeUnits": 7060,
+        "instruction": "upload_methodology",
+        "transactionBytes": 901
+      },
+      {
+        "computeUnits": 7060,
+        "instruction": "upload_methodology",
+        "transactionBytes": 901
+      },
+      {
+        "computeUnits": 7062,
+        "instruction": "upload_methodology",
+        "transactionBytes": 901
+      },
+      {
+        "computeUnits": 7068,
+        "instruction": "upload_methodology",
+        "transactionBytes": 510
+      },
+      {
+        "computeUnits": 338264,
+        "instruction": "seal_dynamic_methodology",
+        "transactionBytes": 358
+      },
+      {
+        "computeUnits": 4553,
+        "instruction": "pause",
+        "transactionBytes": 259
+      },
+      {
+        "computeUnits": 56500,
+        "instruction": "migrate_dynamic_pool",
+        "transactionBytes": 424
+      }
+    ]
   }
 }

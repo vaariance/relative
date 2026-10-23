@@ -1,7 +1,7 @@
 {
   "schemaVersion": "eox.signing/v1",
   "environment": "dev",
-  "version": 2,
+  "version": 3,
   "generatedAt": 1791690822,
   "entries": [
     {
@@ -81,6 +81,19 @@
       "state": "retired",
       "validFrom": 0,
       "validUntil": 1791688452
+    },
+    {
+      "role": "devnet-faucet",
+      "environment": "dev",
+      "chain": "solana",
+      "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+      "algorithm": "ed25519",
+      "publicKey": "EXdRi1koWKTW5cdTR8SdUFVWz7vX7h9dyQJtceswA9e1",
+      "address": "EXdRi1koWKTW5cdTR8SdUFVWz7vX7h9dyQJtceswA9e1",
+      "keyVersion": "projects/colosseum-eox/locations/us-central1/keyRings/eox-signing-dev/cryptoKeys/devnet-faucet/cryptoKeyVersions/1",
+      "state": "pending",
+      "validFrom": 1792757849,
+      "validUntil": null
     }
   ]
 }
