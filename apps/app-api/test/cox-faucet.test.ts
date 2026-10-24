@@ -305,7 +305,7 @@ describe("faucet routes", () => {
   const fixture = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "cox-fixture.json");
   const servers: ReturnType<typeof createCoxApiServer>[] = [];
   const start = async (options: Partial<Parameters<typeof createCoxApiServer>[0]>) => {
-    const server = createCoxApiServer({ source: new CoxFixtureSource(fixture), trustForwardedFor: true, ...options });
+    const server = createCoxApiServer({ source: new CoxFixtureSource(fixture), trustForwardedFor: true, now: () => now, ...options });
     servers.push(server);
     await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
     return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
