@@ -3,9 +3,9 @@
 import type { Epoch, EpochLot, EpochOverview, PreviewHistory } from "@eox/app-api";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
-import { ArrowLeft, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleDot, Clock, Hourglass, Lock, Plus, X } from "lucide-react";
+import { Activity, ArrowLeft, BarChart3, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Clock, Coins, LayoutList, Lock, Plus, Timer, X } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { walletEpochLots } from "@/app/actions";
 import { parseScaled } from "@/lib/amounts";
 import { COLLATERAL } from "@/lib/config";
@@ -24,10 +24,14 @@ const LOTS_MS = 20_000;
 const BASKET_SIZE = 30;
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ASSOCIATED_TOKEN_PROGRAM = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
-const panel = "overflow-hidden rounded-2xl border border-line bg-surface bg-[linear-gradient(180deg,rgba(255,255,255,0.035),transparent_45%)] shadow-card";
-const field = "num h-11 w-full rounded-control border border-line bg-bg px-3 text-sm text-ink placeholder:text-muted";
-const primary = "flex h-11 w-full items-center justify-center gap-2 rounded-pill bg-[linear-gradient(90deg,#f2622e,#a24bd6)] text-sm font-medium text-accent-ink";
-const quiet = "flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-pill border border-line text-sm transition-colors duration-150 hover:bg-surface-2";
+
+const card = "min-w-0 rounded-2xl border border-white/[0.06] bg-surface";
+const gradient = "bg-[linear-gradient(90deg,#f2622e,#c2418f_60%,#7c3aed)]";
+const primary = `flex h-11 w-full items-center justify-center gap-2 rounded-pill ${gradient} text-sm font-medium text-white`;
+const pill = "inline-flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-pill bg-surface-2 px-4 text-sm transition-colors duration-150 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40";
+const quiet = "flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-pill bg-surface-2 text-sm transition-colors duration-150 hover:bg-white/10";
+const well = "rounded-xl bg-bg/70 p-3";
+const eyebrow = "text-[11px] uppercase tracking-wider text-muted";
 
 function useNow(start: number): number {
   const [now, setNow] = useState(start);
@@ -52,6 +56,10 @@ function pct(value: number | null, digits = 3): string {
 
 function tone(value: number | null): string {
   return value === null || value === 0 ? "text-muted" : value > 0 ? "text-up" : "text-down";
+}
+
+function chip(value: number | null): string {
+  return value === null || value === 0 ? "bg-surface-2 text-muted" : value > 0 ? "bg-up/15 text-up" : "bg-down/15 text-down";
 }
 
 function coinsOf(epoch: Epoch, roster: readonly string[]): string[] {
@@ -116,149 +124,131 @@ function useWalletCollateral(mint: string, decimals: number, refreshKey: number)
   return balance;
 }
 
+function CardHead({ icon, title, children }: { icon: ReactNode; title: string; children?: ReactNode }) {
+  return (
+    <div className="flex min-h-9 items-center justify-between gap-3">
+      <h2 className="flex items-center gap-2.5 text-sm font-medium">
+        <span className="grid size-7 place-items-center rounded-full bg-surface-2 text-ink">{icon}</span>
+        {title}
+      </h2>
+      {children}
+    </div>
+  );
+}
+
+function Figure({ main, dim, unit }: { main: string; dim?: string; unit?: string }) {
+  return (
+    <p className="num text-[2.5rem] font-semibold leading-none tracking-tight">
+      {main}
+      {dim && <span className="text-muted/50">{dim}</span>}
+      {unit && <span className="ml-2 text-base font-normal text-muted">{unit}</span>}
+    </p>
+  );
+}
+
+function splitAmount(value: number | null, digits = 2): { main: string; dim?: string } {
+  if (value === null) return { main: "—" };
+  const text = formatAmount(value, digits);
+  const dot = text.lastIndexOf(".");
+  return dot < 0 ? { main: text } : { main: text.slice(0, dot), dim: text.slice(dot) };
+}
+
 function ModeSwitch() {
   return (
-    <div role="tablist" aria-label="Mode" className="inline-flex rounded-pill border border-line bg-surface p-1">
+    <div role="tablist" aria-label="Mode" className="inline-flex rounded-pill bg-surface p-1">
       <Link href="/markets" role="tab" aria-selected={false} className="rounded-pill px-4 py-1.5 text-sm text-muted transition-colors duration-150 hover:text-ink">Basic</Link>
       <span role="tab" aria-selected className="rounded-pill bg-surface-2 px-4 py-1.5 text-sm font-medium text-ink">Epoch</span>
     </div>
   );
 }
 
-const STAGE_STYLE: Record<Stage, { className: string; icon: typeof CircleDot }> = {
-  upcoming: { className: "border-line text-muted", icon: Clock },
-  open: { className: "border-accent text-accent", icon: CircleDot },
-  closing: { className: "border-warn text-warn", icon: Hourglass },
-  scoring: { className: "border-warn text-warn", icon: Hourglass },
-  allocating: { className: "border-warn text-warn", icon: Hourglass },
-  settled: { className: "border-line text-ink", icon: Check },
-  voided: { className: "border-warn text-warn", icon: CircleAlert },
+const STAGE_TONE: Record<Stage, string> = {
+  upcoming: "bg-surface-2 text-muted",
+  open: "bg-up/15 text-up",
+  closing: "bg-warn/15 text-warn",
+  scoring: "bg-warn/15 text-warn",
+  allocating: "bg-warn/15 text-warn",
+  settled: "bg-surface-2 text-ink",
+  voided: "bg-warn/15 text-warn",
 };
 
-function StagePill({ stage }: { stage: Stage }) {
-  const style = STAGE_STYLE[stage];
+function StageChip({ stage }: { stage: Stage }) {
+  return <span className={`inline-flex items-center gap-1.5 rounded-pill px-2 py-0.5 text-[11px] font-medium ${STAGE_TONE[stage]}`}><span className="size-1.5 rounded-full bg-current" />{STAGE_LABEL[stage]}</span>;
+}
+
+function bannerText(epoch: Epoch, stage: Stage): string {
+  switch (stage) {
+    case "upcoming":
+      return `This Epoch opens at ${utcTime(epoch.opensAt)} UTC. Entries open then.`;
+    case "open":
+      return `Entries are open until ${utcTime(epoch.closesAt)} UTC. Each entry starts from its execution reference, not from your click.`;
+    case "closing":
+      return `Waiting for the closing reference at ${utcTime(epoch.closesAt)} UTC. A later market price is never substituted.`;
+    case "scoring":
+    case "allocating":
+      return "Scores and payouts are being calculated. Withdrawals open when allocation finishes.";
+    case "settled":
+      return "This Epoch is settled. Any payout or refund is withdrawable from My entries.";
+    case "voided":
+      return "No qualifying closing data within 24 hours of the close. Every entry is refundable in full.";
+  }
+}
+
+function Banner({ epoch, stage }: { epoch: Epoch; stage: Stage }) {
+  const key = `${epoch.address}:${stage}`;
+  const [hidden, setHidden] = useState<string | null>(null);
+  if (hidden === key) return null;
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-pill border px-2.5 py-0.5 text-xs font-medium uppercase tracking-wider ${style.className}`}>
-      <style.icon size={12} aria-hidden="true" />
-      {STAGE_LABEL[stage]}
-    </span>
+    <div className={`flex items-center gap-3 rounded-xl border border-white/[0.06] px-4 py-2.5 text-xs ${stage === "voided" ? "bg-warn/10 text-warn" : "bg-[linear-gradient(90deg,rgba(242,98,46,0.22),rgba(194,65,143,0.12)_55%,rgba(124,58,237,0.06))] text-ink"}`}>
+      <CircleAlert size={15} aria-hidden="true" className="shrink-0" />
+      <p className="min-w-0 flex-1">{bannerText(epoch, stage)}</p>
+      <button type="button" onClick={() => setHidden(key)} aria-label="Dismiss" className="grid size-6 shrink-0 cursor-pointer place-items-center rounded-full text-muted hover:text-ink">
+        <X size={14} aria-hidden="true" />
+      </button>
+    </div>
   );
 }
 
-function ClockStrip({ epochs, epoch, now, onSelect }: { epochs: Epoch[]; epoch: Epoch; now: number; onSelect: (address: string) => void }) {
+function ClockCard({ epochs, epoch, now, canEnter, onSelect, onEnter }: { epochs: Epoch[]; epoch: Epoch; now: number; canEnter: boolean; onSelect: (address: string) => void; onEnter: () => void }) {
   const mounted = useMounted();
   const stage = stageOf(epoch, now);
   const index = epochs.findIndex((item) => item.address === epoch.address);
   const previous = epochs[index - 1];
   const next = epochs[index + 1];
   const local = mounted ? new Date(epoch.closesAt * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null;
-  const timer =
-    stage === "upcoming" ? `Opens in ${countdown(epoch.opensAt - now)}` : stage === "open" ? `Closes in ${countdown(epoch.closesAt - now)}` : stage === "closing" ? "Awaiting closing reference" : null;
-  const arrow = "grid size-9 shrink-0 cursor-pointer place-items-center rounded-pill border border-line text-muted transition-colors duration-150 hover:text-ink disabled:cursor-not-allowed disabled:opacity-30";
+  const ticking = stage === "open" || stage === "upcoming";
+  const time = ticking ? countdown((stage === "open" ? epoch.closesAt : epoch.opensAt) - now) : null;
+  const label = stage === "open" ? "Closes in" : stage === "upcoming" ? "Opens in" : "Closed at";
 
   return (
-    <section className={`${panel} flex flex-col gap-3 bg-[radial-gradient(40%_160%_at_0%_0%,rgba(242,98,46,0.14),transparent_70%)] p-4 sm:flex-row sm:items-center sm:justify-between`}>
-      <div className="flex items-center gap-3">
-        <button type="button" className={arrow} disabled={!previous} onClick={() => previous && onSelect(previous.address)} aria-label="Previous Epoch">
-          <ChevronLeft size={16} aria-hidden="true" />
-        </button>
-        <div className="flex flex-col gap-1">
-          <span className="num text-base font-semibold">{windowText(epoch)}</span>
-          <span className="num text-xs text-muted">Closes {utcTime(epoch.closesAt)} UTC{local ? ` · ${local} your time` : ""}</span>
+    <section className={`${card} flex flex-col gap-5 p-5`}>
+      <CardHead icon={<Timer size={14} aria-hidden="true" />} title="Epoch">
+        <span className="num text-xs text-muted">{windowText(epoch)}</span>
+      </CardHead>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="flex flex-col gap-3">
+          <span className={eyebrow}>{label}</span>
+          {time ? <Figure main={time.slice(0, 5)} dim={time.slice(5)} /> : <Figure main={utcTime(epoch.closesAt)} unit="UTC" />}
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+            <StageChip stage={stage} />
+            <span className="num">Closes {utcTime(epoch.closesAt)} UTC{local ? ` · ${local} your time` : ""}</span>
+          </div>
         </div>
-        <button type="button" className={arrow} disabled={!next} onClick={() => next && onSelect(next.address)} aria-label="Next Epoch">
-          <ChevronRight size={16} aria-hidden="true" />
-        </button>
-      </div>
-      <div className="flex items-center gap-3 sm:justify-end">
-        <StagePill stage={stage} />
-        {timer && <span className="num text-sm font-medium">{timer}</span>}
+        <div className="flex flex-wrap gap-2">
+          {canEnter && (
+            <button type="button" onClick={onEnter} className={`hidden h-9 cursor-pointer items-center gap-1.5 rounded-pill px-4 text-sm font-medium text-white shadow-none lg:inline-flex lg:shadow-[0_0_24px_rgba(242,98,46,0.35)] ${gradient}`}>
+              <Plus size={14} aria-hidden="true" /> New entry
+            </button>
+          )}
+          <button type="button" className={pill} disabled={!previous} onClick={() => previous && onSelect(previous.address)}>
+            <ChevronLeft size={14} aria-hidden="true" /> Previous
+          </button>
+          <button type="button" className={pill} disabled={!next} onClick={() => next && onSelect(next.address)}>
+            Next <ChevronRight size={14} aria-hidden="true" />
+          </button>
+        </div>
       </div>
     </section>
-  );
-}
-
-function Comparison({ epoch, coins, now, backed, canPick, onPick }: { epoch: Epoch; coins: string[]; now: number; backed: string | null; canPick: boolean; onPick: (id: string) => void }) {
-  const { estimate, freshness } = useLive();
-  const stage = stageOf(epoch, now);
-  const opening = useOpeningReferences(epoch, now);
-  const closing = useMemo(() => {
-    if (epoch.closingReferences.length === 0) return null;
-    return Object.fromEntries(epoch.closingReferences.map((item) => [item.assetId, (Number(BigInt(item.reference)) / 10 ** REFERENCE_DIGITS) * PREVIEW_BASE]));
-  }, [epoch.closingReferences]);
-  const end = closing ?? (stage === "open" ? (estimate?.references ?? null) : null);
-  const rows = moves(coins, opening, end);
-  const largest = Math.max(1e-9, ...rows.map((row) => Math.abs(row.change ?? 0)));
-  const ready = opening !== null && end !== null;
-
-  const basis = closing
-    ? `Closing reference · ${utcTime(epoch.closesAt, true)} UTC`
-    : freshness === "live" && estimate
-      ? `Live estimate · as of ${utcTime(estimate.at, true)} UTC`
-      : estimate
-        ? `Estimate paused · last update ${utcTime(estimate.at, true)} UTC`
-        : "Estimate unavailable";
-
-  return (
-    <section className={`${panel} min-w-0`}>
-      <header className="flex flex-wrap items-end justify-between gap-2 border-b border-line bg-[radial-gradient(60%_140%_at_100%_0%,rgba(242,98,46,0.16),transparent_70%)] px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold">Relative moves since Epoch start</h2>
-          <p className="text-xs text-muted">Each asset against $CRYPTO from the opening reference at {utcTime(epoch.opensAt)} UTC.</p>
-        </div>
-        {stage !== "upcoming" && (
-          <span className={`num rounded-pill border px-2 py-0.5 text-[11px] ${closing ? "border-line text-ink" : freshness === "live" ? "border-dashed border-line text-muted" : "border-warn text-warn"}`}>{basis}</span>
-        )}
-      </header>
-
-      {stage === "upcoming" ? (
-        <p className="px-4 py-10 text-center text-sm text-muted">Moves appear once this Epoch opens at {utcTime(epoch.opensAt)} UTC.</p>
-      ) : !ready ? (
-        <p className="px-4 py-10 text-center text-sm text-muted">{stage === "open" ? "Loading the opening references…" : "Awaiting the closing reference. A later market price is not substituted."}</p>
-      ) : (
-        <ul className="divide-y divide-line">
-          {rows.map((row) => (
-            <MoveRow key={row.id} row={row} largest={largest} backed={row.id === backed} canPick={canPick} onPick={() => onPick(row.id)} />
-          ))}
-        </ul>
-      )}
-      <p className="border-t border-line px-4 py-3 text-xs text-muted">0% means matching $CRYPTO over the interval, not an unchanged USD price. This ranks assets, not entries or payouts.</p>
-    </section>
-  );
-}
-
-function MoveRow({ row, largest, backed, canPick, onPick }: { row: Move; largest: number; backed: boolean; canPick: boolean; onPick: () => void }) {
-  const width = row.change === null ? 0 : Math.round((Math.abs(row.change) / largest) * 50);
-  const content = (
-    <>
-      <span className="flex min-w-0 items-center gap-2.5">
-        <CoinIcon id={row.id} size={22} />
-        <span className="truncate text-sm font-medium">{row.id}</span>
-        {backed && <span className="rounded-pill bg-accent px-1.5 py-0.5 text-[10px] font-semibold uppercase text-accent-ink">Backed</span>}
-      </span>
-      <span className="relative hidden h-2 sm:block" aria-hidden="true">
-        <span className="absolute inset-y-0 left-1/2 w-px bg-line" />
-        {row.change !== null && (
-          <span
-            className={`absolute inset-y-0 rounded-pill ${backed ? "bg-accent" : row.change >= 0 ? "bg-up/70" : "bg-down/70"}`}
-            style={row.change >= 0 ? { left: "50%", width: `${width}%` } : { right: "50%", width: `${width}%` }}
-          />
-        )}
-      </span>
-      <span className={`num text-right text-sm ${tone(row.change)}`}>{pct(row.change)}</span>
-    </>
-  );
-  const grid = `grid w-full grid-cols-[minmax(0,1fr)_88px] items-center gap-4 px-4 py-2.5 text-left sm:grid-cols-[160px_minmax(0,1fr)_88px] ${backed ? "bg-accent/5" : ""}`;
-  return (
-    <li>
-      {canPick ? (
-        <button type="button" onClick={onPick} className={`${grid} cursor-pointer transition-colors duration-150 hover:bg-surface-2`} aria-label={`Back ${row.id}`}>
-          {content}
-        </button>
-      ) : (
-        <div className={grid}>{content}</div>
-      )}
-    </li>
   );
 }
 
@@ -269,68 +259,231 @@ function PotCard({ epoch, now, decimals }: { epoch: Epoch; now: number; decimals
   const net = settled ? units(epoch.settlementPot!, decimals) : epoch.ledger ? units(epoch.ledger.activeNet, decimals) : null;
   const queued = epoch.ledger ? units(epoch.ledger.pendingGross, decimals) : null;
   const entries = epoch.nextNonce !== null ? Number(epoch.nextNonce) : (epoch.lots?.executed ?? null);
+  const figure = splitAmount(net);
 
   return (
-    <section className="flex flex-col gap-4 border-t border-dashed border-line pt-5">
-      <dl className="grid grid-cols-3 gap-2">
-        <div>
-          <dt className="text-[11px] text-muted">{settled ? "Settlement pot" : "Net stake pot"}</dt>
-          <dd className="num text-sm font-semibold">{net === null ? "—" : formatAmount(net, 2)} <span className="text-xs font-normal text-muted">{COLLATERAL.symbol}</span></dd>
+    <section className={`${card} flex flex-col gap-5 p-5`}>
+      <CardHead icon={<Coins size={14} aria-hidden="true" />} title="Pot" />
+      <div className="flex flex-col gap-3">
+        <span className={eyebrow}>{settled ? "Settlement pot" : "Net stake pot"}</span>
+        <Figure main={figure.main} dim={figure.dim} unit={COLLATERAL.symbol} />
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="num rounded-pill bg-surface-2 px-2 py-0.5">{entries ?? "—"} entries</span>
+          <span className="num text-muted">Queued {queued === null ? "—" : formatAmount(queued, 2)} {COLLATERAL.symbol}</span>
         </div>
-        <div>
-          <dt className="text-[11px] text-muted">Queued</dt>
-          <dd className="num text-sm">{queued === null ? "—" : formatAmount(queued, 2)}</dd>
-        </div>
-        <div>
-          <dt className="text-[11px] text-muted">Entries</dt>
-          <dd className="num text-sm">{entries ?? "—"}</dd>
-        </div>
-      </dl>
-      {stage === "voided" ? (
-        <p className="flex items-start gap-2 text-xs text-warn"><CircleAlert size={14} aria-hidden="true" className="mt-0.5 shrink-0" />No qualifying closing data within 24 hours of the close. Every entry is refundable in full.</p>
-      ) : (
-        <ol className="flex flex-col gap-2">
-          {TIMELINE.map((label, index) => {
-            const done = index < step;
-            const current = index === step;
-            return (
-              <li key={label} className={`flex items-center gap-2 text-xs ${current ? "font-medium text-ink" : done ? "text-muted" : "text-muted/60"}`}>
-                <span className={`grid size-5 shrink-0 place-items-center rounded-full ${done ? "bg-accent text-accent-ink" : current ? "bg-accent/20" : "bg-surface-2"}`}>
-                  {done && <Check size={12} strokeWidth={3.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" />}
-                  {current && <span className="size-2 rounded-full bg-accent" />}
-                </span>
-                {label}
-                {current && label === "Closing reference" && <span className="num text-muted">· {utcTime(epoch.closesAt, true)} UTC</span>}
-                {current && label === "Scoring" && epoch.lots && <span className="num text-muted">· {epoch.lots.scored} of {epoch.lots.executed}</span>}
-                {current && label === "Allocating payouts" && epoch.lots && <span className="num text-muted">· {epoch.lots.allocated} of {epoch.lots.executed}</span>}
-              </li>
-            );
-          })}
-        </ol>
-      )}
+      </div>
+      <div className="flex gap-1" aria-hidden="true">
+        {TIMELINE.map((label, index) => (
+          <span key={label} className={`h-1.5 flex-1 rounded-full ${stage === "voided" ? "bg-warn/40" : index < step ? "bg-accent" : index === step ? "bg-accent/40" : "bg-surface-2"}`} />
+        ))}
+      </div>
     </section>
   );
 }
 
-function PayoutExplainer({ open: initial = false }: { open?: boolean }) {
-  const [open, setOpen] = useState(initial);
+function PromoCard({ onExplain, explaining }: { onExplain: () => void; explaining: boolean }) {
   return (
-    <section className={panel}>
-      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-left text-sm font-semibold">
-        How your payout works
-        <ChevronDown size={16} aria-hidden="true" className={`text-muted transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && (
-        <div className="flex flex-col gap-3 border-t border-line px-4 py-4 text-xs text-muted">
-          <p className="text-sm text-ink">Your backed asset&apos;s positive relative move is compared with all positive relative moves in your basket. Your score is weighted by your net stake. The shared pot is distributed according to those weights across all entries.</p>
-          <pre className="num overflow-x-auto rounded-control bg-surface-2 p-3 text-[11px] leading-5 text-ink">{`Member move = closing reference / entry reference − 1
+    <section className="relative isolate flex min-w-0 flex-col justify-between gap-5 overflow-hidden rounded-2xl p-5">
+      <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[radial-gradient(120%_120%_at_0%_0%,#f2622e_0%,#b23a74_45%,#3b1d6e_100%)] opacity-90" />
+      <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[radial-gradient(60%_60%_at_100%_100%,rgba(0,0,0,0.35),transparent)]" />
+      <div className="flex flex-col gap-2">
+        <h2 className="text-lg font-semibold leading-tight text-white">Back your analysis.</h2>
+        <p className="text-xs leading-relaxed text-white/80">Pick the coin your research says will beat the rest of crypto. If it leads, your share of the pot grows, even on a red day.</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={onExplain} aria-expanded={explaining} className="h-9 cursor-pointer rounded-pill bg-white px-4 text-sm font-medium text-black transition-opacity duration-150 hover:opacity-90">
+          {explaining ? "Hide payouts" : "How payouts work"}
+        </button>
+        <span className="inline-flex h-9 items-center rounded-pill bg-white/15 px-4 text-sm text-white backdrop-blur">30 coins · 4 hours</span>
+      </div>
+    </section>
+  );
+}
+
+function PayoutExplainer({ onClose }: { onClose?: () => void }) {
+  return (
+    <section className={`${card} flex flex-col gap-4 p-5`}>
+      <CardHead icon={<CircleAlert size={14} aria-hidden="true" />} title="How your payout works">
+        {onClose && (
+          <button type="button" onClick={onClose} aria-label="Close" className="grid size-8 cursor-pointer place-items-center rounded-full text-muted hover:bg-surface-2 hover:text-ink">
+            <X size={16} aria-hidden="true" />
+          </button>
+        )}
+      </CardHead>
+      <div className="grid gap-4 text-xs text-muted lg:grid-cols-2">
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-ink">Your backed asset&apos;s positive relative move is compared with all positive relative moves in your basket. Your score is weighted by your net stake, and the shared pot is split by those weights across all entries.</p>
+          <pre className="num overflow-x-auto rounded-xl bg-bg/70 p-3 text-[11px] leading-5 text-ink">{`Member move = closing reference / entry reference − 1
 Score       = positive backed-asset move / sum of positive basket moves
 Weight      = net stake × score
 Payout      = available pot × entry weight / total entry weight`}</pre>
+        </div>
+        <div className="flex flex-col gap-3">
           <p>The score is zero when no basket member rose. Negative moves add nothing to the denominator. A score is not a win probability and not your share of the pot: other entries&apos; stakes, baskets, entry times and scores decide the money. Several entries can be paid.</p>
           <p>Example: two 100 {COLLATERAL.symbol} entries have net stakes of 99.98 each. Scores of 10% and 30% split the 199.96 pot 25% / 75%: payouts of 49.99 and 149.97. The first entry rose against $CRYPTO and still lost money.</p>
           <p>If every score is zero, every entry is refunded in full, held fee included. These formulas explain the rules; the protocol decides the actual scores, rounding and payouts.</p>
         </div>
+      </div>
+    </section>
+  );
+}
+
+function MovesCard({ epoch, coins, now, backed, canPick, onPick }: { epoch: Epoch; coins: string[]; now: number; backed: string | null; canPick: boolean; onPick: (id: string) => void }) {
+  const { estimate, freshness } = useLive();
+  const stage = stageOf(epoch, now);
+  const opening = useOpeningReferences(epoch, now);
+  const closing = useMemo(() => {
+    if (epoch.closingReferences.length === 0) return null;
+    return Object.fromEntries(epoch.closingReferences.map((item) => [item.assetId, (Number(BigInt(item.reference)) / 10 ** REFERENCE_DIGITS) * PREVIEW_BASE]));
+  }, [epoch.closingReferences]);
+  const end = closing ?? (stage === "open" ? (estimate?.references ?? null) : null);
+  const rows = moves(coins, opening, end);
+  const scored = rows.filter((row) => row.change !== null);
+  const largest = Math.max(1e-9, ...scored.map((row) => Math.abs(row.change ?? 0)));
+  const ready = opening !== null && end !== null && scored.length > 0;
+  const leader = scored[0] ?? null;
+  const laggard = scored[scored.length - 1] ?? null;
+  const above = scored.filter((row) => (row.change ?? 0) > 0).length;
+  const below = scored.filter((row) => (row.change ?? 0) < 0).length;
+  const focus = (backed ? rows.find((row) => row.id === backed) : null) ?? leader;
+
+  const basis = closing
+    ? `Closing reference · ${utcTime(epoch.closesAt, true)} UTC`
+    : freshness === "live" && estimate
+      ? `Live estimate · ${utcTime(estimate.at, true)} UTC`
+      : estimate
+        ? `Estimate paused · ${utcTime(estimate.at, true)} UTC`
+        : "Estimate unavailable";
+
+  const stats = [
+    { label: "Leader", value: leader ? leader.id : "—", change: leader?.change ?? null },
+    { label: "Laggard", value: laggard ? laggard.id : "—", change: laggard?.change ?? null },
+    { label: "Ahead of $CRYPTO", value: ready ? String(above) : "—", change: null },
+    { label: "Behind $CRYPTO", value: ready ? String(below) : "—", change: null },
+  ];
+
+  return (
+    <section className={`${card} flex flex-col`}>
+      <div className="flex flex-col gap-5 p-5">
+        <CardHead icon={<BarChart3 size={14} aria-hidden="true" />} title="Relative moves since Epoch start">
+          {stage !== "upcoming" && <span className={`num rounded-pill px-2.5 py-1 text-[11px] ${closing ? "bg-surface-2 text-ink" : freshness === "live" ? "bg-surface-2 text-muted" : "bg-warn/15 text-warn"}`}>{basis}</span>}
+        </CardHead>
+
+        {ready && focus && (
+          <div className="flex flex-wrap items-end justify-between gap-5">
+            <div className="flex flex-col gap-3">
+              <span className={`${eyebrow} flex items-center gap-2`}>
+                <CoinIcon id={focus.id} size={18} />
+                {focus.id} · {focus.id === backed ? "your pick" : "leading"} since {utcTime(epoch.opensAt)} UTC
+              </span>
+              <p className={`num text-[2.5rem] font-semibold leading-none tracking-tight ${tone(focus.change)}`}>{pct(focus.change)}</p>
+            </div>
+            <dl className="grid flex-1 grid-cols-2 gap-px overflow-hidden rounded-xl bg-white/[0.06] sm:max-w-xl sm:grid-cols-4">
+              {stats.map((stat) => (
+                <div key={stat.label} className="flex flex-col gap-1.5 bg-surface px-3 py-2.5">
+                  <dt className="text-[11px] text-muted">{stat.label}</dt>
+                  <dd className="flex items-center gap-1.5">
+                    <span className="num text-sm font-medium">{stat.value}</span>
+                    {stat.change !== null && <span className={`num rounded-pill px-1.5 py-0.5 text-[10px] ${chip(stat.change)}`}>{pct(stat.change, 2)}</span>}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
+      </div>
+
+      {stage === "upcoming" ? (
+        <p className="px-5 pb-10 pt-4 text-center text-sm text-muted">Moves appear once this Epoch opens at {utcTime(epoch.opensAt)} UTC.</p>
+      ) : !ready ? (
+        <p className="px-5 pb-10 pt-4 text-center text-sm text-muted">{stage === "open" ? "Loading the opening references…" : "Awaiting the closing reference. A later market price is not substituted."}</p>
+      ) : (
+        <>
+          <div className={`grid grid-cols-[28px_minmax(0,1fr)_88px] gap-4 border-t border-white/[0.06] px-5 py-2 sm:grid-cols-[28px_150px_minmax(0,1fr)_88px] ${eyebrow}`}>
+            <span>#</span>
+            <span>Asset</span>
+            <span className="hidden text-center sm:block">vs $CRYPTO</span>
+            <span className="text-right">Move</span>
+          </div>
+          <ul className="max-h-[440px] overflow-y-auto [scrollbar-color:rgba(255,255,255,0.12)_transparent] [scrollbar-width:thin]">
+            {rows.map((row, index) => (
+              <MoveRow key={row.id} rank={index + 1} row={row} largest={largest} backed={row.id === backed} canPick={canPick} onPick={() => onPick(row.id)} />
+            ))}
+          </ul>
+        </>
+      )}
+      <p className="border-t border-white/[0.06] px-5 py-3 text-[11px] text-muted">0% means matching $CRYPTO over the interval, not an unchanged USD price. This ranks assets, not entries or payouts.</p>
+    </section>
+  );
+}
+
+function MoveRow({ rank, row, largest, backed, canPick, onPick }: { rank: number; row: Move; largest: number; backed: boolean; canPick: boolean; onPick: () => void }) {
+  const width = row.change === null ? 0 : Math.round((Math.abs(row.change) / largest) * 50);
+  const bar = backed ? gradient : row.change !== null && row.change >= 0 ? "bg-[linear-gradient(90deg,rgba(62,207,142,0.25),#3ecf8e)]" : "bg-[linear-gradient(270deg,rgba(240,97,109,0.25),#f0616d)]";
+  const content = (
+    <>
+      <span className="num text-xs text-muted">{rank}</span>
+      <span className="flex min-w-0 items-center gap-2.5">
+        <CoinIcon id={row.id} size={22} />
+        <span className="truncate text-sm font-medium">{row.id}</span>
+        {backed && <span className="rounded-pill bg-accent px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white">Backed</span>}
+      </span>
+      <span className="relative hidden h-1.5 sm:block" aria-hidden="true">
+        <span className="absolute inset-y-[-4px] left-1/2 w-px bg-white/10" />
+        {row.change !== null && <span className={`absolute inset-y-0 rounded-full ${bar}`} style={row.change >= 0 ? { left: "50%", width: `${width}%` } : { right: "50%", width: `${width}%` }} />}
+      </span>
+      <span className={`num text-right text-sm ${tone(row.change)}`}>{pct(row.change)}</span>
+    </>
+  );
+  const grid = `grid w-full grid-cols-[28px_minmax(0,1fr)_88px] items-center gap-4 px-5 py-2.5 text-left sm:grid-cols-[28px_150px_minmax(0,1fr)_88px] ${backed ? "bg-accent/[0.07]" : ""}`;
+  return (
+    <li>
+      {canPick ? (
+        <button type="button" onClick={onPick} className={`${grid} cursor-pointer transition-colors duration-150 hover:bg-white/[0.03]`} aria-label={`Back ${row.id}`}>
+          {content}
+        </button>
+      ) : (
+        <div className={grid}>{content}</div>
+      )}
+    </li>
+  );
+}
+
+function SettlementCard({ epoch, now }: { epoch: Epoch; now: number }) {
+  const stage = stageOf(epoch, now);
+  const step = timelineStep(stage);
+  return (
+    <section className={`${card} flex flex-col gap-4 p-5`}>
+      <CardHead icon={<Activity size={14} aria-hidden="true" />} title="Settlement">
+        <StageChip stage={stage} />
+      </CardHead>
+      {stage === "voided" ? (
+        <p className="flex items-start gap-2 text-xs text-warn"><CircleAlert size={14} aria-hidden="true" className="mt-0.5 shrink-0" />No qualifying closing data within 24 hours of the close. Every entry is refundable in full.</p>
+      ) : (
+        <ol className="flex flex-col">
+          {TIMELINE.map((label, index) => {
+            const done = index < step;
+            const current = index === step;
+            const last = index === TIMELINE.length - 1;
+            return (
+              <li key={label} className="flex gap-3">
+                <span className="flex flex-col items-center">
+                  <span className={`grid size-6 shrink-0 place-items-center rounded-full ${done ? "bg-accent text-white" : current ? "bg-accent/20" : "bg-surface-2"}`}>
+                    {done && <Check size={13} strokeWidth={3.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" />}
+                    {current && <span className="size-2 rounded-full bg-accent" />}
+                  </span>
+                  {!last && <span className={`w-px flex-1 ${done ? "bg-accent/60" : "bg-white/10"}`} />}
+                </span>
+                <span className={`flex flex-wrap items-center gap-x-1.5 pb-4 pt-0.5 text-xs ${current ? "font-medium text-ink" : done ? "text-ink/80" : "text-muted"}`}>
+                  {label}
+                  {current && label === "Closing reference" && <span className="num text-muted">· {utcTime(epoch.closesAt, true)} UTC</span>}
+                  {current && label === "Scoring" && epoch.lots && <span className="num text-muted">· {epoch.lots.scored} of {epoch.lots.executed}</span>}
+                  {current && label === "Allocating payouts" && epoch.lots && <span className="num text-muted">· {epoch.lots.allocated} of {epoch.lots.executed}</span>}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
       )}
     </section>
   );
@@ -362,44 +515,45 @@ function EntryPanel(props: { epoch: Epoch; coins: string[]; now: number; decimal
         ? "This Epoch is not taking entries right now (for example it is full or paused)."
         : "This Epoch has closed. New entries go into a later Epoch.";
 
-  const header = (
-    <div className="flex items-center justify-between">
-      <h2 className="text-sm font-semibold">{review ? "Review entry" : "Create your entry"}</h2>
+  const head = (
+    <CardHead icon={<Plus size={14} aria-hidden="true" />} title={review ? "Review entry" : "Create entry"}>
       {props.onClose && (
-        <button type="button" onClick={props.onClose} aria-label="Close" className="grid size-8 cursor-pointer place-items-center rounded-pill text-muted hover:bg-surface-2 hover:text-ink">
+        <button type="button" onClick={props.onClose} aria-label="Close" className="grid size-8 cursor-pointer place-items-center rounded-full text-muted hover:bg-surface-2 hover:text-ink">
           <X size={16} aria-hidden="true" />
         </button>
       )}
-    </div>
+    </CardHead>
   );
 
   if (!open) {
     return (
-      <section className={`${panel} flex flex-col gap-3 p-4`}>
-        {header}
-        <p className="text-sm text-muted">{closedReason}</p>
+      <section id="epoch-entry" className={`${card} flex flex-col gap-4 p-5`}>
+        {head}
+        <div className={`${well} flex items-start gap-3 text-sm text-muted`}>
+          <Clock size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
+          {closedReason}
+        </div>
       </section>
     );
   }
 
   if (review && intent && gross !== null && charge !== null && net !== null && backed) {
     return (
-      <section className={`${panel} flex flex-col gap-4 p-4`}>
-        {header}
-        <div className="flex items-center gap-3 rounded-control bg-surface-2 p-3">
+      <section id="epoch-entry" className={`${card} flex flex-col gap-4 p-5`}>
+        {head}
+        <div className={`${well} flex items-center gap-3`}>
           <CoinIcon id={backed} size={32} />
           <span className="text-base font-semibold">{backed}</span>
-          <span className="rounded-pill bg-accent px-1.5 py-0.5 text-[10px] font-semibold uppercase text-accent-ink">Backed</span>
+          <span className="rounded-pill bg-accent px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white">Backed</span>
+          <span className="num ml-auto text-xs text-muted">vs 29 assets</span>
         </div>
-        <dl className="flex flex-col gap-2 text-sm">
-          <div className="flex justify-between gap-4"><dt className="text-muted">Basket</dt><dd className="num text-right">30 assets · 1 backed + 29 comparison</dd></div>
+        <dl className="flex flex-col gap-2 text-xs">
           <div className="flex justify-between gap-4"><dt className="text-muted">Gross stake</dt><dd className="num text-right">{show(gross)}</dd></div>
           <div className="flex justify-between gap-4"><dt className="text-muted">Entry fee, held</dt><dd className="num text-right">{show(charge)}</dd></div>
-          <div className="flex justify-between gap-4 font-medium"><dt>Net stake</dt><dd className="num text-right">{show(net)}</dd></div>
-          <div className="flex justify-between gap-4"><dt className="text-muted">Closes</dt><dd className="num text-right">{windowText(epoch).split(" · ")[0]} · {utcTime(epoch.closesAt)} UTC</dd></div>
-          <div className="flex justify-between gap-4"><dt className="text-muted">Time left</dt><dd className="num text-right">{countdown(epoch.closesAt - now)}</dd></div>
+          <div className="flex justify-between gap-4 text-sm font-medium"><dt>Net stake</dt><dd className="num text-right">{show(net)}</dd></div>
+          <div className="flex justify-between gap-4"><dt className="text-muted">Closes</dt><dd className="num text-right">{utcTime(epoch.closesAt)} UTC · in {countdown(epoch.closesAt - now)}</dd></div>
         </dl>
-        <ul className="flex flex-col gap-1.5 rounded-control border border-line p-3 text-xs text-muted">
+        <ul className={`${well} flex flex-col gap-1.5 text-[11px] text-muted`}>
           <li className="flex gap-2"><Lock size={12} aria-hidden="true" className="mt-0.5 shrink-0" />The backed asset and basket are fixed once submitted. There is no early exit after execution.</li>
           <li className="flex gap-2"><Clock size={12} aria-hidden="true" className="mt-0.5 shrink-0" />Performance starts from the execution reference, not from this click. If it cannot execute before the close, the entry is refundable.</li>
           <li className="flex gap-2"><CircleAlert size={12} aria-hidden="true" className="mt-0.5 shrink-0" />Positive relative performance does not guarantee a profit.</li>
@@ -416,7 +570,7 @@ function EntryPanel(props: { epoch: Epoch; coins: string[]; now: number; decimal
               setSent((count) => count + 1);
               props.onSent();
             }}
-            className="h-11 rounded-pill bg-accent text-sm font-medium text-accent-ink"
+            className={`h-11 rounded-pill ${gradient} text-sm font-medium text-white`}
           />
           <button type="button" onClick={() => setReview(false)} className={quiet}><ArrowLeft size={14} aria-hidden="true" /> Edit</button>
         </div>
@@ -425,65 +579,67 @@ function EntryPanel(props: { epoch: Epoch; coins: string[]; now: number; decimal
   }
 
   return (
-    <section className={`${panel} flex flex-col gap-4 p-4`}>
-      {header}
+    <section id="epoch-entry" className={`${card} flex flex-col gap-4 p-5`}>
+      {head}
 
-      <div className="flex flex-col gap-2">
-        <span className="text-xs text-muted">Backed asset</span>
-        <div className="flex items-center gap-3 rounded-control border border-line bg-bg p-3">
-          {backed ? <CoinIcon id={backed} size={32} /> : <span className="grid size-8 place-items-center rounded-full border border-dashed border-line text-muted"><Plus size={14} aria-hidden="true" /></span>}
-          <span className="flex flex-col">
-            <span className="text-base font-semibold">{backed ?? "Choose an asset"}</span>
-            {backed && <span className="w-fit rounded-pill bg-accent px-1.5 py-0.5 text-[10px] font-semibold uppercase text-accent-ink">Backed</span>}
-          </span>
-          <select aria-label="Backed asset" value={backed ?? ""} onChange={(event) => props.onBacked(event.target.value)} className="ml-auto h-9 cursor-pointer rounded-control border border-line bg-surface px-2 text-xs">
-            <option value="" disabled>Choose</option>
-            {coins.map((id) => (
-              <option key={id} value={id}>{id}</option>
-            ))}
-          </select>
+      <div className="flex flex-col gap-1.5">
+        <div className={`${well} flex flex-col gap-3`}>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-muted">Back</span>
+            <span className="relative">
+              <select aria-label="Backed asset" value={backed ?? ""} onChange={(event) => props.onBacked(event.target.value)} className="h-8 cursor-pointer appearance-none rounded-pill bg-surface-2 pl-3 pr-8 text-xs font-medium">
+                <option value="" disabled>Choose</option>
+                {coins.map((id) => (
+                  <option key={id} value={id}>{id}</option>
+                ))}
+              </select>
+              <ChevronDown size={12} aria-hidden="true" className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted" />
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            {backed ? <CoinIcon id={backed} size={30} /> : <span className="grid size-[30px] place-items-center rounded-full border border-dashed border-white/20 text-muted"><Plus size={14} aria-hidden="true" /></span>}
+            <span className="num text-2xl font-semibold">{backed ?? "Pick a coin"}</span>
+          </div>
         </div>
-        <span className="text-[11px] text-muted">Or pick one from the list.</span>
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-muted">Basket</span>
-          <span className="num text-xs">{coins.length} / {BASKET_SIZE}</span>
-        </div>
-        <div className="rounded-control border border-line p-3 text-xs">
-          <p className="text-ink">{exact ? "30 assets · 1 backed + 29 comparison" : "Asset list not available"}</p>
-          {exact && <p className="mt-1 text-muted">All 30 eligible assets are included this Epoch. The basket is a comparison set, not tokens bought for you.</p>}
-          {exact && (
-            <button type="button" onClick={() => setShowBasket(!showBasket)} className="mt-2 cursor-pointer text-accent underline-offset-4 hover:underline">{showBasket ? "Hide basket" : "View basket"}</button>
-          )}
+        <span className="relative z-10 -my-4 mx-auto grid size-9 place-items-center rounded-full border-4 border-surface bg-surface-2 text-[10px] font-semibold text-muted">VS</span>
+        <div className={`${well} flex flex-col gap-2`}>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-muted">Against</span>
+            <span className="num text-[11px] text-muted">{coins.length} / {BASKET_SIZE}</span>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm">{exact ? "The other 29 coins" : "Asset list not available"}</span>
+            {exact && <button type="button" onClick={() => setShowBasket(!showBasket)} className="cursor-pointer text-xs text-accent underline-offset-4 hover:underline">{showBasket ? "Hide" : "View basket"}</button>}
+          </div>
           {showBasket && (
-            <ul className="mt-3 flex flex-wrap gap-1.5">
+            <ul className="flex flex-wrap gap-1.5 pt-1">
               {coins.map((id) => (
-                <li key={id} className={`num rounded-pill border px-2 py-0.5 ${id === backed ? "border-accent text-accent" : "border-line text-muted"}`}>{id}</li>
+                <li key={id} className={`num rounded-pill px-2 py-0.5 text-[11px] ${id === backed ? "bg-accent/20 text-accent" : "bg-surface-2 text-muted"}`}>{id}</li>
               ))}
             </ul>
           )}
         </div>
       </div>
 
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between text-xs text-muted">
+      <div className={`${well} flex flex-col gap-2`}>
+        <div className="flex items-center justify-between text-[11px] text-muted">
           <label htmlFor="epoch-stake">Stake</label>
           {owner && <span className="num">Wallet {wallet === null ? "…" : formatAmount(wallet, 2)} {COLLATERAL.symbol}</span>}
         </div>
-        <div className="relative">
-          <input id="epoch-stake" inputMode="decimal" placeholder="0.00" value={amount} onChange={(event) => setAmount(event.target.value)} className={`${field} pr-16`} />
-          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted">{COLLATERAL.symbol}</span>
+        <div className="flex items-center gap-2">
+          <input id="epoch-stake" inputMode="decimal" placeholder="0.00" value={amount} onChange={(event) => setAmount(event.target.value)} className="num min-w-0 flex-1 bg-transparent text-2xl font-semibold text-ink outline-none placeholder:text-muted/50" />
+          <span className="text-xs text-muted">{COLLATERAL.symbol}</span>
         </div>
-        <dl className="flex flex-col gap-1.5 text-xs">
-          <div className="flex justify-between"><dt className="text-muted">Entry fee ({fee.bps / 100}%, held until settlement)</dt><dd className="num">{show(charge)}</dd></div>
-          <div className="flex justify-between font-medium"><dt>Net stake</dt><dd className="num">{show(net)}</dd></div>
-        </dl>
       </div>
 
+      <dl className="flex flex-col gap-1.5 text-xs">
+        <div className="flex justify-between"><dt className="text-muted">Entry fee ({fee.bps / 100}%, held to settlement)</dt><dd className="num">{show(charge)}</dd></div>
+        <div className="flex justify-between"><dt className="text-muted">Net stake</dt><dd className="num font-medium text-ink">{show(net)}</dd></div>
+        <div className="flex justify-between"><dt className="text-muted">Closes</dt><dd className="num">{utcTime(epoch.closesAt)} UTC</dd></div>
+      </dl>
+
       <div className="flex flex-col gap-2">
-        <button type="button" disabled={problem !== null} onClick={() => setReview(true)} className={`${primary} ${problem === null ? "cursor-pointer hover:opacity-90" : "cursor-not-allowed opacity-50"}`}>
+        <button type="button" disabled={problem !== null} onClick={() => setReview(true)} className={`${primary} ${problem === null ? "cursor-pointer hover:opacity-90" : "cursor-not-allowed opacity-40"}`}>
           Review entry
         </button>
         {amount.trim() !== "" && problem && <p className="text-xs text-muted">{problem}</p>}
@@ -500,61 +656,66 @@ const GROUPS: { id: LotGroup; label: string }[] = [
   { id: "history", label: "History" },
 ];
 
-function EntryCard({ lot, epoch, decimals, onSent }: { lot: EpochLot; epoch: Epoch | null; decimals: number; onSent: () => void }) {
+const STATUS_TONE: Record<LotGroup, string> = {
+  withdrawable: "bg-accent/15 text-accent",
+  pending: "bg-warn/15 text-warn",
+  active: "bg-up/15 text-up",
+  history: "bg-surface-2 text-muted",
+};
+
+const TABLE = "grid min-w-[820px] grid-cols-[minmax(130px,1.1fr)_minmax(150px,1.2fr)_minmax(130px,1fr)_minmax(110px,0.9fr)_minmax(150px,1.3fr)_70px_minmax(120px,1fr)_150px] items-center gap-3 px-5";
+
+function EntryRow({ lot, epoch, decimals, onSent }: { lot: EpochLot; epoch: Epoch | null; decimals: number; onSent: () => void }) {
   const [open, setOpen] = useState(false);
   const view = lotView(lot, epoch);
   const gross = units(lot.grossStake, decimals);
-  const net = units(lot.grossStake, decimals) - units(lot.fee, decimals);
+  const net = gross - units(lot.fee, decimals);
   const score = scoreOf(lot);
   const claimable = lot.claimable === null ? null : units(lot.claimable, decimals);
   const owed = claimable !== null && claimable > 0 && lot.state !== "withdrawn";
   const result = claimable !== null && lot.state !== "withdrawn" ? claimable - gross : null;
-  const tag = view.group === "withdrawable" ? "border-accent text-accent" : view.group === "pending" ? "border-warn text-warn" : view.group === "active" ? "border-up text-up" : "border-line text-muted";
 
   return (
-    <li className="flex flex-col gap-3 py-4">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+    <li className="border-t border-white/[0.06]">
+      <div className={`${TABLE} py-3 text-xs`}>
         <span className="flex items-center gap-2">
-          <CoinIcon id={lot.backedAsset} size={28} />
-          <span className="text-sm font-semibold">{lot.backedAsset}</span>
-          <span className="rounded-pill bg-accent px-1.5 py-0.5 text-[10px] font-semibold uppercase text-accent-ink">Backed</span>
+          <CoinIcon id={lot.backedAsset} size={26} />
+          <span className="flex flex-col">
+            <span className="text-sm font-medium">{lot.backedAsset}</span>
+            <span className="num text-[10px] text-muted">#{lot.nonce}</span>
+          </span>
         </span>
-        <span className={`rounded-pill border px-2 py-0.5 text-[11px] ${tag}`}>{view.label}</span>
-        <span className="num ml-auto text-xs text-muted">Entry #{lot.nonce}</span>
-      </div>
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-        <div><dt className="text-muted">Gross / net stake</dt><dd className="num">{formatAmount(gross, 2)} / {formatAmount(net, 2)} {COLLATERAL.symbol}</dd></div>
-        <div>
-          <dt className="text-muted">Performance basis</dt>
-          <dd className="num">{lot.execution ? `Since your execution · ${utcTime(lot.execution.timestamp, true)} UTC` : `Awaiting execution · entered ${utcTime(lot.admittedAt, true)} UTC`}</dd>
-        </div>
-        <div><dt className="text-muted">Score</dt><dd className="num">{score === null ? "Not scored yet" : `${formatAmount(score * 100, 2)}%`}</dd></div>
-        <div>
-          <dt className="text-muted">{view.refund ? "Refund" : "Payout"}</dt>
-          <dd className="num">
-            {claimable === null ? "Not settled" : `${formatAmount(claimable, 4)} ${COLLATERAL.symbol}`}
-            {result !== null && !view.refund && <span className={`ml-1 ${tone(result)}`}>({result >= 0 ? "+" : "−"}{formatAmount(Math.abs(result), 4)})</span>}
-          </dd>
-        </div>
-      </dl>
-      <div className="flex flex-wrap items-center gap-3">
-        <button type="button" onClick={() => setOpen(!open)} className="cursor-pointer text-xs text-accent underline-offset-4 hover:underline">{open ? "Hide basket" : "View basket"}</button>
-        {owed && epoch && (
-          <span className="w-full">
+        <span className="num text-muted">{epoch ? windowText(epoch) : `${utcTime(lot.epochOpensAt)} UTC`}</span>
+        <span><span className={`inline-flex rounded-pill px-2 py-0.5 text-[11px] ${STATUS_TONE[view.group]}`}>{view.label}</span></span>
+        <span className="num flex flex-col">
+          <span>{formatAmount(gross, 2)}</span>
+          <span className="text-[10px] text-muted">net {formatAmount(net, 2)}</span>
+        </span>
+        <span className="num text-muted">{lot.execution ? `Executed ${utcTime(lot.execution.timestamp, true)}` : `Entered ${utcTime(lot.admittedAt, true)} · awaiting`}</span>
+        <span className="num">{score === null ? "—" : `${formatAmount(score * 100, 2)}%`}</span>
+        <span className="num flex flex-col">
+          <span>{claimable === null ? "Not settled" : `${formatAmount(claimable, 4)} ${view.refund ? "refund" : ""}`}</span>
+          {result !== null && !view.refund && <span className={`text-[10px] ${tone(result)}`}>{result >= 0 ? "+" : "−"}{formatAmount(Math.abs(result), 4)}</span>}
+        </span>
+        <span className="flex items-center justify-end gap-2">
+          {owed && epoch ? (
             <SendButton
               intent={{ operation: "epoch-withdraw", opensAt: epoch.opensAt, nonce: lot.nonce }}
-              label={`${view.refund ? "Withdraw refund" : "Withdraw payout"} · ${formatAmount(claimable ?? 0, 4)}`}
+              label={view.refund ? "Withdraw refund" : "Withdraw"}
               connectLabel="Connect wallet"
               onDone={onSent}
-              className="h-10 w-full rounded-pill bg-accent text-xs font-medium text-accent-ink"
+              className={`h-8 rounded-pill px-3 text-xs font-medium text-white ${gradient}`}
             />
-          </span>
-        )}
+          ) : null}
+          <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-label="Show basket" className="grid size-8 shrink-0 cursor-pointer place-items-center rounded-full text-muted hover:bg-surface-2 hover:text-ink">
+            <ChevronDown size={14} aria-hidden="true" className={`transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
+          </button>
+        </span>
       </div>
       {open && (
-        <ul className="flex flex-wrap gap-1.5 text-[11px]">
+        <ul className="flex flex-wrap gap-1.5 px-5 pb-3">
           {lot.basket.map((id) => (
-            <li key={id} className={`num rounded-pill border px-2 py-0.5 ${id === lot.backedAsset ? "border-accent text-accent" : "border-line text-muted"}`}>{id}</li>
+            <li key={id} className={`num rounded-pill px-2 py-0.5 text-[11px] ${id === lot.backedAsset ? "bg-accent/20 text-accent" : "bg-surface-2 text-muted"}`}>{id}</li>
           ))}
         </ul>
       )}
@@ -566,49 +727,50 @@ function MyEntries({ epochs, lots, decimals, onSent }: { epochs: Epoch[]; lots: 
   const { owner } = useAccount();
   const [filter, setFilter] = useState<LotGroup | "all">("all");
   const byOpen = new Map(epochs.map((epoch) => [epoch.opensAt, epoch]));
-  const views = lots.map((lot) => ({ lot, epoch: byOpen.get(lot.epochOpensAt) ?? null })).map((item) => ({ ...item, view: lotView(item.lot, item.epoch) }));
+  const views = lots
+    .map((lot) => ({ lot, epoch: byOpen.get(lot.epochOpensAt) ?? null }))
+    .map((item) => ({ ...item, view: lotView(item.lot, item.epoch) }))
+    .sort((a, b) => b.lot.epochOpensAt - a.lot.epochOpensAt || Number(b.lot.nonce) - Number(a.lot.nonce));
   const shown = views.filter((item) => filter === "all" || item.view.group === filter);
-  const grouped = [...new Set(shown.map((item) => item.lot.epochOpensAt))].sort((a, b) => b - a);
   const tabs: { id: LotGroup | "all"; label: string }[] = [{ id: "all", label: "All" }, ...GROUPS];
 
   return (
-    <section className="flex min-w-0 flex-col">
-      <div className="mb-5 border-t border-dashed border-line" />
-      <div role="tablist" aria-label="Filter entries" className="flex gap-1 overflow-x-auto pb-2 [mask-image:linear-gradient(to_right,black_85%,transparent)] [scrollbar-width:none]">
-        {tabs.map((item) => {
-          const on = filter === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              aria-selected={on}
-              onClick={() => setFilter(item.id)}
-              className={`h-9 shrink-0 cursor-pointer rounded-xl px-3.5 text-sm font-medium transition-colors duration-150 ${on ? "bg-surface-2 text-ink" : "text-muted hover:text-ink"}`}
-            >
-              {item.label}
-            </button>
-          );
-        })}
+    <section className={`${card} flex flex-col`}>
+      <div className="flex flex-col gap-3 p-5 pb-3 sm:flex-row sm:items-center sm:justify-between">
+        <CardHead icon={<LayoutList size={14} aria-hidden="true" />} title="My entries" />
+        <div role="tablist" aria-label="Filter entries" className="flex gap-1 overflow-x-auto [scrollbar-width:none]">
+          {tabs.map((item) => {
+            const on = filter === item.id;
+            return (
+              <button key={item.id} type="button" role="tab" aria-selected={on} onClick={() => setFilter(item.id)} className={`h-8 shrink-0 cursor-pointer rounded-xl px-3 text-xs font-medium transition-colors duration-150 ${on ? "bg-surface-2 text-ink" : "text-muted hover:text-ink"}`}>
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
       {!owner ? (
-        <p className="py-4 text-sm text-muted">Connect a wallet to see your entries.</p>
+        <p className="border-t border-white/[0.06] px-5 py-8 text-center text-sm text-muted">Connect a wallet to see your entries.</p>
       ) : shown.length === 0 ? (
-        <p className="py-4 text-sm text-muted">{lots.length === 0 ? "No entries yet. Create one while an Epoch is open." : "No entries in this group."}</p>
+        <p className="border-t border-white/[0.06] px-5 py-8 text-center text-sm text-muted">{lots.length === 0 ? "No entries yet. Create one while an Epoch is open." : "No entries in this group."}</p>
       ) : (
-        grouped.map((opensAt) => {
-          const epoch = byOpen.get(opensAt) ?? null;
-          return (
-            <div key={opensAt}>
-              <div className="num pt-3 text-[11px] uppercase tracking-wider text-muted">{epoch ? windowText(epoch) : `Epoch ${utcTime(opensAt)} UTC`}</div>
-              <ul className="divide-y divide-line">
-                {shown.filter((item) => item.lot.epochOpensAt === opensAt).map((item) => (
-                  <EntryCard key={item.lot.address} lot={item.lot} epoch={item.epoch} decimals={decimals} onSent={onSent} />
-                ))}
-              </ul>
-            </div>
-          );
-        })
+        <div className="overflow-x-auto pb-2">
+          <div className={`${TABLE} py-2 ${eyebrow}`}>
+            <span>Asset</span>
+            <span>Epoch</span>
+            <span>Status</span>
+            <span>Stake ({COLLATERAL.symbol})</span>
+            <span>Basis</span>
+            <span>Score</span>
+            <span>Payout</span>
+            <span />
+          </div>
+          <ul>
+            {shown.map((item) => (
+              <EntryRow key={item.lot.address} lot={item.lot} epoch={item.epoch} decimals={decimals} onSent={onSent} />
+            ))}
+          </ul>
+        </div>
       )}
     </section>
   );
@@ -623,6 +785,7 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
   const [backed, setBacked] = useState<string | null>(null);
   const [lots, setLots] = useState<EpochLot[]>([]);
   const [sheet, setSheet] = useState(false);
+  const [explain, setExplain] = useState(false);
   const epoch = epochs.find((item) => item.address === selected) ?? epochs[0] ?? null;
   const coins = epoch ? coinsOf(epoch, roster) : [];
   const stage: Stage | null = epoch ? stageOf(epoch, now) : null;
@@ -640,12 +803,26 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
     return () => window.clearInterval(timer);
   }, [loadLots]);
 
-  if (!epoch) {
+  const header = (
+    <header className="flex flex-wrap items-end justify-between gap-4">
+      <div className="flex flex-col gap-1">
+        <h1 className="text-xl font-semibold tracking-tight">Epoch</h1>
+        <p className="text-sm text-muted">Back one coin against $CRYPTO for four hours.</p>
+      </div>
+      <div className="flex items-center gap-2">
+        <ModeSwitch />
+        <span className="inline-flex h-9 items-center gap-2 rounded-pill bg-surface px-3 text-[11px] uppercase tracking-wider text-muted">
+          <span className="size-1.5 rounded-full bg-accent" /> Devnet
+        </span>
+      </div>
+    </header>
+  );
+
+  if (!epoch || !stage) {
     return (
       <div className="flex flex-col gap-4">
-        <ModeSwitch />
-        <h1 className="font-display text-title font-semibold tracking-tight">Epoch</h1>
-        <p className={`${panel} p-6 text-sm text-muted`}>No Epochs are scheduled yet.</p>
+        {header}
+        <p className={`${card} p-6 text-sm text-muted`}>No Epochs are scheduled yet.</p>
       </div>
     );
   }
@@ -662,58 +839,53 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
     onSent: () => void loadLots(),
   };
 
+  const enter = () => {
+    if (window.matchMedia("(min-width: 1024px)").matches) {
+      document.getElementById("epoch-entry")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      document.getElementById("epoch-stake")?.focus({ preventScroll: true });
+    } else {
+      setSheet(true);
+    }
+  };
+
   return (
-    <div className={`flex flex-col gap-6 ${open ? "pb-24 lg:pb-0" : ""}`}>
-      <section className="relative isolate overflow-hidden rounded-3xl border border-line bg-[#0b0b0c] p-6 sm:p-8">
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(90%_80%_at_50%_125%,rgba(250,130,70,0.7),rgba(242,98,46,0.22)_45%,transparent_78%)]" />
-        <div aria-hidden="true" className="pointer-events-none absolute -right-24 -top-24 -z-10 size-72 rounded-full bg-[radial-gradient(closest-side,rgba(124,58,237,0.22),transparent)]" />
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <ModeSwitch />
-          <span className="inline-flex items-center gap-2 rounded-pill border border-line px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-muted">
-            <span className="size-1.5 rounded-full bg-accent" /> Live on Solana devnet
-          </span>
-        </div>
-        <p className="mt-10 text-xs uppercase tracking-[0.25em] text-accent">Introducing Epochs</p>
-        <h1 className="mt-3 font-display text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl">
-          Back your analysis<span className="text-accent">.</span>
-        </h1>
-        <p className="mt-4 max-w-xl text-sm text-muted sm:text-base">Pick the coin you think will beat the rest of crypto over four hours. Your entry starts from its execution reference and settles at the fixed Epoch close.</p>
-        <div className="mt-8 flex flex-wrap gap-2 text-xs">
-          {["30 coins", "4-hour rounds", "One pot"].map((label) => (
-            <span key={label} className="rounded-pill bg-black/40 px-3.5 py-2 backdrop-blur">{label}</span>
-          ))}
-        </div>
-      </section>
+    <div className={`relative isolate flex flex-col gap-4 ${open ? "pb-24 lg:pb-0" : ""}`}>
+      <div aria-hidden="true" className="pointer-events-none absolute -top-24 left-1/3 -z-10 h-72 w-2/3 bg-[radial-gradient(closest-side,rgba(242,98,46,0.10),transparent)]" />
+      {header}
+      <Banner epoch={epoch} stage={stage} />
 
-      <ClockStrip epochs={epochs} epoch={epoch} now={now} onSelect={(address) => setSelected(address)} />
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+        <div className="lg:col-span-5"><ClockCard epochs={epochs} epoch={epoch} now={now} canEnter={open} onSelect={(address) => setSelected(address)} onEnter={enter} /></div>
+        <div className="lg:col-span-4"><PotCard epoch={epoch} now={now} decimals={decimals} /></div>
+        <div className="flex lg:col-span-3 [&>*]:flex-1"><PromoCard explaining={explain} onExplain={() => setExplain(!explain)} /></div>
+      </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
-        <div className="flex min-w-0 flex-col gap-6">
-          <Comparison epoch={epoch} coins={coins} now={now} backed={backed} canPick={open} onPick={(id) => setBacked(id)} />
-          <PayoutExplainer />
+      {explain && <PayoutExplainer onClose={() => setExplain(false)} />}
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+        <div className="flex min-w-0 flex-col gap-4 lg:col-span-8">
+          <MovesCard epoch={epoch} coins={coins} now={now} backed={backed} canPick={open} onPick={(id) => setBacked(id)} />
+          <MyEntries epochs={epochs} lots={lots} decimals={decimals} onSent={() => void loadLots()} />
         </div>
-        <div className="flex min-w-0 flex-col gap-6">
+        <div className="flex min-w-0 flex-col gap-4 lg:col-span-4">
           <div className="hidden lg:block">
             <EntryPanel {...entryProps} />
           </div>
-          <PotCard epoch={epoch} now={now} decimals={decimals} />
-          <MyEntries epochs={epochs} lots={lots} decimals={decimals} onSent={() => void loadLots()} />
+          <SettlementCard epoch={epoch} now={now} />
         </div>
       </div>
 
       {open && !sheet && (
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-bg/95 p-3 backdrop-blur lg:hidden">
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/[0.06] bg-bg/95 p-3 backdrop-blur lg:hidden">
           <button type="button" onClick={() => setSheet(true)} className={`${primary} cursor-pointer`}>
             <Plus size={16} aria-hidden="true" /> New entry{backed ? ` · ${backed}` : ""}
           </button>
         </div>
       )}
       {sheet && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-bg p-4 lg:hidden">
+        <div className="fixed inset-0 z-50 flex flex-col gap-4 overflow-y-auto bg-bg p-4 lg:hidden">
           <EntryPanel {...entryProps} onClose={() => setSheet(false)} />
-          <div className="mt-4">
-            <PayoutExplainer />
-          </div>
+          <PayoutExplainer />
         </div>
       )}
     </div>
