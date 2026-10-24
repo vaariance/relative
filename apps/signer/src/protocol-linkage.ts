@@ -5,6 +5,7 @@ import type { AdaptiveCoxLinkage, EpochLinkage, ProtocolLinkage, SolanaProgramBi
 import { checkCoxLinkage, type AccountFetcher } from "./cox-linkage.js";
 import { PolicyRejection } from "./policy.js";
 import type { PolicyTransaction } from "./solana.js";
+import { checkEpochPreparation, EPOCH_PREPARATION_NAMES } from "./epoch-preparation.js";
 const deny = (reason: string): never => { throw new PolicyRejection("TARGET_NOT_BOUND", reason); };
 const disc = (kind: string, name: string): Buffer => createHash("sha256").update(`${kind}:${name}`).digest().subarray(0, 8);
 const u64 = (value: bigint): Buffer => {
@@ -185,6 +186,9 @@ export async function checkProtocolLinkage(binding: SolanaProgramBinding, linkag
   const methodOffset = root[112] === 1 ? 145 : 113;
   if (root.length < methodOffset + 32 || root.subarray(methodOffset, methodOffset + 32).toString("hex") !== l.methodologyDigest)
     deny("wrong Epoch methodology");
+  const lifecycleVersion = root.length > methodOffset + 62 ? root[methodOffset + 61]! : 0;
+  const lifecycle = lifecycleVersion === 0 ? 1 : root[methodOffset + 62]!;
+  if (lifecycleVersion > 1 || lifecycle > 2) deny("unsupported Epoch lifecycle extension");
   interface StagedSnapshot { sequence: bigint; timestamp: bigint; benchmark: bigint; expected: number; prices: Buffer[]; sealed: boolean; allocated: number }
   const stagedSnapshots = new Map<string, StagedSnapshot>(), closedSnapshots = new Set<string>();
   const now = () => BigInt(Math.floor(Date.now() / 1000));
@@ -210,12 +214,28 @@ export async function checkProtocolLinkage(binding: SolanaProgramBinding, linkag
     }
     value.prices = combined;
   }
-  const names = ["publish_snapshot", "initialize_snapshot", "grow_snapshot", "append_prices", "seal_snapshot", "close_snapshot", "execute", "begin_close", "score", "allocate", "refund", "finalize_scores", "void_epoch"];
+  const names = ["publish_snapshot", "initialize_snapshot", "grow_snapshot", "append_prices", "seal_snapshot", "close_snapshot", "execute", "begin_close", "score", "allocate", "refund", "finalize_scores", "void_epoch", "finalize_empty", ...EPOCH_PREPARATION_NAMES];
   for (const [instructionIndex, instruction] of relevant.entries()) {
     const { bytes, at, count } = call(instruction);
     const name = names.find(value => bytes.subarray(0, 8).equals(disc("global", value)));
     if (!name)
       return deny("instruction is not Epoch runtime");
+    if (EPOCH_PREPARATION_NAMES.includes(name)) {
+      await checkEpochPreparation(program, l, name, bytes, Array.from({ length: count }, (_, index) => at(index)), root, fetch);
+      continue;
+    }
+    if (lifecycle !== 1 && !["refund", "close_snapshot", "finalize_empty"].includes(name)) deny("Epoch configuration is not active");
+    if (name === "finalize_empty") {
+      if (bytes.length !== 8 || count !== 4) return deny("invalid empty Epoch finalization");
+      same(at(0), config, "empty Epoch config");
+      const epoch = await account(at(1), "EpochAccount", 113), opens = epoch.readBigUInt64LE(40);
+      same(keyAt(epoch, 8), config, "empty Epoch account config");
+      same(at(1), pda(Buffer.from("epoch"), config.toBuffer(), u64(opens)), "empty Epoch PDA");
+      same(at(2), pda(Buffer.from("vault"), at(1).toBuffer()), "empty Epoch vault");
+      same(at(3), pda(Buffer.from("test-vault"), at(1).toBuffer()), "empty Epoch test vault");
+      if (opens % 14400n !== 0n || opens + 14400n > now()) return deny("empty Epoch has not closed");
+      continue;
+    }
     if (["initialize_snapshot", "grow_snapshot", "append_prices", "seal_snapshot"].includes(name)) {
       if (l.allowStagedSnapshots !== true || count !== 4) return deny("staged Epoch snapshots are not enabled or accounts mismatch");
       same(at(0), operator, "staged snapshot operator"); same(at(1), config, "staged snapshot config"); same(at(3), SystemProgram.programId, "staged snapshot system program");

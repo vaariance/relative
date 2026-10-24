@@ -40,6 +40,7 @@ export interface EpochLinkage {
   admin: string;
   operator: string;
   methodologyDigest: string;
+  registry?: { programId: string; assetRegistry: string; generation: string };
 }
 
 export type ProtocolLinkage = CoxLinkage | AdaptiveCoxLinkage | DynamicCoxLinkage | EpochLinkage;
@@ -159,6 +160,7 @@ export function loadSignerConfig(path: string): SignerConfig {
           } else if (l.kind === "epoch-v1") {
             if (l.allowStagedSnapshots !== undefined && typeof l.allowStagedSnapshots !== "boolean") fail(`${role} staged Epoch snapshots`);
             if (!INTEGER_PATTERN.test(l.configId) || BigInt(l.configId) > 18446744073709551615n || ![l.config,l.admin,l.operator].every(value => BASE58_PATTERN.test(value)) || !/^[0-9a-f]{64}$/.test(l.methodologyDigest)) fail(`${role} Epoch linkage`);
+            if (l.registry !== undefined && (!l.registry || ![l.registry.programId, l.registry.assetRegistry].every(value => typeof value === "string" && BASE58_PATTERN.test(value)) || typeof l.registry.generation !== "string" || !/^[0-9a-f]{64}$/.test(l.registry.generation) || /^0+$/.test(l.registry.generation))) fail(`${role} Epoch registry linkage`);
           } else fail(`${role} unknown protocol linkage`);
         }
         for (const discriminator of program.discriminators) if (!HEX_PATTERN.test(discriminator)) fail(`${role} discriminator`);

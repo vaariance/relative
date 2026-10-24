@@ -1,0 +1,77 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
+import { test } from "node:test";
+import { PublicKey, SystemProgram, TransactionMessage, VersionedTransaction, type TransactionInstruction } from "@solana/web3.js";
+import { checkProtocolLinkage } from "../src/protocol-linkage.js";
+import { universe } from "../src/dynamic-linkage.js";
+import type { ChainAccount } from "../src/cox-linkage.js";
+import type { DynamicCoxLinkage, EpochLinkage, SolanaProgramBinding } from "../src/config.js";
+
+const require = createRequire(new URL("../../../packages/cox-client/package.json", import.meta.url)), anchor = require("@coral-xyz/anchor");
+const { CoxInstructions } = require("./src/builders.ts"), { EpochInstructions } = require("./src/epoch.ts");
+const disc = (name: string) => createHash("sha256").update(`account:${name}`).digest().subarray(0, 8);
+const keyAt = (bytes: Buffer, offset: number) => new PublicKey(bytes.subarray(offset, offset + 32));
+function fixture(phase = "active") {
+  const input = JSON.parse(readFileSync(new URL(`../../../packages/cox/fixtures/generation/${phase}.json`, import.meta.url), "utf8")) as { programAddress: string; accounts: { name: string; address: string; owner: string; dataHex: string }[] };
+  const rows = new Map<string, ChainAccount>(input.accounts.map(row => [row.address, { owner: new PublicKey(row.owner), data: Buffer.from(row.dataHex, "hex") }]));
+  const named = (name: string) => {
+    const row = input.accounts.find(row => row.name === name)!;
+    return { key: new PublicKey(row.address), data: rows.get(row.address)!.data };
+  };
+  const pool = named("pool"), root = named("registry"), method = named("methodology"), registry = named("assetRegistry"), version = named("assetRegistryVersion");
+  const operator = keyAt(root.data, 43), admin = keyAt(root.data, 11);
+  const canonical = method.data.subarray(47, 47 + method.data.readUInt32LE(43)), manifest = universe(canonical);
+  const connection = { getAccountInfo: async () => null };
+  const program = new anchor.Program(JSON.parse(readFileSync(new URL("../../../packages/cox/idl/cox.json", import.meta.url), "utf8")), { connection });
+  const sdk = new CoxInstructions(program);
+  const linkage: DynamicCoxLinkage = { kind: "cox-dynamic-v1", poolId: pool.data.readBigUInt64LE(11).toString(), pool: pool.key.toBase58(), operator: operator.toBase58(), sourceMethodologyDigest: manifest.source.toString("hex") };
+  const fetch = async (keys: PublicKey[]) => keys.map(key => rows.get(key.toBase58()) ?? null);
+  const transaction = (instruction: TransactionInstruction) => new VersionedTransaction(new TransactionMessage({ payerKey: operator, recentBlockhash: SystemProgram.programId.toBase58(), instructions: [instruction] }).compileToV0Message());
+  const binding: SolanaProgramBinding = { programId: input.programAddress, discriminators: [] };
+  return { rows, named, pool, root, method, registry, version, operator, admin, manifest, sdk, linkage, fetch, transaction, binding };
+}
+test("fresh class-zero genesis and registry linkage accept compiler-produced accounts and reject archived generations", async () => {
+  const f = fixture();
+  assert.equal(f.manifest.schemaVersion, 2);
+  const generation = f.registry.data.subarray(11, 43), digest = f.version.data.subarray(107, 139);
+  await checkProtocolLinkage(f.binding, f.linkage, f.transaction(f.sdk.registerAssetRegistryVersion(f.operator, f.pool.key, generation, digest)), f.fetch);
+  const sealOffset = 47 + f.method.data.readUInt32LE(43);
+  f.method.data[sealOffset] = 0;
+  await checkProtocolLinkage(f.binding, f.linkage, f.transaction(f.sdk.sealGenesisMethodology(f.operator, f.method.key)), f.fetch);
+  f.method.data[sealOffset] = 1;
+  await assert.rejects(checkProtocolLinkage(f.binding, f.linkage, f.transaction(f.sdk.sealGenesisMethodology(f.operator, f.method.key)), f.fetch), /fresh genesis/);
+  const old = fixture("archived");
+  await assert.rejects(checkProtocolLinkage(old.binding, old.linkage, old.transaction(old.sdk.registerAssetRegistryVersion(old.operator, old.pool.key, old.registry.data.subarray(11, 43), old.version.data.subarray(107, 139))), old.fetch), /archived/);
+});
+test("sole operator can prepare a registry-bound round without administrator authority", async () => {
+  const f = fixture(), program = new anchor.Program(JSON.parse(readFileSync(new URL("../../../packages/cox-epoch/idl/epoch.json", import.meta.url), "utf8")), { connection: {} });
+  const sdk = new EpochInstructions(program), config = sdk.pdas.config(f.admin, 77n), mint = keyAt(f.pool.data, 83);
+  const root = Buffer.alloc(256); disc("PoolConfig").copy(root); f.admin.toBuffer().copy(root, 8); root.writeBigUInt64LE(77n, 40);
+  f.operator.toBuffer().copy(root, 48); mint.toBuffer().copy(root, 80); f.manifest.source.copy(root, 113);
+  root[174] = 1; root[175] = 0; f.registry.key.toBuffer().copy(root, 176);
+  f.rows.set(config.toBase58(), { owner: program.programId, data: root });
+  const linkage: EpochLinkage = { kind: "epoch-v1", configId: "77", config: config.toBase58(), admin: f.admin.toBase58(), operator: f.operator.toBase58(), methodologyDigest: f.manifest.source.toString("hex"), registry: { programId: f.binding.programId, assetRegistry: f.registry.key.toBase58(), generation: f.registry.data.subarray(11, 43).toString("hex") } };
+  const binding = { programId: program.programId.toBase58(), discriminators: [] };
+  const opening = BigInt(Math.floor(Date.now() / 1000 / 14400)) * 14400n, selection = { config, opensAt: opening };
+  const registryBinding = { assetRegistry: f.registry.key, registryVersion: f.version.key, methodology: f.method.key };
+  const initialize = sdk.initializeCurrentEpoch(f.operator, mint, selection, registryBinding);
+  await checkProtocolLinkage(binding, linkage, f.transaction(initialize), f.fetch);
+  await assert.rejects(checkProtocolLinkage(binding, { ...linkage, registry: undefined }, f.transaction(initialize), f.fetch), /not enabled/);
+  f.registry.data.writeBigUInt64LE(opening, 179);
+  await assert.rejects(checkProtocolLinkage(binding, linkage, f.transaction(initialize), f.fetch), /pending activation/);
+  f.registry.data.writeBigUInt64LE(0n, 179);
+  f.version.data.writeBigUInt64LE(opening, 179);
+  await assert.rejects(checkProtocolLinkage(binding, linkage, f.transaction(initialize), f.fetch), /interval/);
+  f.version.data.writeBigUInt64LE(0n, 179);
+  const epoch = sdk.pdas.epoch(selection), bytes = Buffer.alloc(2048);
+  disc("EpochAccount").copy(bytes); config.toBuffer().copy(bytes, 8); bytes.writeBigUInt64LE(opening, 40); bytes[118] = 1; f.version.key.toBuffer().copy(bytes, 119);
+  f.rows.set(epoch.toBase58(), { owner: program.programId, data: bytes });
+  await checkProtocolLinkage(binding, linkage, f.transaction(sdk.growCurrentEpoch(f.operator, selection, registryBinding, 8192)), f.fetch);
+  await checkProtocolLinkage(binding, linkage, f.transaction(sdk.copyRegistryAssets(f.operator, selection, registryBinding, 0, 8)), f.fetch);
+  await assert.rejects(checkProtocolLinkage(binding, linkage, f.transaction(sdk.copyRegistryAssets(f.operator, selection, registryBinding, 1, 8)), f.fetch), /canonical Epoch page/);
+  await assert.rejects(checkProtocolLinkage(binding, linkage, f.transaction(sdk.setConfigLifecycle(f.admin, config, "active")), f.fetch), /sole operator|not Epoch runtime/);
+  root[175] = 2;
+  await assert.rejects(checkProtocolLinkage(binding, linkage, f.transaction(initialize), f.fetch), /not available/);
+});

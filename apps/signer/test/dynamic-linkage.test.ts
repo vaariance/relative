@@ -100,7 +100,7 @@ test("dynamic lineage account order is checked against generated contract ABI", 
     register_scheduled_methodology: ["runtime", "registry", "pool", "methodology", "schedule", "next_methodology", "system_program"],
     upload_scheduled_methodology: ["runtime", "registry", "pool", "methodology", "schedule", "next_methodology"],
     seal_scheduled_methodology: ["runtime", "registry", "pool", "methodology", "schedule", "next_methodology"],
-    activate_universe: ["runtime", "registry", "pool", "methodology", "next_methodology", "vault", "schedule", "test_vault"],
+    activate_universe: ["runtime", "registry", "pool", "methodology", "next_methodology", "vault", "schedule", "test_vault", "asset_registry", "next_registry_version", "previous_registry_version"],
     prepare_dynamic_revaluation: ["runtime", "registry", "pool", "methodology", "batch"], finish_dynamic_revaluation: ["runtime", "registry", "pool", "methodology", "batch"],
   };
   for (const [name, accounts] of Object.entries(expected)) {
