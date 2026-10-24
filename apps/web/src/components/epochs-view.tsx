@@ -6,6 +6,7 @@ import { PublicKey } from "@solana/web3.js";
 import { Activity, ArrowLeft, BarChart3, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Clock, Coins, LayoutList, Lock, Plus, Timer, X } from "lucide-react";
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { walletEpochLots } from "@/app/actions";
 import { parseScaled } from "@/lib/amounts";
 import { COLLATERAL } from "@/lib/config";
@@ -281,7 +282,7 @@ function PotCard({ epoch, now, decimals }: { epoch: Epoch; now: number; decimals
   );
 }
 
-function PromoCard({ onExplain, explaining }: { onExplain: () => void; explaining: boolean }) {
+function PromoCard({ onExplain }: { onExplain: () => void }) {
   return (
     <section className="relative isolate flex min-w-0 flex-col justify-between gap-5 overflow-hidden rounded-2xl p-5">
       <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[radial-gradient(120%_120%_at_0%_0%,#f2622e_0%,#b23a74_45%,#3b1d6e_100%)] opacity-90" />
@@ -291,8 +292,8 @@ function PromoCard({ onExplain, explaining }: { onExplain: () => void; explainin
         <p className="text-xs leading-relaxed text-white/80">Every entry backs one coin against the other 29. At the close, the pot is shared by score: your coin's share of the basket's gains, weighted by your net stake.</p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={onExplain} aria-expanded={explaining} className="h-9 cursor-pointer rounded-pill bg-white px-4 text-sm font-medium text-black transition-opacity duration-150 hover:opacity-90">
-          {explaining ? "Hide payouts" : "How payouts work"}
+        <button type="button" onClick={onExplain} aria-haspopup="dialog" className="h-9 cursor-pointer rounded-pill bg-white px-4 text-sm font-medium text-black transition-opacity duration-150 hover:opacity-90">
+          How payouts work
         </button>
         <span className="inline-flex h-9 items-center rounded-pill bg-white/15 px-4 text-sm text-white backdrop-blur">30 coins · 4 hours</span>
       </div>
@@ -300,31 +301,79 @@ function PromoCard({ onExplain, explaining }: { onExplain: () => void; explainin
   );
 }
 
-function PayoutExplainer({ onClose }: { onClose?: () => void }) {
-  return (
-    <section className={`${card} flex flex-col gap-4 p-5`}>
-      <CardHead icon={<CircleAlert size={14} aria-hidden="true" />} title="How your payout works">
-        {onClose && (
-          <button type="button" onClick={onClose} aria-label="Close" className="grid size-8 cursor-pointer place-items-center rounded-full text-muted hover:bg-surface-2 hover:text-ink">
+const PAYOUT_STEPS = [
+  { title: "Back a coin", body: "Pick one coin. The other 29 are your comparison basket.", formula: "Move = closing ref / entry ref − 1" },
+  { title: "Get a score", body: "Your coin's rise as a share of all the basket's rises. Falls count as zero.", formula: "Score = your coin's rise / all rises" },
+  { title: "Weight it", body: "Your score is multiplied by your net stake.", formula: "Weight = net stake × score" },
+  { title: "Share the pot", body: "Every entry takes the pot in proportion to its weight.", formula: "Payout = pot × weight / total weight" },
+];
+
+function PayoutModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => event.key === "Escape" && onClose();
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", key);
+    return () => {
+      document.body.style.overflow = overflow;
+      window.removeEventListener("keydown", key);
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-end justify-center p-0 sm:items-center sm:p-6" onClick={onClose}>
+      <div aria-hidden="true" className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="payout-title"
+        onClick={(event) => event.stopPropagation()}
+        className="relative isolate flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl border border-white/[0.08] bg-surface shadow-[0_30px_80px_rgba(0,0,0,0.6)] sm:rounded-3xl"
+      >
+        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-56 bg-[radial-gradient(80%_100%_at_20%_0%,rgba(242,98,46,0.35),transparent_70%),radial-gradient(60%_100%_at_100%_0%,rgba(124,58,237,0.25),transparent_70%)]" />
+        <header className="flex items-start justify-between gap-4 px-6 pb-2 pt-6">
+          <div className="flex flex-col gap-2">
+            <span className="text-[11px] uppercase tracking-[0.2em] text-accent">Epoch payouts</span>
+            <h2 id="payout-title" className="text-2xl font-semibold tracking-tight">How your payout works</h2>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="grid size-9 shrink-0 cursor-pointer place-items-center rounded-full bg-white/5 text-muted transition-colors duration-150 hover:bg-white/10 hover:text-ink">
             <X size={16} aria-hidden="true" />
           </button>
-        )}
-      </CardHead>
-      <div className="grid gap-4 text-xs text-muted lg:grid-cols-2">
-        <div className="flex flex-col gap-3">
-          <p className="text-sm text-ink">Your backed asset&apos;s positive relative move is compared with all positive relative moves in your basket. Your score is weighted by your net stake, and the shared pot is split by those weights across all entries.</p>
-          <pre className="num overflow-x-auto rounded-xl bg-bg/70 p-3 text-[11px] leading-5 text-ink">{`Member move = closing reference / entry reference − 1
-Score       = positive backed-asset move / sum of positive basket moves
-Weight      = net stake × score
-Payout      = available pot × entry weight / total entry weight`}</pre>
+        </header>
+
+        <div className="flex flex-col gap-6 overflow-y-auto px-6 pb-6 pt-4">
+          <ol className="grid gap-3 sm:grid-cols-2">
+            {PAYOUT_STEPS.map((step, index) => (
+              <li key={step.title} className="flex flex-col gap-2 rounded-2xl border border-white/[0.06] bg-bg/60 p-4">
+                <span className="flex items-center gap-2.5">
+                  <span className={`grid size-6 place-items-center rounded-full text-[11px] font-semibold text-white ${gradient}`}>{index + 1}</span>
+                  <span className="text-sm font-medium">{step.title}</span>
+                </span>
+                <p className="text-xs leading-relaxed text-muted">{step.body}</p>
+                <code className="num mt-auto rounded-lg bg-white/[0.04] px-2.5 py-1.5 text-[11px] text-ink">{step.formula}</code>
+              </li>
+            ))}
+          </ol>
+
+          <div className="flex flex-col gap-3 rounded-2xl border border-white/[0.06] bg-bg/60 p-4">
+            <span className="text-[11px] uppercase tracking-wider text-muted">Example</span>
+            <p className="text-xs leading-relaxed text-muted">Two 100 {COLLATERAL.symbol} entries, each with a net stake of 99.98. Scores of 10% and 30% split the 199.96 pot 25% / 75%.</p>
+            <div className="flex h-9 overflow-hidden rounded-xl text-[11px] font-medium">
+              <span className="flex w-1/4 items-center justify-center bg-surface-2 text-muted">49.99</span>
+              <span className={`flex w-3/4 items-center justify-center text-white ${gradient}`}>149.97</span>
+            </div>
+            <p className="text-xs text-muted">The first entry rose against $CRYPTO and still lost money.</p>
+          </div>
+
+          <ul className="flex flex-col gap-2 text-xs text-muted">
+            <li className="flex gap-2"><CircleAlert size={13} aria-hidden="true" className="mt-0.5 shrink-0 text-accent" />A score is not a win probability or your share of the pot. Other entries&apos; stakes, entry times and scores decide the money, and several entries can be paid.</li>
+            <li className="flex gap-2"><Check size={13} aria-hidden="true" className="mt-0.5 shrink-0 text-up" />If every score is zero, every entry is refunded in full, held fee included.</li>
+            <li className="flex gap-2"><Lock size={13} aria-hidden="true" className="mt-0.5 shrink-0 text-muted" />These formulas explain the rules. The protocol decides the actual scores, rounding and payouts.</li>
+          </ul>
         </div>
-        <div className="flex flex-col gap-3">
-          <p>The score is zero when no basket member rose. Negative moves add nothing to the denominator. A score is not a win probability and not your share of the pot: other entries&apos; stakes, baskets, entry times and scores decide the money. Several entries can be paid.</p>
-          <p>Example: two 100 {COLLATERAL.symbol} entries have net stakes of 99.98 each. Scores of 10% and 30% split the 199.96 pot 25% / 75%: payouts of 49.99 and 149.97. The first entry rose against $CRYPTO and still lost money.</p>
-          <p>If every score is zero, every entry is refunded in full, held fee included. These formulas explain the rules; the protocol decides the actual scores, rounding and payouts.</p>
-        </div>
-      </div>
-    </section>
+      </section>
+    </div>,
+    document.body,
   );
 }
 
@@ -786,6 +835,7 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
   const [lots, setLots] = useState<EpochLot[]>([]);
   const [sheet, setSheet] = useState(false);
   const [explain, setExplain] = useState(false);
+  const closeExplain = useCallback(() => setExplain(false), []);
   const epoch = epochs.find((item) => item.address === selected) ?? epochs[0] ?? null;
   const coins = epoch ? coinsOf(epoch, roster) : [];
   const stage: Stage | null = epoch ? stageOf(epoch, now) : null;
@@ -857,10 +907,9 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         <div className="lg:col-span-5"><ClockCard epochs={epochs} epoch={epoch} now={now} canEnter={open} onSelect={(address) => setSelected(address)} onEnter={enter} /></div>
         <div className="lg:col-span-4"><PotCard epoch={epoch} now={now} decimals={decimals} /></div>
-        <div className="flex lg:col-span-3 [&>*]:flex-1"><PromoCard explaining={explain} onExplain={() => setExplain(!explain)} /></div>
+        <div className="flex lg:col-span-3 [&>*]:flex-1"><PromoCard onExplain={() => setExplain(true)} /></div>
       </div>
 
-      {explain && <PayoutExplainer onClose={() => setExplain(false)} />}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         <div className="flex min-w-0 flex-col gap-4 lg:col-span-8">
@@ -885,9 +934,10 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
       {sheet && (
         <div className="fixed inset-0 z-50 flex flex-col gap-4 overflow-y-auto bg-bg p-4 lg:hidden">
           <EntryPanel {...entryProps} onClose={() => setSheet(false)} />
-          <PayoutExplainer />
+          <button type="button" onClick={() => setExplain(true)} className="mx-auto cursor-pointer text-xs text-accent underline-offset-4 hover:underline">How payouts work</button>
         </div>
       )}
+      {explain && <PayoutModal onClose={closeExplain} />}
     </div>
   );
 }
