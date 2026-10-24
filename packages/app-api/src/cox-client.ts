@@ -131,7 +131,11 @@ export function createCoxApiClient(options: CoxApiClientOptions) {
       if (!OWNER_PATTERN.test(owner)) throw new CoxApiError("INVALID_REQUEST", "invalid owner", 0);
       return get<EpochLot[]>(`epochs/${opensAt}/lots?owner=${owner}`);
     },
-    buildPreparePosition: (input: PreparePositionInput) => post<UnsignedTransaction>("transactions/prepare-position", input),
+    epochHistory: (opensAt: number, step: 60 | 300 = 60) => {
+      if (!Number.isSafeInteger(opensAt) || opensAt <= 0) throw new CoxApiError("INVALID_REQUEST", "invalid Epoch opening time", 0);
+      return get<PreviewHistory>(`epochs/${opensAt}/history?step=${step}`);
+    },
+    buildPreparePosition:(input: PreparePositionInput) => post<UnsignedTransaction>("transactions/prepare-position", input),
     buildEpochEntry: (input: EpochEntryInput) => post<UnsignedTransaction>("transactions/epoch-entry", input),
     buildEpochWithdraw: (input: EpochWithdrawInput) => post<UnsignedTransaction>("transactions/epoch-withdraw", input),
     buildEpochRefund: (input: EpochRefundInput) => post<UnsignedTransaction>("transactions/epoch-refund", input),

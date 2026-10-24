@@ -234,6 +234,79 @@ describe("preview history", () => {
     const bad = await fetch(`${base}/v1/preview/history?from=${T - 60}&to=${T}&step=7`);
     expect(bad.status).toBe(400);
   });
+
+  type PreviewHistoryOptionsEarlier = (digest: string) => Promise<PreviewIdentity | null>;
+  const NEXT = "cd".repeat(32);
+  const GROWN: PreviewIdentity = { ...IDENTITY, methodologyDigest: NEXT, assets: ["BTC", "ETH", "LIT"], classes: ["BTC", "ETH", "CRYPTO", "LIT"] };
+  const grown = (timestamp: number) =>
+    record(timestamp, {
+      methodologyDigest: NEXT,
+      assets: [...(record(timestamp).assets as unknown[]), { classId: 3, assetId: "LIT", priceE8: "150000000", reference: "100000000000000" }],
+      basicProjection: null,
+    });
+
+  async function acrossChange(earlier: PreviewHistoryOptionsEarlier) {
+    const store = new MemoryStore();
+    store.put(H + 30, withBenchmark(H + 30));
+    store.put(H + 90, withBenchmark(H + 90));
+    store.put(H + 150, grown(H + 150));
+    const errors: unknown[] = [];
+    const history = new PreviewHistory({ store, identity: GROWN, earlier, now: () => H + 600, onError: (error) => errors.push(error) });
+    await history.backfill();
+    return { history, errors };
+  }
+
+  it("keeps records from an earlier methodology and serves them only where every asset is known", async () => {
+    const loaded: string[] = [];
+    const { history, errors } = await acrossChange(async (digest) => {
+      loaded.push(digest);
+      return digest === METHODOLOGY ? IDENTITY : null;
+    });
+    expect(errors).toEqual([]);
+    expect(loaded).toEqual([METHODOLOGY]);
+    expect(history.query(H, H + 180, 60).data.points.map((p) => p.timestamp)).toEqual([H + 150]);
+    const epoch = history.window(H, H + 180, 60, ["ETH", "BTC"]).data;
+    expect(epoch.assets).toEqual(["ETH", "BTC"]);
+    expect(epoch.points.map((p) => p.timestamp)).toEqual([H + 30, H + 90, H + 150]);
+    expect(epoch.points[0]!.prices).toEqual(["237197465112", "8117531545582"]);
+    expect(history.window(H, H + 180, 60, ["BTC", "LIT"]).data.points.map((p) => p.timestamp)).toEqual([H + 150]);
+  });
+
+  it("skips records whose methodology cannot be loaded and asks for it once", async () => {
+    let calls = 0;
+    const { history, errors } = await acrossChange(async () => {
+      calls += 1;
+      throw new Error("rpc down");
+    });
+    expect(calls).toBe(1);
+    expect(errors).toHaveLength(2);
+    expect(errors[0]).toBeInstanceOf(PreviewInvalid);
+    expect(history.window(H, H + 180, 60, ["BTC", "ETH"]).data.points.map((p) => p.timestamp)).toEqual([H + 150]);
+  });
+
+  it("serves an Epoch's history over its own window and basket", async () => {
+    const opens = H;
+    const closes = H + 14_400;
+    const { history } = await acrossChange(async (digest) => (digest === METHODOLOGY ? IDENTITY : null));
+    const epoch = { opensAt: opens, closesAt: closes, universe: [{ id: 0, assetId: "BTC", originPrice: "1" }, { id: 1, assetId: "ETH", originPrice: "1" }] };
+    const epochs = { epoch: async (at: number) => (at === opens ? epoch : null) } as unknown as NonNullable<Parameters<typeof createCoxApiServer>[0]["epochs"]>;
+    let now = H + 600;
+    const server = createCoxApiServer({ source: new PreviewSource(), previewHistory: history, epochs, classes: CLASSES, now: () => now });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const open = await fetch(`${base}/v1/epochs/${opens}/history`);
+    expect(open.headers.get("cache-control")).toBe("no-store");
+    const body = (await open.json()) as { data: { assets: string[]; from: number; to: number; points: { timestamp: number }[] } };
+    expect(body.data.assets).toEqual(["BTC", "ETH"]);
+    expect([body.data.from, body.data.to]).toEqual([opens, H + 600]);
+    expect(body.data.points.map((p) => p.timestamp)).toEqual([H + 30, H + 90, H + 150]);
+    expect((await fetch(`${base}/v1/epochs/${opens}/history?step=1`)).status).toBe(400);
+    expect((await fetch(`${base}/v1/epochs/${opens + 60}/history`)).status).toBe(404);
+    now = opens - 10;
+    const early = (await (await fetch(`${base}/v1/epochs/${opens}/history`)).json()) as { data: { points: unknown[] } };
+    expect(early.data.points).toEqual([]);
+  });
 });
 
 describe("preview portfolio", () => {

@@ -364,6 +364,26 @@ export function createCoxApiServer(options: CoxApiServerOptions): Server {
       if (!found) throw new ApiError(404, "UNKNOWN_EPOCH", `no Epoch opens at ${b}`);
       return send(res, found);
     }
+    if (path.length === 4 && a === "epochs" && c === "history") {
+      const history = options.previewHistory;
+      if (!history) throw new ApiError(409, "NOT_CONFIGURED", "this deployment serves no preview history");
+      const step = Number(url.searchParams.get("step") ?? "60");
+      if (step !== 60 && step !== 300) throw new ApiError(400, "INVALID_REQUEST", "step must be 60 or 300");
+      const epoch = await epochSource().epoch(opensAt(b));
+      if (!epoch) throw new ApiError(404, "UNKNOWN_EPOCH", `no Epoch opens at ${b}`);
+      const assets = epoch.universe.map((asset) => asset.assetId);
+      const to = Math.min(epoch.closesAt, Math.floor(now() / step) * step);
+      const empty = { data: { assets, step, from: epoch.opensAt, to: epoch.opensAt, points: [] }, complete: false };
+      let result: ReturnType<PreviewHistory["window"]>;
+      try {
+        result = to > epoch.opensAt ? history.window(epoch.opensAt, to, step, assets) : empty;
+      } catch (error) {
+        if (error instanceof HistoryRangeError) throw new ApiError(410, "HISTORY_EXPIRED", error.message);
+        throw error;
+      }
+      const body = { schemaVersion: COX_APP_API_SCHEMA_VERSION, deployment: await source.deployment(), data: result.data };
+      return write(res, 200, body, result.complete && to === epoch.closesAt ? "public, max-age=86400, immutable" : "no-store");
+    }
     if (path.length === 4 && a === "epochs" && c === "lots") {
       const wallet = url.searchParams.get("owner");
       if (wallet === null || !OWNER_PATTERN.test(wallet)) throw new ApiError(400, "INVALID_REQUEST", "owner is required");

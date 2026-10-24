@@ -80,6 +80,7 @@ All fixed-point quantities are decimal integer strings. Prices use USD × 10⁸;
 | `GET /v1/transactions/:signature` | Track a transaction submitted through this API |
 | `GET /v1/epochs` | Epoch configuration, the two most recent finished Epochs and up to six current or future ones |
 | `GET /v1/epochs/:opensAt` | One Epoch by its opening time: phase, universe, lot counts, ledger and vault coverage |
+| `GET /v1/epochs/:opensAt/history?step=` | Preview points over the Epoch window for its own basket; see Live previews |
 | `GET /v1/epochs/:opensAt/lots?owner=` | A wallet's lots in that Epoch: stake, fee, basket, backed asset, execution, score and claimable amount |
 | `POST /v1/transactions/epoch-entry` | Build with `{ owner, opensAt, grossStake, basket, backedAsset, collateralMint? }`; `basket` lists all 30 universe tickers once |
 | `POST /v1/transactions/epoch-withdraw` | Build with `{ owner, opensAt, nonce, amount?, collateralMint? }`; omit `amount` to withdraw the whole claim |
@@ -167,6 +168,8 @@ The publisher evaluates the methodology every second but writes to the chain onl
 | `GET /v1/preview/portfolio?owner=` | Each position's `estimatedValue` in collateral base units: its units times the projected class backing divided by the projected class units, rounded down |
 
 `GET /v1/preview/history` returns `{ assets, step, from, to, points }`, where each point is `{ end, timestamp, benchmark, prices, references }` with values in roster order at the record's scales. A point is the last record at or before the end of its step, and a step without a record is left out, never filled. `step` is 1, 60, 300 or 3600 seconds, with at most 1,440 steps per response; one-second steps cover the last hour and longer steps the last seven days.
+
+`GET /v1/epochs/:opensAt/history` returns the same shape for one Epoch. `from` is `opensAt`, `to` is `closesAt` (or the current step while the Epoch is open), `assets` is the Epoch's own basket in universe order, and `step` is 60 (default) or 300. Points come from previews of every methodology the pool has used, so an Epoch that spans an added asset keeps its whole history; a point is left out only when it lacks one of the basket's assets. Values are the previews' estimates on base 100 from the permanent origin, not rebased to the Epoch. History older than seven days answers 410 `HISTORY_EXPIRED`.
 
 - **Where the history comes from:** each process keeps its own history in memory, every second for an hour and the last record of each minute for seven days, from the records it already reads.
 - **After a restart:** it fills the past seven days from the bucket once, in the background.
