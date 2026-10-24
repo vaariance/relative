@@ -128,14 +128,18 @@ impl Archive {
         address: Address,
         bytes: &[u8],
     ) -> Result<(cox::Publication, [u8; 32]), Error> {
-        if owner != self.program || address != self.address || bytes.len() != 8192 {
+        if owner != self.program
+            || address != self.address
+            || !(8192..=cox::dynamic_batch_space(256)).contains(&bytes.len())
+            || bytes.len() % 8192 != 0
+        {
             return Err(Error::Identity);
         }
         let publication = cox::Publication::try_deserialize(&mut bytes.as_ref())
             .map_err(|_| Error::InvalidAccount)?;
         let (_, bump) =
             Address::find_program_address(&[b"publication", self.pool.as_ref()], &self.program);
-        if !matches!(publication.schema_version, 2 | 3)
+        if !matches!(publication.schema_version, 2 | 3 | 4)
             || publication.bump != bump
             || publication.pool.to_bytes() != self.pool.to_bytes()
             || Sha256::digest(&publication.state_preimage).as_slice() != publication.state_digest
@@ -147,6 +151,7 @@ impl Archive {
         let fees = match state.domain.as_str() {
             "COX/STATE/V1" if publication.schema_version == 2 => false,
             "COX/STATE/V2" | "COX/STATE/ADAPTIVE/V1" if publication.schema_version == 3 => true,
+            "COX/STATE/DYNAMIC/V1" if publication.schema_version == 4 => true,
             _ => return Err(Error::State),
         };
         if fees {
@@ -162,7 +167,10 @@ impl Archive {
                 return Err(Error::State);
             }
         }
-        if state.domain == "COX/STATE/ADAPTIVE/V1" {
+        if matches!(
+            state.domain.as_str(),
+            "COX/STATE/ADAPTIVE/V1" | "COX/STATE/DYNAMIC/V1"
+        ) {
             let _ = <u64 as AnchorDeserialize>::deserialize(&mut rest).map_err(|_| Error::State)?;
             let mint = <Option<[u8; 32]> as AnchorDeserialize>::deserialize(&mut rest)
                 .map_err(|_| Error::State)?;
@@ -170,6 +178,13 @@ impl Archive {
                 return Err(Error::State);
             }
         }
+        let dynamic = publication.schema_version == 4;
+        let valid_prices = if dynamic { 30..=255 } else { 2..=30 };
+        let expected_bytes = if dynamic {
+            cox::dynamic_batch_space(state.classes.len())
+        } else {
+            8192
+        };
         if !rest.is_empty()
             || state.program != self.program.to_bytes()
             || state.pool != self.pool.to_bytes()
@@ -177,8 +192,8 @@ impl Archive {
             || state.batch != publication.batch
             || state.manifest != publication.manifest_digest
             || state.snapshot != publication.snapshot_digest
-            || state.prices.len() < 2
-            || state.prices.len() > 30
+            || !valid_prices.contains(&state.prices.len())
+            || bytes.len() != expected_bytes
             || state.references.len() != state.prices.len() + 1
             || state.classes.len() != state.prices.len() + 1
             || state.prices.len() != publication.prices.len()
@@ -403,6 +418,177 @@ mod tests {
             Address::new_from_array([1; 32]),
             Address::new_from_array([2; 32]),
         )
+    }
+    fn dynamic_fixture(archive: &Archive, assets: usize) -> Vec<u8> {
+        use anchor_lang::Discriminator;
+        let mut raw = vec![0; 8192];
+        raw[..8].copy_from_slice(cox::Pool::DISCRIMINATOR);
+        let mut pool = cox::Pool::try_deserialize(&mut raw.as_slice()).unwrap();
+        raw[..8].copy_from_slice(cox::Batch::DISCRIMINATOR);
+        let mut batch = cox::Batch::try_deserialize(&mut raw.as_slice()).unwrap();
+        pool.schema_version = 5;
+        pool.trading_opens_at = 14_400;
+        pool.test_collateral_mint = Some(Pubkey::new_from_array([7; 32]));
+        pool.last_prices = (1..=assets).map(|price| price as u64).collect();
+        pool.references = vec![100; assets + 1];
+        pool.classes = vec![cox::Class::default(); assets + 1];
+        batch.cutoff = 100;
+        batch.snapshot_digest = [5; 32];
+        let preimage = cox::state_bytes(
+            &Pubkey::new_from_array(archive.program.to_bytes()),
+            &Pubkey::new_from_array(archive.pool.to_bytes()),
+            &pool,
+            &pool.classes,
+            &batch,
+            &[4; 32],
+        )
+        .unwrap();
+        let publication = cox::Publication {
+            schema_version: 4,
+            bump: Address::find_program_address(
+                &[b"publication", archive.pool.as_ref()],
+                &archive.program,
+            )
+            .1,
+            pool: Pubkey::new_from_array(archive.pool.to_bytes()),
+            sequence: 0,
+            batch: 0,
+            state_digest: Sha256::digest(&preimage).into(),
+            snapshot_digest: [5; 32],
+            manifest_digest: [4; 32],
+            state_preimage: preimage,
+            prices: pool
+                .last_prices
+                .iter()
+                .map(|price| cox::PriceWire {
+                    price_e8: *price,
+                    venue: 3,
+                    step: 0,
+                    candle_start: 100,
+                    trade_age_minutes: 0,
+                })
+                .collect(),
+            committed_at: 120,
+        };
+        encode_publication(&publication, cox::dynamic_batch_space(assets + 1))
+    }
+    fn encode_publication(publication: &cox::Publication, allocated: usize) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        publication.try_serialize(&mut bytes).unwrap();
+        assert!(bytes.len() <= allocated);
+        bytes.resize(allocated, 0);
+        bytes
+    }
+    #[test]
+    fn dynamic_protocol_publications_archive_migration_inclusion_and_maximum_capacity() {
+        for assets in [30, 31, 32, 255] {
+            let path = directory();
+            let archive = archive(&path);
+            let bytes = dynamic_fixture(&archive, assets);
+            let (publication, previous) = archive
+                .checked(archive.program, archive.address, &bytes)
+                .unwrap();
+            assert_eq!(publication.schema_version, 4);
+            assert_eq!(publication.prices.len(), assets);
+            assert_eq!(previous, [0; 32]);
+            assert_eq!(bytes.len(), cox::dynamic_batch_space(assets + 1));
+            archive
+                .preserve(
+                    archive.program,
+                    archive.address,
+                    &bytes,
+                    42,
+                    0,
+                    publication.state_digest,
+                )
+                .unwrap();
+            assert_eq!(
+                STANDARD
+                    .decode(archive.read(0).unwrap().unwrap().account_base64)
+                    .unwrap(),
+                bytes
+            );
+            fs::remove_dir_all(path).unwrap();
+        }
+    }
+    #[test]
+    fn dynamic_archives_reject_wrong_domain_capacity_fees_tail_prices_and_identity() {
+        let path = directory();
+        let archive = archive(&path);
+        let bytes = dynamic_fixture(&archive, 31);
+        let original = cox::Publication::try_deserialize(&mut bytes.as_slice()).unwrap();
+        let check = |publication: &cox::Publication, size| {
+            archive
+                .checked(
+                    archive.program,
+                    archive.address,
+                    &encode_publication(publication, size),
+                )
+                .map(|_| ())
+        };
+        let mut wrong = original.clone();
+        wrong.schema_version = 3;
+        assert_eq!(check(&wrong, bytes.len()), Err(Error::State));
+        let mut wrong = original.clone();
+        wrong.prices.pop();
+        assert_eq!(check(&wrong, bytes.len()), Err(Error::State));
+        let mut wrong = original.clone();
+        wrong.state_preimage.pop();
+        wrong.state_digest = Sha256::digest(&wrong.state_preimage).into();
+        assert_eq!(check(&wrong, bytes.len()), Err(Error::State));
+        let mut wrong = original.clone();
+        wrong.state_preimage.push(0);
+        wrong.state_digest = Sha256::digest(&wrong.state_preimage).into();
+        assert_eq!(check(&wrong, bytes.len()), Err(Error::State));
+        let mut wrong = original.clone();
+        let policy_end = wrong.state_preimage.len() - 41;
+        wrong.state_preimage[policy_end - 1] ^= 1;
+        wrong.state_digest = Sha256::digest(&wrong.state_preimage).into();
+        assert_eq!(check(&wrong, bytes.len()), Err(Error::State));
+        let mut wrong = original.clone();
+        let end = wrong.state_preimage.len();
+        wrong.state_preimage[end - 32..].fill(0);
+        wrong.state_digest = Sha256::digest(&wrong.state_preimage).into();
+        assert_eq!(check(&wrong, bytes.len()), Err(Error::State));
+        assert_eq!(check(&original, bytes.len() + 8192), Err(Error::State));
+        let oversized = dynamic_fixture(&archive, 256);
+        assert_eq!(
+            archive
+                .checked(archive.program, archive.address, &oversized)
+                .map(|_| ()),
+            Err(Error::State)
+        );
+        assert_eq!(
+            archive
+                .checked(archive.pool, archive.address, &bytes)
+                .map(|_| ()),
+            Err(Error::Identity)
+        );
+        assert_eq!(
+            archive
+                .checked(archive.program, archive.pool, &bytes)
+                .map(|_| ()),
+            Err(Error::Identity)
+        );
+    }
+    #[test]
+    fn captured_live_dynamic_publication_is_verified_when_explicitly_supplied() {
+        let Ok(path) = std::env::var("COX_LIVE_PUBLICATION_FIXTURE") else {
+            return;
+        };
+        let value: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        let program: Address = value["program"].as_str().unwrap().parse().unwrap();
+        let pool: Address = value["pool"].as_str().unwrap().parse().unwrap();
+        let archive = Archive::new(directory(), program, pool);
+        let owner = value["owner"].as_str().unwrap().parse().unwrap();
+        let address = value["address"].as_str().unwrap().parse().unwrap();
+        let bytes = STANDARD
+            .decode(value["accountBase64"].as_str().unwrap())
+            .unwrap();
+        let (publication, _) = archive.checked(owner, address, &bytes).unwrap();
+        assert_eq!(publication.schema_version, 4);
+        assert_eq!(publication.sequence, value["sequence"].as_u64().unwrap());
+        assert!(value["slot"].as_u64().unwrap() > 0);
     }
     #[test]
     fn immutable_chain_survives_restart_and_records_confirmed_provenance() {
