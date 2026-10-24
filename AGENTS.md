@@ -1710,3 +1710,13 @@ another agent needs to know.
 - **Rules for agents:** To hide Epochs again, remove `EPOCHS_ENABLED` from Vercel production and redeploy.
 - **Open:** No real entry, execution or withdrawal has been sent through the app yet. Joel: `universe` and per-entry reference series, as in the earlier Epoch entries.
 - **Refs:** commits `3872099`..`84582fb`.
+
+### 2026-10-24 · Godwin (Claude Code) · rlUSD faucet claims and rlUSD as collateral in the web app
+
+- **Area:** `apps/web` (`faucet-panel.tsx`, `signer.tsx`, `trade-form.tsx`, `swap-form.tsx`, `portfolio-view.tsx`, `src/lib/market.ts`, `config.ts`, `errors.ts`).
+- **What:** At Godwin's request, following Joel's 2026-10-23 faucet entries.
+  - **Faucet:** the Faucet page claims 100 rlUSD through Joel's `/v1/faucet/challenge`, a wallet `signMessage` of the returned text, and `/v1/faucet/claim`, called from the browser so the per-visitor limits see each visitor. Status is read on load, on tab focus and after a claim, never on a timer. The signer context now exposes `signMessage` for wallet-adapter and Privy wallets.
+  - **Collateral:** reverses Godwin's 2026-10-23 "Web app offers only USDC" entry. Buy (coin pages) and Swap offer USDC or rlUSD, sent as `collateralMint`; withdrawals offer both; selling still receives into the shared payable balance.
+  - **Name:** the test mint `5rpG…wV3X` is shown as rlUSD everywhere (`TEST_COLLATERAL`).
+- **Verified:** type check and 63 tests pass. In the dev server, the faucet status call works against the live API, and the Buy, Sell and Swap choices switch correctly. No claim or rlUSD trade has been signed with a real wallet. Not deployed.
+- **Refs:** commits `29a37c4`, `3595d7d`.
