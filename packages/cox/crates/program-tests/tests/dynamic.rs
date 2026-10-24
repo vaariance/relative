@@ -163,8 +163,8 @@ fn publish(p: &mut PoolHarness, value: &UniverseVersion, batch_id: u64) {
         };
         value.instruments.len()
     ];
-    let benchmark = if batch_id == 3 { 103 } else { 100 } * cox_math::SCALE;
-    if batch_id == 3 {
+    let benchmark = if batch_id == 3 || batch_id == 63 { 103 } else { 100 } * cox_math::SCALE;
+    if batch_id == 3 || batch_id == 63 {
         prices[0].price_e8 = 120_000_000; prices[1].price_e8 = 80_000_000;
         prices.last_mut().unwrap().price_e8 = 110_000_000;
     }
@@ -380,7 +380,7 @@ fn verify_inclusion(count: usize) -> PoolHarness {
     next.capture.prices_e8.resize(count, 100_000_000);
     for index in 30..count {
         next.instruments.push(Instrument {
-            stable_id: format!("asset-new-{index}"), symbol: format!("NEW{index}"), class_id: cox::class_for_asset_index(index).unwrap(), epoch_id: index as u16,
+            stable_id: format!("asset-new-{index}"), symbol: format!("NEW{index}"), class_id: (index+1) as u16, epoch_id: index as u16,
             pyth_pro_feed_id: index as u32 + 1, pyth_core_feed_id: [index as u8 + 1; 32], token_mint: None,
             original_price_e8: 100_000_000, original_benchmark: 100 * cox_math::SCALE, original_timestamp: ORIGIN + 2,
         });
@@ -388,7 +388,7 @@ fn verify_inclusion(count: usize) -> PoolHarness {
     let admin = p.h.admin.insecure_clone();
     let schedule = pda(&[b"universe-schedule", p.pool.as_ref(), &next.version.to_le_bytes()]);
     p.h.send("schedule_universe", &[ComputeBudgetInstruction::request_heap_frame(262_144), Harness::instruction(
-        a::ScheduleUniverse { admin: admin.pubkey(), registry: p.registry, pool: p.pool, methodology: p.methodology, schedule, system_program: system_program::ID },
+        a::ScheduleUniverse {asset_registry: None, admin: admin.pubkey(), registry: p.registry, pool: p.pool, methodology: p.methodology, schedule, system_program: system_program::ID },
         i::ScheduleUniverse { version: next.version, identities_digest: cox::instrument_identities_digest(&next.instruments).unwrap(), expected_instruments: count as u16, activation_timestamp: ORIGIN + 2, expires_at: ORIGIN + 100 },
     )], &[&admin], true);
     p.pause(false);
@@ -407,7 +407,7 @@ fn verify_inclusion(count: usize) -> PoolHarness {
         &[
             ComputeBudgetInstruction::request_heap_frame(262_144),
             Harness::instruction(
-                a::ActivateUniverse {
+                a::ActivateUniverse {asset_registry: None, next_registry_version: None, previous_registry_version: None,
                     runtime: runtime.pubkey(),
                     registry: p.registry,
                     pool: p.pool,
@@ -598,14 +598,14 @@ fn dynamic_runtime_rotation_keeps_historical_attestors_and_requires_authorized_s
     next.instruments.push(Instrument { stable_id: "rotation-asset".into(), symbol: "ROTATE".into(), class_id: 32, epoch_id: 31, pyth_pro_feed_id: 32,
         pyth_core_feed_id: [32; 32], token_mint: None, original_price_e8: 100_000_000, original_benchmark: p.pool_state().benchmark, original_timestamp: ORIGIN + 14 });
     let schedule = pda(&[b"universe-schedule", p.pool.as_ref(), &next.version.to_le_bytes()]);
-    p.h.send("schedule_universe", &[ComputeBudgetInstruction::request_heap_frame(262144), Harness::instruction(a::ScheduleUniverse {
+    p.h.send("schedule_universe", &[ComputeBudgetInstruction::request_heap_frame(262144), Harness::instruction(a::ScheduleUniverse {asset_registry: None,
         admin: admin.pubkey(), registry: p.registry, pool: p.pool, methodology: p.methodology, schedule, system_program: system_program::ID,
     }, i::ScheduleUniverse { version: next.version, identities_digest: cox::instrument_identities_digest(&next.instruments).unwrap(), expected_instruments: 32,
         activation_timestamp: ORIGIN + 14, expires_at: ORIGIN + 100 })], &[&admin], true);
     p.h.time(ORIGIN + 14); publish(&mut p, &previous, 14);
     next.capture.predecessor_sequence = p.pool_state().sequence; next.capture.predecessor_state_digest = p.pool_state().state_digest;
     let key = upload(&mut p, &next); let runtime = p.h.runtime.insecure_clone();
-    p.h.send("activate_universe", &[ComputeBudgetInstruction::request_heap_frame(262144), Harness::instruction(a::ActivateUniverse {
+    p.h.send("activate_universe", &[ComputeBudgetInstruction::request_heap_frame(262144), Harness::instruction(a::ActivateUniverse {asset_registry: None, next_registry_version: None, previous_registry_version: None,
         runtime: runtime.pubkey(), registry: p.registry, pool: p.pool, methodology: p.methodology, next_methodology: key, vault: p.vault, schedule, test_vault: p.test_vault(),
     }, i::ActivateUniverse {})], &[&runtime], true);
     assert_eq!(p.pool_state().classes.len(), 33);
@@ -781,4 +781,164 @@ fn maximum_universe_preparation_cancellation_preserves_requests_through_both_mat
     assert_eq!(p.pool_state().pending, 0);
     assert_eq!(p.pool_state().sequence, 5);
     p.assert_owners(&[p.h.alice.pubkey()]);
+}
+
+fn export_generation(p: &PoolHarness, phase: &str, registry: Option<Pubkey>, version: Option<Pubkey>, count: usize) {
+    if count != 31 { return; }
+    let Ok(directory)=std::env::var("COX_GENERATION_FIXTURES_DIR") else {return;};
+    let directory=std::path::Path::new(&directory);std::fs::create_dir_all(directory).unwrap();
+    let mut keys=vec![("pool",p.pool),("registry",p.registry),("methodology",p.methodology),("vault",p.vault)];
+    if let Some(key)=registry {keys.push(("assetRegistry",key));}
+    if let Some(key)=version {keys.push(("assetRegistryVersion",key));}
+    p.h.write_accounts(&directory.join(format!("{phase}.json")),&keys);
+}
+
+fn fresh_generation(count: usize, export: bool) -> (PoolHarness, Pubkey) {
+    let mut p = PoolHarness::new_adaptive(30);
+    let admin = p.h.admin.insecure_clone(); let runtime = p.h.runtime.insecure_clone();
+    let mut authority: cox::Registry = p.h.read(p.registry);
+    authority.next_pool_id = 7;
+    let mut account = p.h.svm.get_account(&p.registry).unwrap();
+    account.data.fill(0);
+    anchor_lang::AccountSerialize::try_serialize(&authority, &mut account.data.as_mut_slice()).unwrap();
+    p.h.svm.set_account(p.registry, account).unwrap();
+    let fresh_pool = pda(&[b"pool", &7u64.to_le_bytes()]);
+    let mut universe = genesis(&p);
+    universe.schema_version=2; universe.pool = fresh_pool; universe.capture.predecessor_sequence = 0; universe.capture.predecessor_state_digest = [0;32];
+    universe.capture.prices_e8 = vec![100_000_000; count];
+    universe.expected_instruments = count as u16;
+    universe.instruments = (0..count).map(|index| Instrument {
+        stable_id: format!("asset-{index}"), symbol: format!("ASSET{index}"),
+        class_id: (index+1) as u16, epoch_id: index as u16,
+        pyth_pro_feed_id: index as u32+1, pyth_core_feed_id: cox::dynamic_digest(&index.to_le_bytes()), token_mint: None,
+        original_price_e8: 100_000_000, original_benchmark: 100*cox_math::SCALE, original_timestamp: ORIGIN,
+    }).collect();
+    universe.sealed = false; universe.seal_genesis().unwrap();
+    let bytes = universe.canonical_bytes().unwrap();
+    let methodology = pda(&[b"methodology", &universe.digest]);
+    p.h.send("register_fresh_methodology", &[Harness::instruction(a::RegisterDynamicMethodology {
+        admin: admin.pubkey(), registry: p.registry, methodology, system_program: system_program::ID,
+    },i::RegisterDynamicMethodology {digest: universe.digest,length:bytes.len() as u32,activation_batch:0})], &[&admin],true);
+    grow(&mut p,methodology,bytes.len()+512);
+    for (index,bytes) in bytes.chunks(600).enumerate() {
+        p.h.send("upload_fresh_methodology", &[ComputeBudgetInstruction::request_heap_frame(262144),Harness::instruction(a::ManageMethodology {admin:admin.pubkey(),registry:p.registry,methodology},
+            i::UploadMethodology {offset:(index*600) as u32,bytes:bytes.to_vec()})],&[&admin],true);
+    }
+    p.h.send("seal_fresh_methodology", &[ComputeBudgetInstruction::request_heap_frame(262144),Harness::instruction(a::SealGenesisMethodology {
+        runtime:runtime.pubkey(),registry:p.registry,methodology},i::SealGenesisMethodology {})], &[&runtime],true);
+    p.pool = fresh_pool; p.methodology = methodology; p.vault = pda(&[b"vault",fresh_pool.as_ref()]);
+    p.h.send("initialize_fresh_pool", &[ComputeBudgetInstruction::request_heap_frame(262144),Harness::instruction(a::InitializePool {
+        admin:admin.pubkey(),registry:p.registry,methodology,pool:fresh_pool,mint:p.h.mint,vault:p.vault,
+        token_program:support::token_program(),system_program:system_program::ID,test_vault:None,
+    },i::InitializeDynamicPool {pool_id:7,trading_opens_at:ORIGIN+60})], &[&admin],true);
+    grow(&mut p,fresh_pool,32768);
+    p.h.send("prepare_fresh_pool", &[ComputeBudgetInstruction::request_heap_frame(262144),Harness::instruction(a::PrepareDynamicPool {
+        admin:admin.pubkey(),registry:p.registry,pool:fresh_pool,methodology},i::PrepareDynamicPool {})],&[&admin],true);
+    assert_eq!(cox::pool_lifecycle(&p.pool_state()).unwrap(),cox::InstanceLifecycle::Preparing);
+    let batch=pda(&[b"batch",p.pool.as_ref()]);let publication=pda(&[b"publication",p.pool.as_ref()]);
+    p.h.send("initialize_genesis_staging",&[Harness::instruction(a::InitializeDynamicStaging {payer:runtime.pubkey(),pool:p.pool,batch,publication,system_program:system_program::ID},i::InitializeDynamicStaging {})],&[&runtime],true);
+    grow(&mut p,batch,cox::dynamic_batch_space(count+1));grow(&mut p,publication,cox::dynamic_batch_space(count+1));
+    p.h.time(ORIGIN); publish(&mut p,&universe,0);
+    assert!(p.pool_state().initialized);
+    assert_eq!(p.pool_state().origin_prices.len(),count);
+    assert!(p.pool_state().references.iter().all(|r|*r==100*cox_math::SCALE));
+    let generation = [101;32]; let asset_registry = pda(&[b"asset-registry",&generation]);
+    p.h.send("initialize_asset_registry",&[Harness::instruction(a::InitializeAssetRegistry {admin:admin.pubkey(),registry:p.registry,pool:p.pool,asset_registry,system_program:system_program::ID},i::InitializeAssetRegistry {generation})],&[&admin],true);
+    let version = pda(&[b"asset-version",asset_registry.as_ref(),&universe.digest]);
+    p.h.send("register_asset_version",&[ComputeBudgetInstruction::request_heap_frame(262144),Harness::instruction(a::RegisterAssetRegistryVersion {payer:admin.pubkey(),registry:p.registry,pool:p.pool,asset_registry,methodology,version,system_program:system_program::ID},i::RegisterAssetRegistryVersion {})],&[&admin],true);
+    if export { export_generation(&p,"preparing",Some(asset_registry),Some(version),count); }
+    p.h.send("activate_genesis_registry",&[Harness::instruction(a::ActivateAssetRegistryVersion {runtime:runtime.pubkey(),registry:p.registry,pool:p.pool,methodology,asset_registry,version,previous_version:None},i::ActivateAssetRegistryVersion {})],&[&runtime],true);
+    p.h.time(ORIGIN+60);
+    let owner=p.h.alice.insecure_clone();
+    let before=p.pool_state();
+    let custody=p.h.token_balance(p.vault);
+    let accounts=p.submit_accounts(owner.pubkey(),p.h.alice_token);
+    p.h.send("preparing_reject_deposit_after_opening",&[Harness::instruction(accounts,i::DepositV2 {to:31,amount:1_000_000,minimum_units:1,expiry:100,expected_fee_version:1})],&[&owner],false);
+    assert_eq!(p.pool_state().next_request_nonce,before.next_request_nonce);
+    assert_eq!(p.pool_state().pending,before.pending);
+    assert_eq!(p.h.token_balance(p.vault),custody);
+    p.h.send("activate_fresh_pool",&[Harness::instruction(a::ManagePoolLifecycle {admin:admin.pubkey(),registry:p.registry,pool:p.pool,asset_registry:Some(asset_registry)},i::SetPoolLifecycle {lifecycle:cox::InstanceLifecycle::Active})],&[&admin],true);
+    assert_eq!(p.pool_state().crypto_class,0);
+    assert_eq!(p.pool_state().fee_cap,200_000); assert_eq!(p.pool_state().fee_bps,2);
+    assert_eq!(cox::pool_lifecycle(&p.pool_state()).unwrap(),cox::InstanceLifecycle::Active);
+    if export { export_generation(&p,"active",Some(asset_registry),Some(version),count); }
+    (p,asset_registry)
+}
+
+#[test]
+fn fresh_31_asset_generation_bootstraps_without_migration_and_archive_preserves_refunds() {
+    let (mut p,registry) = fresh_generation(31,true);
+    let admin=p.h.admin.insecure_clone();
+    let owner=p.h.alice.insecure_clone();
+    let accounts=p.submit_accounts(owner.pubkey(),p.h.alice_token);
+    p.h.send("fresh_deposit",&[Harness::instruction(accounts,i::DepositV2 {to:31,amount:1_000_000,minimum_units:1,expiry:100,expected_fee_version:1})],&[&owner],true);
+    let custody=p.h.token_balance(p.vault);
+    p.h.send("archive_instance",&[Harness::instruction(a::ManagePoolLifecycle {admin:admin.pubkey(),registry:p.registry,pool:p.pool,asset_registry:Some(registry)},i::SetPoolLifecycle {lifecycle:cox::InstanceLifecycle::Archived})],&[&admin],true);
+    assert_eq!(p.h.token_balance(p.vault),custody);
+    let r:cox::AssetRegistry=p.h.read(registry);
+    export_generation(&p,"archived",Some(registry),Some(r.active_version),31);
+    p.pause(true);p.pause(false);
+    let accounts=p.submit_accounts(owner.pubkey(),p.h.alice_token);
+    p.h.send("archived_reject_deposit",&[Harness::instruction(accounts,i::DepositV2 {to:31,amount:1_000_000,minimum_units:1,expiry:100,expected_fee_version:1})],&[&owner],false);
+    p.h.send("cannot_reactivate_archived",&[Harness::instruction(a::ManagePoolLifecycle {admin:admin.pubkey(),registry:p.registry,pool:p.pool,asset_registry:Some(registry)},i::SetPoolLifecycle {lifecycle:cox::InstanceLifecycle::Active})],&[&admin],false);
+    p.cancel(0,false,true);p.refund(0,false,true);
+    assert_eq!(p.h.token_balance(p.vault),0);
+}
+
+#[test]
+fn fresh_255_asset_generation_uses_bounded_genesis_staging() {
+    let (p,_) = fresh_generation(255,false);
+    assert_eq!(p.pool_state().classes.len(),256);
+    assert_eq!(p.pool_state().origin_prices.len(),255);
+}
+
+#[test]
+fn shared_registry_activation_closes_intervals_atomically_and_requires_bound_registry() {
+    let (mut p,asset_registry)=fresh_generation(31,false);
+    let previous=cox::read_dynamic_manifest(&p.h.read::<Methodology>(p.methodology)).unwrap();
+    let admin=p.h.admin.insecure_clone();let runtime=p.h.runtime.insecure_clone();
+    let registry:cox::AssetRegistry=p.h.read(asset_registry);let previous_version=registry.active_version;
+    let mut next=UniverseVersion::draft(0,p.pool,runtime.pubkey(),previous.source_methodology,2,previous.digest,32,
+        UniverseCapture {timestamp:ORIGIN+61,prices_e8:vec![100_000_000;32],..previous.capture.clone()}).unwrap();
+    next.schema_version=2;next.instruments=previous.instruments.clone();
+    next.instruments.push(Instrument {stable_id:"new-asset".into(),symbol:"NEW".into(),class_id:32,epoch_id:31,pyth_pro_feed_id:32,
+        pyth_core_feed_id:[88;32],token_mint:None,original_price_e8:100_000_000,original_benchmark:100*cox_math::SCALE,original_timestamp:ORIGIN+61});
+    let schedule=pda(&[b"universe-schedule",p.pool.as_ref(),&2u64.to_le_bytes()]);
+    let schedule_args=i::ScheduleUniverse {version:2,identities_digest:cox::instrument_identities_digest_for_schema(2,&next.instruments).unwrap(),expected_instruments:32,activation_timestamp:ORIGIN+61,expires_at:ORIGIN+100};
+    p.h.send("bound_schedule_cannot_omit_registry",&[Harness::instruction(a::ScheduleUniverse {admin:admin.pubkey(),registry:p.registry,pool:p.pool,methodology:p.methodology,schedule,system_program:system_program::ID,asset_registry:None},i::ScheduleUniverse {version:2,identities_digest:cox::instrument_identities_digest_for_schema(2,&next.instruments).unwrap(),expected_instruments:32,activation_timestamp:ORIGIN+61,expires_at:ORIGIN+100})],&[&admin],false);
+    p.h.send("bound_schedule",&[Harness::instruction(a::ScheduleUniverse {admin:admin.pubkey(),registry:p.registry,pool:p.pool,methodology:p.methodology,schedule,system_program:system_program::ID,asset_registry:Some(asset_registry)},schedule_args)],&[&admin],true);
+    let r:cox::AssetRegistry=p.h.read(asset_registry);assert_eq!(r.pending_activation,ORIGIN+61);
+    p.h.time(ORIGIN+61);publish(&mut p,&previous,61);
+    let state=p.pool_state();next.capture.predecessor_sequence=state.sequence;next.capture.predecessor_state_digest=state.state_digest;
+    next.digest=next.canonical_digest().unwrap();
+    let methodology=upload(&mut p,&next);
+    let version=pda(&[b"asset-version",asset_registry.as_ref(),&next.digest]);
+    p.h.send("register_successor_version",&[Harness::instruction(a::RegisterAssetRegistryVersion {payer:runtime.pubkey(),registry:p.registry,pool:p.pool,asset_registry,methodology,version,system_program:system_program::ID},i::RegisterAssetRegistryVersion {})],&[&runtime],true);
+    let before=p.h.svm.get_account(&p.pool).unwrap().data;
+    p.h.send("activation_cannot_omit_registry",&[Harness::instruction(a::ActivateUniverse {runtime:runtime.pubkey(),registry:p.registry,pool:p.pool,methodology:p.methodology,next_methodology:methodology,vault:p.vault,schedule,test_vault:None,asset_registry:None,next_registry_version:None,previous_registry_version:None},i::ActivateUniverse {})],&[&runtime],false);
+    assert_eq!(p.h.svm.get_account(&p.pool).unwrap().data,before);
+    p.h.send("activate_shared_universe",&[Harness::instruction(a::ActivateUniverse {runtime:runtime.pubkey(),registry:p.registry,pool:p.pool,methodology:p.methodology,next_methodology:methodology,vault:p.vault,schedule,test_vault:None,asset_registry:Some(asset_registry),next_registry_version:Some(version),previous_registry_version:Some(previous_version)},i::ActivateUniverse {})],&[&runtime],true);
+    let old:cox::AssetRegistryVersion=p.h.read(previous_version);let new:cox::AssetRegistryVersion=p.h.read(version);let r:cox::AssetRegistry=p.h.read(asset_registry);
+    assert_eq!(old.effective_until,ORIGIN+61);assert_eq!(new.effective_from,ORIGIN+61);assert!(new.sealed);
+    assert_eq!(r.active_version,version);assert_eq!(r.pending_activation,0);assert_eq!(p.pool_state().methodology,methodology);
+    let u=cox::read_dynamic_manifest(&p.h.read::<Methodology>(methodology)).unwrap();assert!(u.instruments.starts_with(&previous.instruments));
+}
+
+#[test]
+fn fresh_class_zero_is_crypto_and_first_underlying_is_class_one() {
+    let (mut p,_)=fresh_generation(31,false);let owner=p.h.alice.insecure_clone();
+    for to in [0,1] {
+        let accounts=p.submit_accounts(owner.pubkey(),p.h.alice_token);
+        p.h.send("fresh_class_deposit",&[Harness::instruction(accounts,i::DepositV2 {to,amount:1_000_000,minimum_units:1,expiry:100,expected_fee_version:1})],&[&owner],true);
+    }
+    let universe=cox::read_dynamic_manifest(&p.h.read::<Methodology>(p.methodology)).unwrap();
+    assert_eq!(universe.crypto_class(),0);assert_eq!(universe.instruments[0].class_id,1);
+    p.h.time(ORIGIN+61);publish(&mut p,&universe,61);
+    let before=p.pool_state();assert!(before.classes[0].units>0 && before.classes[1].units>0);
+    p.h.time(ORIGIN+63);publish(&mut p,&universe,63);
+    let after=p.pool_state();assert_eq!(after.references[0],100*cox_math::SCALE);
+    assert!(after.references[1]>100*cox_math::SCALE);
+    assert!(after.classes[1].backing>after.classes[0].backing);
+    assert_eq!(after.classes[0].units,before.classes[0].units);
+    assert_eq!(after.classes[1].units,before.classes[1].units);
 }

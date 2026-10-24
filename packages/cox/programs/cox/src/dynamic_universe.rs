@@ -68,7 +68,10 @@ pub fn class_for_asset_index(index: usize) -> Result<u16> {
         .map_err(|_| error!(CoxError::ArithmeticOverflow))
 }
 
-pub fn validate_instruments(instruments: &[Instrument]) -> Result<()> {
+pub fn validate_instruments(instruments: &[Instrument]) -> Result<()> { validate_instruments_for_schema(1, instruments) }
+
+pub fn validate_instruments_for_schema(schema_version: u16, instruments: &[Instrument]) -> Result<()> {
+    require!(matches!(schema_version,1|2), CoxError::InvalidManifest);
     require!(
         (30..=DYNAMIC_MAX_ASSETS).contains(&instruments.len()),
         CoxError::InvalidRoster
@@ -100,8 +103,8 @@ pub fn validate_instruments(instruments: &[Instrument]) -> Result<()> {
             CoxError::InvalidRoster
         );
         require!(
-            instrument.class_id == class_for_asset_index(index)?
-                && instrument.class_id != DYNAMIC_CRYPTO_CLASS
+            instrument.class_id == if schema_version == 2 { (index+1) as u16 } else { class_for_asset_index(index)? }
+                && instrument.class_id != if schema_version == 2 { 0 } else { DYNAMIC_CRYPTO_CLASS }
                 && instrument.epoch_id < 256
                 && instrument.pyth_pro_feed_id > 0
                 && nonzero(&instrument.pyth_core_feed_id)
@@ -134,7 +137,7 @@ fn validate_capture(capture: &UniverseCapture, count: usize) -> Result<()> {
             && nonzero(&capture.price_universe_digest)
             && nonzero(&capture.signed_payload_digest)
             && nonzero(&capture.trusted_storage_digest)
-            && nonzero(&capture.predecessor_state_digest),
+            && (capture.predecessor_sequence == 0 || nonzero(&capture.predecessor_state_digest)),
         CoxError::InvalidPrice
     );
     Ok(())
@@ -147,6 +150,11 @@ pub fn capture_digest(capture: &UniverseCapture) -> Result<[u8; 32]> {
 }
 
 impl UniverseVersion {
+    pub fn crypto_class(&self) -> u16 { if self.schema_version == 2 { 0 } else { DYNAMIC_CRYPTO_CLASS } }
+    pub fn class_for_asset_index(&self, index: usize) -> Result<u16> {
+        require!(index < DYNAMIC_MAX_ASSETS && matches!(self.schema_version,1|2), CoxError::CapacityExceeded);
+        if self.schema_version == 2 { Ok((index+1) as u16) } else { class_for_asset_index(index) }
+    }
     pub fn draft(
         bump: u8,
         pool: Pubkey,
@@ -250,7 +258,7 @@ impl UniverseVersion {
 
     fn validate_complete(&self) -> Result<()> {
         require!(
-            self.schema_version == 1
+            matches!(self.schema_version,1|2)
                 && self.pool != Pubkey::default()
                 && self.operator != Pubkey::default()
                 && nonzero(&self.source_methodology)
@@ -260,7 +268,7 @@ impl UniverseVersion {
             CoxError::InvalidManifest
         );
         validate_capture(&self.capture, self.instruments.len())?;
-        validate_instruments(&self.instruments)?;
+        validate_instruments_for_schema(self.schema_version,&self.instruments)?;
         self.serialized_size()?;
         Ok(())
     }
@@ -336,7 +344,7 @@ impl UniverseVersion {
             digest: dynamic_digest(bytes),
         };
         if admission { value.validate_complete()?; } else {
-            require!(value.schema_version == 1 && value.expected_instruments as usize == value.instruments.len()
+            require!(matches!(value.schema_version,1|2) && value.expected_instruments as usize == value.instruments.len()
                 && (30..=DYNAMIC_MAX_ASSETS).contains(&value.instruments.len()), CoxError::InvalidManifest);
         }
         Ok(value)
@@ -355,8 +363,19 @@ impl UniverseVersion {
         Ok(())
     }
 
+    pub fn seal_genesis(&mut self) -> Result<()> {
+        require!(!self.sealed && self.schema_version == 2 && self.version == 1 && self.predecessor_digest == [0;32]
+            && self.capture.predecessor_sequence == 0 && self.capture.predecessor_state_digest == [0;32] && self.capture.benchmark == 100 * cox_math::SCALE, CoxError::InvalidManifest);
+        self.validate_complete()?;
+        require!(self.instruments.iter().zip(&self.capture.prices_e8).all(|(instrument,price)|
+            instrument.original_price_e8 == *price && instrument.original_benchmark == self.capture.benchmark
+            && instrument.original_timestamp == self.capture.timestamp), CoxError::InvalidOrigin);
+        self.digest = dynamic_digest(&self.canonical_bytes_validated()?); self.sealed = true;
+        Ok(())
+    }
+
     pub fn seal_initial(&mut self, policy: &AdaptiveManifestConfig) -> Result<()> {
-        require!(!self.sealed && self.version == 1, CoxError::InvalidManifest);
+        require!(!self.sealed && self.schema_version == 1 && self.version == 1, CoxError::InvalidManifest);
         require!(
             policy.roster.len() == 30
                 && policy.pyth_feed_ids.len() == 30
@@ -398,7 +417,8 @@ impl UniverseVersion {
     pub(crate) fn seal_validated_successor(&mut self, previous: &Self, old_universe_benchmark_at_activation: i128, canonical_digest: [u8; 32]) -> Result<()> {
         require!(!self.sealed && previous.sealed, CoxError::AlreadyProcessed);
         require!(
-            self.pool == previous.pool
+            self.schema_version == previous.schema_version
+                && self.pool == previous.pool
                 && self.source_methodology == previous.source_methodology
                 && previous.version.checked_add(1) == Some(self.version)
                 && self.predecessor_digest == previous.digest
@@ -673,8 +693,9 @@ mod wire_fixture_test {
 
 pub const DYNAMIC_IDENTITIES_DOMAIN: &str = "COX/UNIVERSE/IDENTITIES/V1";
 
-pub fn instrument_identities_digest(instruments: &[Instrument]) -> Result<[u8; 32]> {
-    validate_instruments(instruments)?;
+pub fn instrument_identities_digest(instruments: &[Instrument]) -> Result<[u8; 32]> { instrument_identities_digest_for_schema(1,instruments) }
+pub fn instrument_identities_digest_for_schema(schema_version:u16,instruments: &[Instrument]) -> Result<[u8;32]> {
+    validate_instruments_for_schema(schema_version,instruments)?;
     validated_instrument_identities_digest(instruments)
 }
 fn validated_instrument_identities_digest(instruments: &[Instrument]) -> Result<[u8; 32]> {

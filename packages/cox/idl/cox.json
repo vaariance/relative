@@ -7,6 +7,176 @@
   },
   "instructions": [
     {
+      "name": "activate_asset_registry_version",
+      "discriminator": [
+        76,
+        222,
+        34,
+        27,
+        3,
+        28,
+        128,
+        150
+      ],
+      "accounts": [
+        {
+          "name": "runtime",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "asset_registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  45,
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "asset_registry.generation",
+                "account": "AssetRegistry"
+              }
+            ]
+          }
+        },
+        {
+          "name": "version",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  45,
+                  118,
+                  101,
+                  114,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "asset_registry"
+              },
+              {
+                "kind": "account",
+                "path": "version.digest",
+                "account": "AssetRegistryVersion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "previous_version",
+          "writable": true,
+          "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "activate_universe",
       "discriminator": [
         153,
@@ -180,6 +350,21 @@
         },
         {
           "name": "test_vault",
+          "optional": true
+        },
+        {
+          "name": "asset_registry",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "next_registry_version",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "previous_registry_version",
+          "writable": true,
           "optional": true
         }
       ],
@@ -1013,6 +1198,11 @@
               }
             ]
           }
+        },
+        {
+          "name": "asset_registry",
+          "writable": true,
+          "optional": true
         }
       ],
       "args": []
@@ -2489,6 +2679,120 @@
       ]
     },
     {
+      "name": "initialize_asset_registry",
+      "discriminator": [
+        9,
+        159,
+        48,
+        18,
+        28,
+        225,
+        108,
+        176
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "asset_registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  45,
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "generation"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "generation",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "initialize_devnet_collateral",
       "discriminator": [
         107,
@@ -2602,6 +2906,146 @@
       "args": []
     },
     {
+      "name": "initialize_dynamic_pool",
+      "discriminator": [
+        40,
+        200,
+        187,
+        156,
+        226,
+        211,
+        182,
+        113
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "pool_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "test_vault",
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "pool_id",
+          "type": "u64"
+        },
+        {
+          "name": "trading_opens_at",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "initialize_dynamic_position",
       "discriminator": [
         32,
@@ -2665,6 +3109,102 @@
               {
                 "kind": "account",
                 "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_dynamic_staging",
+      "discriminator": [
+        205,
+        10,
+        104,
+        115,
+        99,
+        194,
+        51,
+        35
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "batch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  116,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "publication",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  117,
+                  98,
+                  108,
+                  105,
+                  99,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
               }
             ]
           }
@@ -3355,6 +3895,105 @@
           "name": "test_vault",
           "writable": true,
           "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "prepare_dynamic_pool",
+      "discriminator": [
+        116,
+        61,
+        188,
+        33,
+        29,
+        1,
+        80,
+        243
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
         }
       ],
       "args": []
@@ -5034,6 +5673,169 @@
       ]
     },
     {
+      "name": "register_asset_registry_version",
+      "discriminator": [
+        246,
+        0,
+        67,
+        126,
+        15,
+        31,
+        133,
+        245
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "asset_registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  45,
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "asset_registry.generation",
+                "account": "AssetRegistry"
+              }
+            ]
+          }
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          }
+        },
+        {
+          "name": "version",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  45,
+                  118,
+                  101,
+                  114,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "asset_registry"
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "register_dynamic_methodology",
       "discriminator": [
         89,
@@ -6087,6 +6889,11 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "asset_registry",
+          "writable": true,
+          "optional": true
         }
       ],
       "args": [
@@ -6545,6 +7352,78 @@
       "args": []
     },
     {
+      "name": "seal_genesis_methodology",
+      "discriminator": [
+        9,
+        124,
+        145,
+        75,
+        5,
+        112,
+        95,
+        222
+      ],
+      "accounts": [
+        {
+          "name": "runtime",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "methodology",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "seal_methodology",
       "discriminator": [
         101,
@@ -6792,6 +7671,115 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "set_pool_lifecycle",
+      "discriminator": [
+        174,
+        195,
+        250,
+        228,
+        79,
+        226,
+        81,
+        33
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "asset_registry",
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  45,
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "asset_registry.generation",
+                "account": "AssetRegistry"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "lifecycle",
+          "type": {
+            "defined": {
+              "name": "InstanceLifecycle"
+            }
+          }
+        }
+      ]
     },
     {
       "name": "switch",
@@ -7831,6 +8819,32 @@
   ],
   "accounts": [
     {
+      "name": "AssetRegistry",
+      "discriminator": [
+        60,
+        94,
+        213,
+        134,
+        205,
+        170,
+        175,
+        68
+      ]
+    },
+    {
+      "name": "AssetRegistryVersion",
+      "discriminator": [
+        171,
+        236,
+        76,
+        5,
+        14,
+        244,
+        7,
+        169
+      ]
+    },
+    {
       "name": "Batch",
       "discriminator": [
         156,
@@ -8417,6 +9431,123 @@
       }
     },
     {
+      "name": "AssetRegistry",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "schema_version",
+            "type": "u16"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "generation",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "authority_registry",
+            "type": "pubkey"
+          },
+          {
+            "name": "source_pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "active_version",
+            "type": "pubkey"
+          },
+          {
+            "name": "active_digest",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "active_from",
+            "type": "u64"
+          },
+          {
+            "name": "pending_activation",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AssetRegistryVersion",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "schema_version",
+            "type": "u16"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "registry",
+            "type": "pubkey"
+          },
+          {
+            "name": "generation",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "methodology",
+            "type": "pubkey"
+          },
+          {
+            "name": "digest",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "predecessor",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "effective_from",
+            "type": "u64"
+          },
+          {
+            "name": "effective_until",
+            "type": "u64"
+          },
+          {
+            "name": "sealed",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
       "name": "Batch",
       "type": {
         "kind": "struct",
@@ -8809,6 +9940,23 @@
       }
     },
     {
+      "name": "InstanceLifecycle",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Preparing"
+          },
+          {
+            "name": "Active"
+          },
+          {
+            "name": "Archived"
+          }
+        ]
+      }
+    },
+    {
       "name": "ManifestConfig",
       "type": {
         "kind": "struct",
@@ -9091,6 +10239,35 @@
             "type": {
               "option": "pubkey"
             }
+          },
+          {
+            "name": "lifecycle_version",
+            "type": "u8"
+          },
+          {
+            "name": "lifecycle",
+            "type": {
+              "defined": {
+                "name": "InstanceLifecycle"
+              }
+            }
+          },
+          {
+            "name": "asset_registry",
+            "type": "pubkey"
+          },
+          {
+            "name": "generation",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "crypto_class",
+            "type": "u16"
           }
         ]
       }
