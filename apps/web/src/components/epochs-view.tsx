@@ -237,7 +237,7 @@ function ClockCard({ epochs, epoch, now, canEnter, onSelect, onEnter }: { epochs
         </div>
         <div className="flex flex-wrap gap-2">
           {canEnter && (
-            <button type="button" onClick={onEnter} className={`hidden h-9 cursor-pointer items-center gap-1.5 rounded-pill px-4 text-sm font-medium text-white shadow-none lg:inline-flex lg:shadow-[0_0_24px_rgba(242,98,46,0.35)] ${gradient}`}>
+            <button type="button" onClick={onEnter} className={`hidden h-9 cursor-pointer items-center gap-1.5 rounded-pill px-4 text-sm font-medium text-white shadow-none xl:inline-flex xl:shadow-[0_0_24px_rgba(242,98,46,0.35)] ${gradient}`}>
               <Plus size={14} aria-hidden="true" /> New entry
             </button>
           )}
@@ -927,7 +927,7 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
   };
 
   const enter = () => {
-    if (window.matchMedia("(min-width: 1024px)").matches) {
+    if (window.matchMedia("(min-width: 1280px)").matches) {
       document.getElementById("epoch-entry")?.scrollIntoView({ behavior: "smooth", block: "center" });
       document.getElementById("epoch-stake")?.focus({ preventScroll: true });
     } else {
@@ -936,25 +936,25 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
   };
 
   return (
-    <div className={`relative isolate flex flex-col gap-4 ${open ? "pb-24 lg:pb-0" : ""}`}>
+    <div className={`relative isolate flex flex-col gap-4 ${open ? "pb-24 xl:pb-0" : ""}`}>
       <div aria-hidden="true" className="pointer-events-none absolute -top-24 left-1/3 -z-10 h-72 w-2/3 bg-[radial-gradient(closest-side,rgba(242,98,46,0.10),transparent)]" />
       {header}
       <Banner epoch={epoch} stage={stage} />
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-        <div className="lg:col-span-5"><ClockCard epochs={epochs} epoch={epoch} now={now} canEnter={open} onSelect={(address) => setSelected(address)} onEnter={enter} /></div>
-        <div className="lg:col-span-4"><PotCard epoch={epoch} now={now} decimals={decimals} /></div>
-        <div className="flex lg:col-span-3 [&>*]:flex-1"><PromoCard onExplain={() => setExplain(true)} /></div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-12">
+        <div className="md:col-span-2 xl:col-span-5"><ClockCard epochs={epochs} epoch={epoch} now={now} canEnter={open} onSelect={(address) => setSelected(address)} onEnter={enter} /></div>
+        <div className="xl:col-span-4"><PotCard epoch={epoch} now={now} decimals={decimals} /></div>
+        <div className="flex xl:col-span-3 [&>*]:flex-1"><PromoCard onExplain={() => setExplain(true)} /></div>
       </div>
 
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-        <div className="flex min-w-0 flex-col gap-4 lg:col-span-8">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+        <div className="flex min-w-0 flex-col gap-4 xl:col-span-8">
           <MovesCard epoch={epoch} coins={coins} now={now} backed={backed} canPick={open} onPick={(id) => setBacked(id)} />
           <MyEntries epochs={epochs} lots={lots} decimals={decimals} onSent={() => void loadLots()} />
         </div>
-        <div className="flex min-w-0 flex-col gap-4 lg:col-span-4">
-          <div className="hidden lg:block">
+        <div className="flex min-w-0 flex-col gap-4 xl:col-span-4">
+          <div className="hidden xl:block">
             <EntryPanel {...entryProps} />
           </div>
           <SettlementCard epoch={epoch} now={now} />
@@ -962,14 +962,14 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
       </div>
 
       {open && !sheet && (
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/[0.06] bg-bg/95 p-3 backdrop-blur lg:hidden">
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/[0.06] bg-bg/95 p-3 backdrop-blur xl:hidden">
           <button type="button" onClick={() => setSheet(true)} className={`${primary} cursor-pointer`}>
             <Plus size={16} aria-hidden="true" /> New entry{backed ? ` · ${backed}` : ""}
           </button>
         </div>
       )}
       {sheet && (
-        <div className="fixed inset-0 z-50 flex flex-col gap-4 overflow-y-auto bg-bg p-4 lg:hidden">
+        <div className="fixed inset-0 z-50 flex flex-col gap-4 overflow-y-auto bg-bg p-4 xl:hidden">
           <EntryPanel {...entryProps} onClose={() => setSheet(false)} />
           <button type="button" onClick={() => setExplain(true)} className="mx-auto cursor-pointer text-xs text-accent underline-offset-4 hover:underline">How payouts work</button>
         </div>
