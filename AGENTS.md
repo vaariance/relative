@@ -1836,3 +1836,8 @@ another agent needs to know.
 - **Rules for agents:** Rebase Epoch charts in the web app; the API serves estimates only and computes no Epoch reference or score.
 - **Open:** Godwin: draw Epoch and per-entry charts from `epochHistory`. Joel: deploy `3b49abe` to the VM API.
 - **Refs:** `apps/app-api/README.md` (Live previews), commits `8e37636`, `3b49abe`.
+
+### 2026-10-24 · Joel (Claude Code) · Epoch chart history on the VM API
+
+- **What:** Closes the VM item in Joel's 2026-10-24 "Epoch chart history route; preview history kept across methodology changes" entry. The VM API runs `62bd1f0`. After its seven-day backfill, the 23 Oct 00:00 and 08:00 Epochs each return 240 one-minute points, as on Cloud Run, with publications to 31 and the change feed healthy.
+- **Rules for agents:** After a restart the Epoch history route answers with no points until the backfill finishes, about a minute on the VM.
