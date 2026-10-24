@@ -1,7 +1,8 @@
 "use client";
 
 import type { Submission, UnsignedTransaction } from "@eox/app-api";
-import { VersionedTransaction } from "@solana/web3.js";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { LAMPORTS_PER_SOL, PublicKey, VersionedTransaction } from "@solana/web3.js";
 import { useEffect, useRef, useState } from "react";
 import { buildTransaction, submissionState, submitSigned } from "@/app/actions";
 import { COLLATERAL } from "@/lib/config";
@@ -13,6 +14,13 @@ import { openLogin, useSigner } from "./signer";
 import { useSnackbar } from "./snackbar";
 
 const POLL_MS = 2000;
+const POSITION_BYTES = 4096;
+const REQUEST_BYTES = 320;
+const FEE_LAMPORTS = 10_000;
+
+function sol(lamports: number): string {
+  return (lamports / LAMPORTS_PER_SOL).toFixed(4);
+}
 const POLLS = 45;
 
 function decode(text: string): Uint8Array {
@@ -48,6 +56,7 @@ interface SendButtonProps {
 export function SendButton({ intent, label, connectLabel, problem = null, className, quiet = false, describe, trading = false, onDone }: SendButtonProps) {
   const { live, owner, market, refresh } = useAccount();
   const { sign } = useSigner();
+  const { connection } = useConnection();
   const { show, fail } = useSnackbar();
   const [mounted, setMounted] = useState(false);
   const [working, setWorking] = useState<string | null>(null);
@@ -80,11 +89,41 @@ export function SendButton({ intent, label, connectLabel, problem = null, classN
     onDone?.();
   };
 
+  const shortOfSol = async (): Promise<boolean> => {
+    if (!wallet || !intent || !market.program || !market.pool) return false;
+    if (intent.operation !== "deposit" && intent.operation !== "switch" && intent.operation !== "redeem") return false;
+    try {
+      const owner = new PublicKey(wallet);
+      const position = PublicKey.findProgramAddressSync([new TextEncoder().encode("position"), new PublicKey(market.pool).toBuffer(), owner.toBuffer()], new PublicKey(market.program))[0];
+      const [accounts, positionRent, requestRent] = await Promise.all([
+        connection.getMultipleAccountsInfo([owner, position]),
+        connection.getMinimumBalanceForRentExemption(POSITION_BYTES),
+        connection.getMinimumBalanceForRentExemption(REQUEST_BYTES),
+      ]);
+      const balance = accounts[0]?.lamports ?? 0;
+      const first = accounts[1] === null;
+      const needed = (first ? positionRent : 0) + requestRent + FEE_LAMPORTS;
+      if (balance >= needed) return false;
+      show({
+        tone: "bad",
+        title: "Not enough SOL",
+        text: first
+          ? `Your first trade needs ${sol(needed)} devnet SOL: ${sol(positionRent)} to open your position on chain, plus ${sol(requestRent + FEE_LAMPORTS)} for this trade. Your wallet has ${sol(balance)} SOL. Nothing was sent.`
+          : `This trade needs ${sol(needed)} devnet SOL and your wallet has ${sol(balance)} SOL. Nothing was sent.`,
+        link: { href: "/faucet", label: "Get SOL" },
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const send = async () => {
     if (!wallet || !intent) return;
     if (!sign) return fail("This wallet cannot sign this kind of request. Try a different wallet.");
     setWorking("Preparing");
     try {
+      if (await shortOfSol()) return;
       const built = await buildTransaction(wallet, intent);
       if (!built.ok) return fail(humanError(built.code, built.message));
       const transaction = VersionedTransaction.deserialize(decode(built.value.transaction));

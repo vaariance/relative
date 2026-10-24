@@ -16,7 +16,7 @@ const PROGRAM: Array<[RegExp, string]> = [
   [/\bPaused\b/, "Trading is paused for the moment. Nothing was sent."],
   [/\bHalted\b/, "Trading is halted for now. You can still cancel pending requests and refund deposits."],
   [/InvalidCollateral/, `This wallet's ${COLLATERAL.symbol} is not the token the pool uses.`],
-  [/"Custom":1\}/, `Your wallet needs more devnet SOL. A first trade opens your position on chain, which takes about 0.025 SOL; later trades take about 0.003. Check you also hold enough ${COLLATERAL.symbol} or rlUSD. You can get both on the Faucet page.`],
+  [/"Custom":1\}/, "Your wallet does not have enough devnet SOL or collateral for this. A first trade needs about 0.024 SOL to open your position. Nothing was sent. Get more on the Faucet page."],
   [/AccountNotInitialized|AccountNotFound|user_token|insufficient funds|insufficient lamports|0x1\b/i, `Your wallet does not have enough ${COLLATERAL.symbol}, or has no devnet SOL to pay the network fee. You can get both on the Faucet page.`],
   [/blockhash|expired/i, "That took too long and timed out. Nothing moved. Please try again."],
   [/EntryLimit/, "This Epoch is full and takes no more entries."],

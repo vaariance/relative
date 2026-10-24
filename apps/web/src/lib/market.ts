@@ -15,9 +15,11 @@ export interface Market {
   interval: number;
   collaterals: Collateral[];
   decimals: number;
+  program: string | null;
+  pool: string | null;
 }
 
-export const NO_MARKET: Market = { trading: null, interval: 60, collaterals: [], decimals: 0 };
+export const NO_MARKET: Market = { trading: null, interval: 60, collaterals: [], decimals: 0, program: null, pool: null };
 
 function describe(mint: string, primary: boolean): Collateral {
   if (mint === CIRCLE_DEVNET_USDC) return { mint, symbol: COLLATERAL.symbol, name: COLLATERAL.name, primary };
@@ -33,7 +35,7 @@ export function collateralsOf(deployment: Pick<CoxDeployment, "collateralMint" |
 
 export function marketOf(deployment: CoxDeployment | null, trading: TradingStatus | null): Market {
   const interval = deployment?.publicationIntervalSeconds;
-  return { trading, interval: Number.isSafeInteger(interval) && interval! > 0 ? interval! : 60, collaterals: collateralsOf(deployment), decimals: deployment?.collateralDecimals ?? 0 };
+  return { trading, interval: Number.isSafeInteger(interval) && interval! > 0 ? interval! : 60, collaterals: collateralsOf(deployment), decimals: deployment?.collateralDecimals ?? 0, program: deployment?.program ?? null, pool: deployment?.poolAddress ?? null };
 }
 
 export function batchesFor(interval: number, seconds = VALID_SECONDS): number {
