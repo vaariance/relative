@@ -9,6 +9,7 @@ import { readDynamicManifest, DYNAMIC_CRYPTO_CLASS, dynamicPositionSpace } from 
 import { sha256 } from "./wire.ts";
 import type { Pool, Position } from "./accounts.ts";
 import { swapCapabilities, SWAP_DEVNET_GENESIS } from "./capabilities.ts";
+import { assertMarketActive, marketLifecycle } from "./lifecycle.ts";
 export type { SwapCapabilities, SwapCapability, SwapCapabilityReason } from "./capabilities.ts";
 
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -98,7 +99,10 @@ export class CoxSwapSdk {
   private checkFeeVersion(pool: Pool, expected?: bigint) {
     if (expected !== undefined) { uint(expected, U64_MAX); check(expected === number(pool.feeVersion), "SwapFeeChangedRebuild"); }
   }
-  private cryptoClass(pool: Pool): number { return pool.schemaVersion === 5 ? DYNAMIC_CRYPTO_CLASS : pool.classes.length - 1; }
+  private cryptoClass(pool: Pool): number {
+    if (pool.schemaVersion !== 5) return pool.classes.length - 1;
+    return pool.lifecycleVersion === 1 ? pool.cryptoClass : DYNAMIC_CRYPTO_CLASS;
+  }
   private selectedClass(pool: Pool, classId?: number): number {
     const selected = classId ?? this.cryptoClass(pool);
     check(Number.isInteger(selected) && selected >= 0 && selected < pool.classes.length, "SwapInvalidClass");
@@ -128,6 +132,7 @@ export class CoxSwapSdk {
       && methodology.canonical.length === methodology.expectedLength
       && sha256(Buffer.from(methodology.canonical)).equals(Buffer.from(methodology.digest)), "SwapMethodologyMismatch");
     const dynamic = pool.schemaVersion === 5 ? readDynamicManifest(methodology, this.poolKey) : null;
+    if (dynamic) check(this.cryptoClass(pool) === (dynamic.schemaVersion === 2 ? 0 : DYNAMIC_CRYPTO_CLASS), "SwapCryptoClassMismatch");
     check((pool.schemaVersion === 5) === (methodology.schemaVersion === 3), "SwapMethodologyMismatch");
     check(pool.classes.length === methodology.roster.length + 1 && pool.classes.length >= (dynamic ? 31 : 3) && pool.classes.length <= (dynamic ? 256 : 31)
       && pool.references.length === pool.classes.length
@@ -160,6 +165,7 @@ export class CoxSwapSdk {
   }
   private trading(context: Awaited<ReturnType<CoxSwapSdk["context"]>>) {
     check(context.pool.schemaVersion !== 3, "SwapPoolRetired");
+    assertMarketActive(context.pool);
     check(context.pool.initialized, "SwapPoolNotInitialized");
     check(!context.registry.paused, "SwapPaused");
     check(!context.halted, "SwapHalted");
@@ -215,13 +221,16 @@ export class CoxSwapSdk {
   }
   async market() {
     const context = await this.context();
+    const lifecycle = marketLifecycle(context.pool);
     return { pool: this.poolKey, collateralMint: this.options.collateralMint, collateralDecimals: COLLATERAL_DECIMALS,
       feeTerms: this.feeTerms(context.pool), pendingFees: context.pool.feePending ? { version: number(context.pool.feePendingVersion), bps: context.pool.feePendingBps, cap: number(context.pool.feePendingCap), activationCutoff: number(context.pool.feePendingCutoff) } : null,
       classes: context.pool.classes.map((_, classId) => ({ classId, assetId: context.dynamic ? context.dynamic.instruments.find(asset => asset.classId === classId)?.symbol ?? null : context.methodology.roster[classId] ?? null, benchmark: classId === this.cryptoClass(context.pool) })),
       cryptoUnitDecimals: CRYPTO_UNIT_DECIMALS, cryptoClass: this.cryptoClass(context.pool), testOnly: true as const,
       benchmarkLabel: `CRYPTO (pilot, ${context.methodology.roster.length} assets)`, initialized: context.pool.initialized,
-      tradingOpensAt: number(context.pool.tradingOpensAt), tradingOpen: context.pool.schemaVersion < 4 || context.now >= number(context.pool.tradingOpensAt),
-      retired: context.pool.schemaVersion === 3, paused: context.registry.paused, halted: context.halted, earliestBatchEstimate: this.earliestBatch(context), sequence: number(context.pool.sequence), batch: number(context.pool.lastBatch) };
+      lifecycle, assetRegistry: context.pool.assetRegistry.equals(PublicKey.default) ? null : context.pool.assetRegistry,
+      generation: context.pool.generation.some(value => value !== 0) ? Buffer.from(context.pool.generation).toString("hex") : null,
+      tradingOpensAt: number(context.pool.tradingOpensAt), tradingOpen: lifecycle === "active" && context.pool.initialized && !context.registry.paused && !context.halted && (context.pool.schemaVersion < 4 || context.now >= number(context.pool.tradingOpensAt)),
+      retired: lifecycle === "archived", paused: context.registry.paused, halted: context.halted, earliestBatchEstimate: this.earliestBatch(context), sequence: number(context.pool.sequence), batch: number(context.pool.lastBatch) };
   }
   async balances(owner: PublicKey) {
     return this.classBalances(owner);

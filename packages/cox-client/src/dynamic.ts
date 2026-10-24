@@ -4,6 +4,12 @@ import type { Methodology } from "./accounts.ts";
 import { bytes32, integer, sha256, stringBytes } from "./wire.ts";
 
 export const DYNAMIC_CRYPTO_CLASS = 30;
+export const FRESH_CRYPTO_CLASS = 0;
+export type DynamicSchemaVersion = 1 | 2;
+export function dynamicCryptoClass(schemaVersion: DynamicSchemaVersion): number {
+  if (schemaVersion !== 1 && schemaVersion !== 2) throw new Error("UnsupportedDynamicSchema");
+  return schemaVersion === 2 ? FRESH_CRYPTO_CLASS : DYNAMIC_CRYPTO_CLASS;
+}
 export const DYNAMIC_MAX_ASSETS = 255;
 export const DYNAMIC_UNIVERSE_DOMAIN = "COX/UNIVERSE/OPERATOR-ATTESTED/V1";
 export interface DynamicInstrument {
@@ -15,34 +21,39 @@ export interface DynamicCapture {
   signedPayloadDigest: Uint8Array; trustedStorageDigest: Uint8Array; predecessorSequence: bigint; predecessorStateDigest: Uint8Array;
 }
 export interface DynamicManifest {
-  schemaVersion: 1; pool: PublicKey; operator: PublicKey; sourceMethodology: Uint8Array; version: bigint;
+  schemaVersion: DynamicSchemaVersion; pool: PublicKey; operator: PublicKey; sourceMethodology: Uint8Array; version: bigint;
   predecessorDigest: Uint8Array; expectedInstruments: number; capture: DynamicCapture; instruments: readonly DynamicInstrument[];
 }
 function check(condition: boolean): asserts condition { if (!condition) throw new Error("InvalidDynamicManifest"); }
 const nonzero = (value: Uint8Array) => value.length === 32 && value.some(byte => byte !== 0);
 const vector = (values: readonly Uint8Array[]) => Buffer.concat([integer(BigInt(values.length), 4), ...values]);
-export function dynamicClassForAsset(index: number): number {
+export function dynamicClassForAsset(index: number, schemaVersion: DynamicSchemaVersion = 1): number {
   check(Number.isInteger(index) && index >= 0 && index < DYNAMIC_MAX_ASSETS);
+  check(schemaVersion === 1 || schemaVersion === 2);
+  if (schemaVersion === 2) return index + 1;
   return index < DYNAMIC_CRYPTO_CLASS ? index : index + 1;
 }
-export function dynamicAssetForClass(classId: number, assetCount: number): number | null {
+export function dynamicAssetForClass(classId: number, assetCount: number, schemaVersion: DynamicSchemaVersion = 1): number | null {
   check(Number.isInteger(assetCount) && assetCount >= 30 && assetCount <= DYNAMIC_MAX_ASSETS);
   check(Number.isInteger(classId) && classId >= 0 && classId <= assetCount);
+  check(schemaVersion === 1 || schemaVersion === 2);
+  if (schemaVersion === 2) return classId === FRESH_CRYPTO_CLASS ? null : classId - 1;
   return classId === DYNAMIC_CRYPTO_CLASS ? null : classId < DYNAMIC_CRYPTO_CLASS ? classId : classId - 1;
 }
 function validate(value: DynamicManifest): void {
   const c = value.capture;
-  check(value.schemaVersion === 1 && !value.pool.equals(PublicKey.default) && !value.operator.equals(PublicKey.default)
+  check((value.schemaVersion === 1 || value.schemaVersion === 2) && !value.pool.equals(PublicKey.default) && !value.operator.equals(PublicKey.default)
     && nonzero(value.sourceMethodology) && value.version > 0n && value.predecessorDigest.length === 32
     && (value.version === 1n) === !nonzero(value.predecessorDigest)
     && value.expectedInstruments === value.instruments.length && value.instruments.length >= 30 && value.instruments.length <= DYNAMIC_MAX_ASSETS);
   check(c.timestamp > 0n && c.benchmark > 0n && c.pricesE8.length === value.instruments.length && c.pricesE8.every(price => price > 0n)
-    && nonzero(c.priceUniverseDigest) && nonzero(c.signedPayloadDigest) && nonzero(c.trustedStorageDigest) && nonzero(c.predecessorStateDigest));
+    && nonzero(c.priceUniverseDigest) && nonzero(c.signedPayloadDigest) && nonzero(c.trustedStorageDigest)
+    && c.predecessorStateDigest.length === 32 && (c.predecessorSequence === 0n || nonzero(c.predecessorStateDigest)));
   const ids = new Set<string>(), symbols = new Set<string>(), epochs = new Set<number>(), pro = new Set<number>(), core = new Set<string>(), mints = new Set<string>();
   for (const [index, asset] of value.instruments.entries()) {
     const coreKey = Buffer.from(asset.pythCoreFeedId).toString("hex"), mint = asset.tokenMint?.toBase58();
     check(/^[a-z0-9._:-]{1,64}$/.test(asset.stableId) && /^[A-Z0-9._-]{1,16}$/.test(asset.symbol)
-      && asset.classId === dynamicClassForAsset(index) && Number.isInteger(asset.epochId) && asset.epochId >= 0 && asset.epochId < 256
+      && asset.classId === dynamicClassForAsset(index, value.schemaVersion) && Number.isInteger(asset.epochId) && asset.epochId >= 0 && asset.epochId < 256
       && Number.isInteger(asset.pythProFeedId) && asset.pythProFeedId > 0 && asset.pythProFeedId <= 0xffffffff
       && nonzero(asset.pythCoreFeedId) && (asset.tokenMint === null || !asset.tokenMint.equals(PublicKey.default))
       && asset.originalPriceE8 > 0n && asset.originalBenchmark > 0n && asset.originalTimestamp > 0n
@@ -54,7 +65,7 @@ function validate(value: DynamicManifest): void {
 export function dynamicManifestBytes(value: DynamicManifest): Buffer {
   validate(value);
   const c = value.capture;
-  const out = Buffer.concat([stringBytes(DYNAMIC_UNIVERSE_DOMAIN), integer(1n, 2), value.pool.toBuffer(), value.operator.toBuffer(), bytes32(value.sourceMethodology),
+  const out = Buffer.concat([stringBytes(DYNAMIC_UNIVERSE_DOMAIN), integer(BigInt(value.schemaVersion), 2), value.pool.toBuffer(), value.operator.toBuffer(), bytes32(value.sourceMethodology),
     integer(value.version, 8), bytes32(value.predecessorDigest), integer(BigInt(value.expectedInstruments), 2),
     bytes32(c.priceUniverseDigest), integer(c.timestamp, 8), integer(c.benchmark, 16, true), vector(c.pricesE8.map(price => integer(price, 8))),
     bytes32(c.signedPayloadDigest), bytes32(c.trustedStorageDigest), integer(c.predecessorSequence, 8), bytes32(c.predecessorStateDigest),
@@ -72,7 +83,7 @@ export function decodeDynamicManifest(bytes: Uint8Array, expectedDigest?: Uint8A
   const text = (maximum: number) => { const length = Number(number(4)); check(length <= maximum); const bytes = take(length), result = bytes.toString("utf8"); check(Buffer.from(result).equals(bytes)); return result; };
   const list = <T>(read: () => T): T[] => { const count = Number(number(4)); check(count >= 30 && count <= DYNAMIC_MAX_ASSETS); return Array.from({ length: count }, read); };
   check(text(64) === DYNAMIC_UNIVERSE_DOMAIN);
-  const schemaVersion = Number(number(2)); check(schemaVersion === 1);
+  const schemaVersion = Number(number(2)); check(schemaVersion === 1 || schemaVersion === 2);
   const pool = new PublicKey(take(32)), operator = new PublicKey(take(32)), sourceMethodology = take(32), version = number(8), predecessorDigest = take(32), expectedInstruments = Number(number(2));
   const capture: DynamicCapture = { priceUniverseDigest: take(32), timestamp: number(8), benchmark: number(16, true), pricesE8: list(() => number(8)),
     signedPayloadDigest: take(32), trustedStorageDigest: take(32), predecessorSequence: number(8), predecessorStateDigest: take(32) };

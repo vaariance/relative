@@ -33,6 +33,22 @@ test("dynamic class mapping reserves CRYPTO thirty across appended assets and fu
   assert.equal(decodeDynamicManifest(canonical).instruments.length, 255);
   assert.equal(dynamicPositionSpace(31), 4096); assert.equal(dynamicPositionSpace(256), 24576);
 });
+test("fresh schema-two generations reserve CRYPTO zero without reinterpreting legacy history", () => {
+  const value = manifest(31); value.schemaVersion = 2;
+  value.capture.predecessorStateDigest = new Uint8Array(32);
+  value.instruments.forEach((asset, index) => { asset.classId = dynamicClassForAsset(index, 2); });
+  assert.equal(dynamicAssetForClass(0, 31, 2), null);
+  assert.equal(dynamicClassForAsset(0, 2), 1);
+  assert.equal(dynamicClassForAsset(30, 2), 31);
+  assert.equal(dynamicClassForAsset(254, 2), 255);
+  assert.equal(dynamicAssetForClass(30, 31, 2), 29);
+  assert.equal(dynamicAssetForClass(30, 31, 1), null);
+  const encoded = dynamicManifestBytes(value), decoded = decodeDynamicManifest(encoded, sha256(encoded));
+  assert.equal(decoded.schemaVersion, 2);
+  assert.deepEqual(decoded.instruments.map(asset => asset.classId), Array.from({ length: 31 }, (_, index) => index + 1));
+  value.schemaVersion = 1;
+  assert.throws(() => dynamicManifestBytes(value), /InvalidDynamicManifest/);
+});
 test("dynamic manifests reject forged mappings, duplicate feeds, invalid option mints and missing provenance", () => {
   for (let change = 0; change < 8; change++) {
     const value = manifest();

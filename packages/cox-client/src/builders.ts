@@ -3,6 +3,7 @@ import { BN, type Program } from "@coral-xyz/anchor";
 import { PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
 import { addresses } from "./pdas.ts";
 import { bytes32 } from "./wire.ts";
+import type { MarketLifecycle } from "./lifecycle.ts";
 
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const bn = (value: bigint) => new BN(value.toString());
@@ -73,6 +74,33 @@ export class CoxInstructions {
     const pool = this.pdas.pool(poolId);
     return this.build("initializeAdaptivePool", { poolId: bn(poolId), tradingOpensAt: bn(tradingOpensAt) }, { admin, registry: this.pdas.registry(), methodology, pool, mint, vault: this.pdas.vault(pool), tokenProgram: TOKEN_PROGRAM, systemProgram: SystemProgram.programId });
   }
+  sealGenesisMethodology(runtime: PublicKey, methodology: PublicKey) {
+    return this.build("sealGenesisMethodology", {}, { runtime, registry: this.pdas.registry(), methodology });
+  }
+  initializeDynamicPool(admin: PublicKey, methodology: PublicKey, mint: PublicKey, poolId: bigint, tradingOpensAt: bigint) {
+    const pool = this.pdas.pool(poolId);
+    return this.build("initializeDynamicPool", { poolId: bn(poolId), tradingOpensAt: bn(tradingOpensAt) }, { admin, registry: this.pdas.registry(), methodology, pool, mint, vault: this.pdas.vault(pool), tokenProgram: TOKEN_PROGRAM, systemProgram: SystemProgram.programId });
+  }
+  prepareDynamicPool(admin: PublicKey, pool: PublicKey, methodology: PublicKey) {
+    return this.build("prepareDynamicPool", {}, { admin, registry: this.pdas.registry(), pool, methodology });
+  }
+  initializeDynamicStaging(payer: PublicKey, pool: PublicKey) {
+    return this.build("initializeDynamicStaging", {}, { payer, pool, batch: this.pdas.batch(pool), publication: this.pdas.publication(pool), systemProgram: SystemProgram.programId });
+  }
+  setPoolLifecycle(admin: PublicKey, pool: PublicKey, lifecycle: MarketLifecycle, assetRegistry?: PublicKey) {
+    return this.build("setPoolLifecycle", { lifecycle: { [lifecycle]: {} } }, { admin, registry: this.pdas.registry(), pool, ...(assetRegistry ? { assetRegistry } : {}) });
+  }
+  initializeAssetRegistry(admin: PublicKey, pool: PublicKey, generation: Uint8Array) {
+    return this.build("initializeAssetRegistry", { generation: [...bytes32(generation)] }, { admin, registry: this.pdas.registry(), pool, assetRegistry: this.pdas.assetRegistry(generation), systemProgram: SystemProgram.programId });
+  }
+  registerAssetRegistryVersion(payer: PublicKey, pool: PublicKey, generation: Uint8Array, digest: Uint8Array) {
+    const assetRegistry = this.pdas.assetRegistry(generation);
+    return this.build("registerAssetRegistryVersion", {}, { payer, registry: this.pdas.registry(), pool, assetRegistry, methodology: this.pdas.methodology(digest), version: this.pdas.assetRegistryVersion(assetRegistry, digest), systemProgram: SystemProgram.programId });
+  }
+  activateAssetRegistryVersion(runtime: PublicKey, pool: PublicKey, generation: Uint8Array, digest: Uint8Array) {
+    const assetRegistry = this.pdas.assetRegistry(generation);
+    return this.build("activateAssetRegistryVersion", {}, { runtime, registry: this.pdas.registry(), pool, methodology: this.pdas.methodology(digest), assetRegistry, version: this.pdas.assetRegistryVersion(assetRegistry, digest) });
+  }
   initializeDevnetCollateral(admin: PublicKey, keys: PoolKeys, testMint: PublicKey) {
     return this.build("initializeDevnetCollateral", {}, { admin, registry: this.pdas.registry(), pool: keys.pool, vault: keys.vault,
       testMint, testVault: this.pdas.testVault(keys.pool), tokenProgram: TOKEN_PROGRAM, systemProgram: SystemProgram.programId });
@@ -119,12 +147,12 @@ export class CoxInstructions {
   migrateDynamicPool(admin: PublicKey, keys: PoolKeys, methodology: PublicKey, nextMethodology: PublicKey) {
     return this.build("migrateDynamicPool", {}, { admin, registry: this.pdas.registry(), ...keys, methodology, nextMethodology });
   }
-  scheduleUniverse(admin: PublicKey, pool: PublicKey, methodology: PublicKey, version: bigint, identitiesDigest: Uint8Array, expectedInstruments: number, activationTimestamp: bigint, expiresAt: bigint) {
+  scheduleUniverse(admin: PublicKey, pool: PublicKey, methodology: PublicKey, version: bigint, identitiesDigest: Uint8Array, expectedInstruments: number, activationTimestamp: bigint, expiresAt: bigint, assetRegistry?: PublicKey) {
     if (!Number.isInteger(expectedInstruments) || expectedInstruments < 31 || expectedInstruments > 255 || activationTimestamp <= 0n || expiresAt < activationTimestamp || expiresAt > activationTimestamp + 86400n) throw new Error("InvalidUniverseSchedule");
-    return this.build("scheduleUniverse", { version: bn(version), identitiesDigest: [...bytes32(identitiesDigest)], expectedInstruments, activationTimestamp: bn(activationTimestamp), expiresAt: bn(expiresAt) }, { admin, registry: this.pdas.registry(), pool, methodology, schedule: this.pdas.universeSchedule(pool, version), systemProgram: SystemProgram.programId });
+    return this.build("scheduleUniverse", { version: bn(version), identitiesDigest: [...bytes32(identitiesDigest)], expectedInstruments, activationTimestamp: bn(activationTimestamp), expiresAt: bn(expiresAt) }, { admin, registry: this.pdas.registry(), pool, methodology, schedule: this.pdas.universeSchedule(pool, version), systemProgram: SystemProgram.programId, ...(assetRegistry ? { assetRegistry } : {}) });
   }
-  cancelUniverseSchedule(admin: PublicKey, pool: PublicKey, version: bigint) {
-    return this.build("cancelUniverseSchedule", {}, { admin, registry: this.pdas.registry(), pool, schedule: this.pdas.universeSchedule(pool, version) });
+  cancelUniverseSchedule(admin: PublicKey, pool: PublicKey, version: bigint, assetRegistry?: PublicKey) {
+    return this.build("cancelUniverseSchedule", {}, { admin, registry: this.pdas.registry(), pool, schedule: this.pdas.universeSchedule(pool, version), ...(assetRegistry ? { assetRegistry } : {}) });
   }
   registerScheduledMethodology(runtime: PublicKey, pool: PublicKey, methodology: PublicKey, version: bigint, digest: Uint8Array, length: number) {
     return this.build("registerScheduledMethodology", { digest: [...bytes32(digest)], length }, { runtime, registry: this.pdas.registry(), pool, methodology, schedule: this.pdas.universeSchedule(pool, version), nextMethodology: this.pdas.methodology(digest), systemProgram: SystemProgram.programId });
@@ -135,8 +163,8 @@ export class CoxInstructions {
   sealScheduledMethodology(runtime: PublicKey, pool: PublicKey, methodology: PublicKey, version: bigint, nextMethodology: PublicKey) {
     return this.build("sealScheduledMethodology", {}, { runtime, registry: this.pdas.registry(), pool, methodology, schedule: this.pdas.universeSchedule(pool, version), nextMethodology });
   }
-  activateUniverse(runtime: PublicKey, keys: PoolKeys, methodology: PublicKey, nextMethodology: PublicKey, version: bigint) {
-    return this.build("activateUniverse", {}, { runtime, registry: this.pdas.registry(), ...keys, methodology, nextMethodology, schedule: this.pdas.universeSchedule(keys.pool, version) });
+  activateUniverse(runtime: PublicKey, keys: PoolKeys, methodology: PublicKey, nextMethodology: PublicKey, version: bigint, registryBinding?: { assetRegistry: PublicKey; nextRegistryVersion: PublicKey; previousRegistryVersion: PublicKey }) {
+    return this.build("activateUniverse", {}, { runtime, registry: this.pdas.registry(), ...keys, methodology, nextMethodology, schedule: this.pdas.universeSchedule(keys.pool, version), ...registryBinding });
   }
   beginDynamicPublication(keys: PoolKeys & { payer: PublicKey; runtime: PublicKey; methodology: PublicKey }, batchId: bigint, sequence: bigint, predecessor: Uint8Array, snapshot: Uint8Array, benchmark: bigint) {
     return this.build("beginDynamicPublication", { batchId: bn(batchId), sequence: bn(sequence), predecessor: [...bytes32(predecessor)], snapshot: [...bytes32(snapshot)], benchmark: bn(benchmark) }, { ...keys, registry: this.pdas.registry(), batch: this.pdas.batch(keys.pool), systemProgram: SystemProgram.programId });

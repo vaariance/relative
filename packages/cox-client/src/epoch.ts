@@ -2,11 +2,13 @@ import { Buffer } from "buffer";
 import { BN, type Program } from "@coral-xyz/anchor";
 import { PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
 import { bytes32, integer } from "./wire.ts";
+import type { MarketLifecycle } from "./lifecycle.ts";
 
 export const EPOCH_SECONDS = 14_400n;
 export const EPOCH_FEE_BPS = 2n;
 export const EPOCH_FEE_CAP = 200_000n;
 export const EPOCH_HEAP_BYTES = 262_144;
+export const EPOCH_ACCOUNT_BYTES = 64_000;
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const MAX_REFERENCE = 10n ** 24n;
 const bn = (value: bigint) => new BN(value.toString());
@@ -14,6 +16,8 @@ const assetId = (value: number) => { if (!Number.isSafeInteger(value) || value <
 const positiveReference = (value: bigint) => { if (value <= 0n || value > MAX_REFERENCE) throw new Error("InvalidEpochReference"); return bn(value); };
 
 export interface EpochSelection { readonly config: PublicKey; readonly opensAt: bigint }
+export interface EpochRegistryBinding { readonly assetRegistry: PublicKey; readonly registryVersion: PublicKey; readonly methodology: PublicKey }
+export interface EpochPreparationProgress { readonly accountBytes: number | null; readonly copiedAssets: number; readonly assetCount: number; readonly sealed: boolean }
 export interface EpochAsset { readonly id: number; readonly feedId: Uint8Array; readonly originPrice: bigint }
 export interface EpochPrice { readonly assetId: number; readonly feedId: Uint8Array; readonly value: bigint }
 export interface EpochPrediction {
@@ -78,6 +82,53 @@ export class EpochInstructions {
     if (testMint.equals(mint)) throw new Error("InvalidEpochCollateral");
     return this.build("initializeDevnetConfig", this.configArguments(configId, operator, methodology, originBenchmark, maxEntryPriceAge, maxLots),
       { admin, mint, testMint, config: this.pdas.config(admin, configId), systemProgram: SystemProgram.programId });
+  }
+  initializeRegistryConfig(admin: PublicKey, mint: PublicKey, configId: bigint, operator: PublicKey, methodology: Uint8Array,
+    originBenchmark: bigint, maxEntryPriceAge: bigint, maxLots: number, assetRegistry: PublicKey, testMint?: PublicKey) {
+    if (assetRegistry.equals(PublicKey.default) || testMint?.equals(mint)) throw new Error("InvalidEpochConfiguration");
+    return this.build(testMint ? "initializeRegistryDevnetConfig" : "initializeRegistryConfig",
+      { ...this.configArguments(configId, operator, methodology, originBenchmark, maxEntryPriceAge, maxLots), assetRegistry },
+      { admin, mint, ...(testMint ? { testMint } : {}), config: this.pdas.config(admin, configId), systemProgram: SystemProgram.programId });
+  }
+  setConfigLifecycle(admin: PublicKey, config: PublicKey, lifecycle: MarketLifecycle) {
+    return this.build("setConfigLifecycle", { lifecycle: { [lifecycle]: {} } }, { admin, config });
+  }
+  initializeCurrentEpoch(payer: PublicKey, mint: PublicKey, selection: EpochSelection, binding: EpochRegistryBinding, testMint: PublicKey = mint) {
+    return this.build("initializeCurrentEpoch", { opensAt: bn(selection.opensAt) }, { payer, ...this.keys(selection), ...binding, mint, testMint, tokenProgram: TOKEN_PROGRAM, systemProgram: SystemProgram.programId });
+  }
+  private currentDraftKeys(payer: PublicKey, selection: EpochSelection, binding: EpochRegistryBinding) {
+    return { payer, config: selection.config, ...binding, epoch: this.pdas.epoch(selection), systemProgram: SystemProgram.programId };
+  }
+  growCurrentEpoch(payer: PublicKey, selection: EpochSelection, binding: EpochRegistryBinding, additionalBytes: number) {
+    if (!Number.isSafeInteger(additionalBytes) || additionalBytes < 1 || additionalBytes > 8192) throw new Error("InvalidEpochGrowth");
+    return this.build("growCurrentEpoch", { additionalBytes }, this.currentDraftKeys(payer, selection, binding));
+  }
+  copyRegistryAssets(payer: PublicKey, selection: EpochSelection, binding: EpochRegistryBinding, start: number, count: number) {
+    if (!Number.isSafeInteger(start) || start < 0 || start > 254 || !Number.isSafeInteger(count) || count < 1 || count > 8 || start + count > 255) throw new Error("InvalidEpochPage");
+    return this.build("copyRegistryAssets", { start, count }, this.currentDraftKeys(payer, selection, binding));
+  }
+  sealCurrentEpoch(payer: PublicKey, selection: EpochSelection, binding: EpochRegistryBinding) {
+    return this.build("sealCurrentEpoch", {}, this.currentDraftKeys(payer, selection, binding));
+  }
+  prepareCurrentEpoch(payer: PublicKey, mint: PublicKey, selection: EpochSelection, binding: EpochRegistryBinding, progress: EpochPreparationProgress, testMint: PublicKey = mint): TransactionInstruction[] {
+    if (!Number.isSafeInteger(progress.assetCount) || progress.assetCount < 30 || progress.assetCount > 255
+      || !Number.isSafeInteger(progress.copiedAssets) || progress.copiedAssets < 0 || progress.copiedAssets > progress.assetCount
+      || progress.accountBytes !== null && (!Number.isSafeInteger(progress.accountBytes) || progress.accountBytes < 2048 || progress.accountBytes > EPOCH_ACCOUNT_BYTES)
+      || progress.accountBytes === null && (progress.copiedAssets !== 0 || progress.sealed)) throw new Error("InvalidEpochPreparation");
+    if (progress.sealed) return [];
+    const instructions: TransactionInstruction[] = [];
+    if (progress.accountBytes === null) instructions.push(this.initializeCurrentEpoch(payer, mint, selection, binding, testMint));
+    let bytes = progress.accountBytes ?? 2048;
+    while (bytes < EPOCH_ACCOUNT_BYTES) {
+      const growth = Math.min(8192, EPOCH_ACCOUNT_BYTES - bytes);
+      instructions.push(this.growCurrentEpoch(payer, selection, binding, growth)); bytes += growth;
+    }
+    for (let start = progress.copiedAssets; start < progress.assetCount; start += 8) instructions.push(this.copyRegistryAssets(payer, selection, binding, start, Math.min(8, progress.assetCount - start)));
+    instructions.push(this.sealCurrentEpoch(payer, selection, binding));
+    return instructions;
+  }
+  finalizeEmpty(selection: EpochSelection) {
+    return this.build("finalizeEmpty", {}, this.keys(selection));
   }
   private configArguments(configId: bigint, operator: PublicKey, methodology: Uint8Array, originBenchmark: bigint, maxEntryPriceAge: bigint, maxLots: number) {
     integer(configId, 8); integer(maxEntryPriceAge, 8);

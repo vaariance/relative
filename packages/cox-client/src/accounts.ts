@@ -1,5 +1,6 @@
 import type anchor from "@coral-xyz/anchor";
 import type { PublicKey } from "@solana/web3.js";
+import type { LifecycleAccount } from "./lifecycle.ts";
 
 type Integer = anchor.BN;
 interface Header { schemaVersion: number; bump: number }
@@ -8,11 +9,12 @@ export interface Retirement extends Header { pool: PublicKey; sequence: Integer;
 export interface PriceWire { priceE8: Integer; venue: number; step: number; candleStart: Integer; tradeAgeMinutes: number }
 export interface Registry extends Header { admin: PublicKey; runtime: PublicKey; pendingRuntime: PublicKey | null; runtimeEffectiveBatch: Integer; paused: boolean; nextPoolId: Integer; maxAcceptedBatch: Integer; activeBatches: Integer }
 export interface Methodology extends Header { digest: number[]; canonical: number[]; sealed: boolean; activationBatch: Integer; expectedLength: number; roster: number[]; origin: Integer; bybit: boolean }
-export interface Pool extends Header {
+export interface Pool extends Header, LifecycleAccount {
   poolId: Integer; registry: PublicKey; methodology: PublicKey; collateralMint: PublicKey; vault: PublicKey; origin: Integer; lastBatch: Integer; sequence: Integer;
   stateDigest: number[]; benchmark: Integer; originPrices: Integer[]; lastPrices: Integer[]; references: Integer[]; classes: Class[];
   active: Integer; pending: Integer; payable: Integer; residual: Integer; nextRequestNonce: Integer; stage: PublicKey | null; initialized: boolean; queueStart: Integer; stageBatch: Integer; stageClosedEnd: Integer;
   feeVersion: Integer; feeBps: number; feeCap: Integer; fees: Integer; feeNextVersion: Integer; feePending: boolean; feePendingVersion: Integer; feePendingBps: number; feePendingCap: Integer; feePendingCutoff: Integer; feeInitialScheduled: boolean; tradingOpensAt: Integer; testCollateralMint: PublicKey | null;
+  assetRegistry: PublicKey; generation: number[]; cryptoClass: number;
 }
 export interface Position extends Header {
   pool: PublicKey; owner: PublicKey; appliedSequence: Integer; classes: { units: Integer; locked: Integer }[]; payable: Integer; refundable: Integer;
@@ -34,4 +36,6 @@ export interface Publication extends Header {
   pool: PublicKey; sequence: Integer; batch: Integer; stateDigest: number[]; snapshotDigest: number[]; manifestDigest: number[]; statePreimage: number[]; prices: PriceWire[]; committedAt: Integer;
 }
 export interface UniverseSchedule extends Header { pool: PublicKey; predecessorDigest: number[]; sourceMethodology: number[]; version: Integer; identitiesDigest: number[]; expectedInstruments: number; activationTimestamp: Integer; expiresAt: Integer; cancelled: boolean; consumed: boolean }
-export interface Accounts { universeSchedule: UniverseSchedule; registry: Registry; methodology: Methodology; pool: Pool; position: Position; request: Request; batch: Batch; publication: Publication; retirement: Retirement }
+export interface AssetRegistry extends Header { generation: number[]; authorityRegistry: PublicKey; sourcePool: PublicKey; activeVersion: PublicKey; activeDigest: number[]; activeFrom: Integer; pendingActivation: Integer }
+export interface AssetRegistryVersion extends Header { registry: PublicKey; generation: number[]; methodology: PublicKey; digest: number[]; predecessor: number[]; effectiveFrom: Integer; effectiveUntil: Integer; sealed: boolean }
+export interface Accounts { assetRegistry: AssetRegistry; assetRegistryVersion: AssetRegistryVersion; universeSchedule: UniverseSchedule; registry: Registry; methodology: Methodology; pool: Pool; position: Position; request: Request; batch: Batch; publication: Publication; retirement: Retirement }

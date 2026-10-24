@@ -5,6 +5,7 @@ import type { Accounts, Pool, Position, Publication, Request } from "./accounts.
 import { addresses } from "./pdas.ts";
 import { readDynamicManifest } from "./dynamic.ts";
 import { decodeState, sha256 } from "./wire.ts";
+import { marketLifecycle } from "./lifecycle.ts";
 
 const appended = {
   pool: ["feeVersion", "feeBps", "feeCap", "fees", "feeNextVersion", "feePending", "feePendingVersion", "feePendingBps", "feePendingCap", "feePendingCutoff", "feeInitialScheduled", "tradingOpensAt"],
@@ -40,7 +41,7 @@ export function decodeAccount<K extends keyof Accounts>(program: Program, name: 
     : name === "batch" || name === "publication" ? schema === 2 || schema === 3 || schema === 4 : name === "methodology" ? schema === 1 || schema === 2 || schema === 3 : schema === 1;
   if (!supported) throw new Error("AccountVersionMismatch");
   const fields: string[] = [...(legacy ? appended[name as keyof typeof appended] ?? [] : [])];
-  if (name === "pool" && schema < 4) fields.push("tradingOpensAt", "testCollateralMint");
+  if (name === "pool" && schema < 4) fields.push("tradingOpensAt", "testCollateralMint", "lifecycleVersion", "lifecycle", "assetRegistry", "generation", "cryptoClass");
   if (name === "request" && schema !== 4 && schema !== 3) fields.push("refundedAmount");
   if (name === "request" && schema !== 3) fields.push("fromId", "toId");
   const account = (fields.length ? compatibilityCoder(program, name, schema, fields) : program.coder.accounts).decode(name, info.data) as Accounts[K];
@@ -48,6 +49,10 @@ export function decodeAccount<K extends keyof Accounts>(program: Program, name: 
     const value = field === "fromId" || field === "toId" ? 65535 : field === "testCollateralMint" ? null : field === "feeBps" || field === "feePendingBps" ? 0
       : field === "feePending" || field === "feeInitialScheduled" ? false : new BN(0);
     Object.assign(account, { [field]: value });
+  }
+  if (name === "pool") {
+    if (!("lifecycleVersion" in account) || fields.includes("lifecycleVersion")) Object.assign(account, { lifecycleVersion: 0, lifecycle: { preparing: {} }, assetRegistry: PublicKey.default, generation: Array(32).fill(0), cryptoClass: schema === 5 ? 30 : (account as Pool).classes.length - 1 });
+    marketLifecycle(account as Pool);
   }
   return account;
 }
@@ -99,6 +104,18 @@ export class CoxReader {
     return value;
   }
   async registry() { return this.account("registry", this.pdas.registry()); }
+  async assetRegistry(generation: Uint8Array) {
+    const key = this.pdas.assetRegistry(generation);
+    const value = await this.account("assetRegistry", key);
+    if (!Buffer.from(value.generation).equals(Buffer.from(generation)) || !value.authorityRegistry.equals(this.pdas.registry())) throw new Error("AssetRegistryIdentityMismatch");
+    return value;
+  }
+  async assetRegistryVersion(generation: Uint8Array, digest: Uint8Array) {
+    const registry = this.pdas.assetRegistry(generation);
+    const value = await this.account("assetRegistryVersion", this.pdas.assetRegistryVersion(registry, digest));
+    if (!value.registry.equals(registry) || !Buffer.from(value.generation).equals(Buffer.from(generation)) || !Buffer.from(value.digest).equals(Buffer.from(digest))) throw new Error("AssetRegistryVersionMismatch");
+    return value;
+  }
   async retirement(poolId: bigint) {
     const pool = this.pdas.pool(poolId);
     const value = await this.account("retirement", this.pdas.retirement(pool));

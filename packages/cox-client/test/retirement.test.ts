@@ -50,6 +50,8 @@ async function setup() {
   pool.nextRequestNonce = bn(2);
   pool.classes = [{ backing: bn(3), units: bn(3) }, { backing: bn(0), units: bn(0) }, { backing: bn(0), units: bn(0) }];
   pool.references = [bn(100), bn(100), bn(100)];
+  pool.originPrices = pool.originPrices.slice(0, 2);
+  pool.lastPrices = pool.lastPrices.slice(0, 2);
   pool.active = bn(3); pool.pending = bn(5); pool.payable = bn(7); pool.residual = bn(1); pool.fees = bn(2);
   const position = fixture("position");
   const owner = position.owner;

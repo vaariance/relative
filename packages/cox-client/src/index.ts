@@ -10,3 +10,4 @@ export * from "./epoch.ts";
 
 export * from "./dynamic.ts";
 export * from "./faucet.ts";
+export * from "./lifecycle.ts";

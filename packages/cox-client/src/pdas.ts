@@ -6,6 +6,8 @@ export const PROGRAM_ID = new PublicKey("G6iQGoupNSfduw1QJxQ9vcVi9FnCC6cbippXsi4
 export function addresses(programId: PublicKey = PROGRAM_ID) {
   const derive = (...seeds: Uint8Array[]) => PublicKey.findProgramAddressSync(seeds, programId)[0];
   return {
+    assetRegistry: (generation: Uint8Array) => derive(Buffer.from("asset-registry"), bytes32(generation)),
+    assetRegistryVersion: (registry: PublicKey, digest: Uint8Array) => derive(Buffer.from("asset-version"), registry.toBytes(), bytes32(digest)),
     universeSchedule: (pool: PublicKey, version: bigint) => derive(Buffer.from("universe-schedule"), pool.toBytes(), integer(version, 8)),
     registry: () => derive(Buffer.from("registry")),
     methodology: (digest: Uint8Array) => derive(Buffer.from("methodology"), bytes32(digest)),

@@ -22,6 +22,38 @@ test("Epoch PDA addresses bind the configured pool, UTC boundary and individual 
   assert.throws(()=>pdas.epoch({...selection,opensAt:144_001n}),/InvalidEpochBoundary/);
   assert.throws(()=>pdas.lot(epoch,-1n),/IntegerOutOfRange/);
 });
+test("current-round preparation is canonical, bounded, permissionless and resumable",()=>{
+  const sdk=new EpochInstructions(program),binding={assetRegistry:key(6),registryVersion:key(7),methodology:key(8)};
+  const instructions=sdk.prepareCurrentEpoch(owner,mint,selection,binding,{accountBytes:null,copiedAssets:0,assetCount:31,sealed:false});
+  const decoded=instructions.map(instruction=>coder.decode(instruction.data)!);
+  assert.equal(decoded[0]!.name,"initializeCurrentEpoch");
+  assert.equal(decoded.at(-1)!.name,"sealCurrentEpoch");
+  let growth=0;
+  for(const value of decoded.filter(value=>value.name==="growCurrentEpoch")){
+    const amount=(value.data as {additionalBytes:number}).additionalBytes;
+    assert.ok(amount>0&&amount<=8192);growth+=amount;
+  }
+  assert.equal(growth,64000-2048);
+  assert.deepEqual(decoded.filter(value=>value.name==="copyRegistryAssets").map(value=>value.data),[
+    {start:0,count:8},{start:8,count:8},{start:16,count:8},{start:24,count:7},
+  ]);
+  assert.ok(instructions.every(instruction=>instruction.keys.filter(key=>key.isSigner).every(key=>key.pubkey.equals(owner))));
+  const resumed=sdk.prepareCurrentEpoch(operator,mint,selection,binding,{accountBytes:64000,copiedAssets:16,assetCount:31,sealed:false});
+  assert.deepEqual(resumed.map(instruction=>coder.decode(instruction.data)!.name),["copyRegistryAssets","copyRegistryAssets","sealCurrentEpoch"]);
+  assert.deepEqual(sdk.prepareCurrentEpoch(owner,mint,selection,binding,{accountBytes:64000,copiedAssets:0,assetCount:31,sealed:true}),[]);
+  assert.throws(()=>sdk.prepareCurrentEpoch(owner,mint,selection,binding,{accountBytes:null,copiedAssets:1,assetCount:31,sealed:false}),/InvalidEpochPreparation/);
+  assert.throws(()=>sdk.copyRegistryAssets(owner,selection,binding,254,2),/InvalidEpochPage/);
+  assert.ok(sdk.finalizeEmpty(selection).keys.every(key=>!key.isSigner));
+});
+test("registry-bound configuration and lifecycle encode the generated ABI",()=>{
+  const sdk=new EpochInstructions(program),registry=key(6);
+  const normal=sdk.initializeRegistryConfig(admin,mint,1n,operator,new Uint8Array(32).fill(9),100000000000000n,5n,4096,registry);
+  const dual=sdk.initializeRegistryConfig(admin,mint,1n,operator,new Uint8Array(32).fill(9),100000000000000n,5n,4096,registry,key(7));
+  assert.equal(coder.decode(normal.data)!.name,"initializeRegistryConfig");
+  assert.equal(coder.decode(dual.data)!.name,"initializeRegistryDevnetConfig");
+  assert.equal(coder.decode(sdk.setConfigLifecycle(admin,selection.config,"archived").data)!.name,"setConfigLifecycle");
+  assert.throws(()=>sdk.initializeRegistryConfig(admin,mint,1n,operator,new Uint8Array(32).fill(9),100000000000000n,5n,4096,PublicKey.default),/InvalidEpochConfiguration/);
+});
 test("Epoch SDK encodes every lifecycle operation with the generated contract ABI",()=>{
   const sdk=new EpochInstructions(program);
   const calls=[sdk.initializeConfig(admin,mint,0n,operator,new Uint8Array(32).fill(9),1000n,3n,1000),
