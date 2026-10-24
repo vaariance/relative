@@ -4,7 +4,6 @@ import { CoinIcon } from "@/components/coin-icon";
 import { FirstPublication } from "@/components/first-publication";
 import { LeaderCards } from "@/components/leader-cards";
 import { LiveChange, LiveFigure, LiveSparkline } from "@/components/live";
-import { RowLink } from "@/components/row-link";
 import { CardTitle, Figure, StatCard } from "@/components/stat-card";
 import { getAssets, getDeployment, getPublications } from "@/lib/data";
 import { formatAmount } from "@/lib/format";
@@ -15,9 +14,9 @@ const EMPTY = "—";
 
 function EmptyRow({ id, name, href }: { id: string; name: string; href: string }) {
   return (
-    <RowLink href={href} className="border-b border-line transition-colors last:border-b-0 duration-150 hover:bg-surface-2">
+    <tr className="relative border-b border-line transition-colors last:border-b-0 duration-150 hover:bg-surface-2">
       <th scope="row" className="px-4 py-3 text-left font-normal">
-        <Link href={href} className="flex items-center gap-2.5">
+        <Link href={href} className="flex items-center gap-2.5 after:absolute after:inset-0 after:content-['']">
           <CoinIcon id={id} />
           <span className="font-medium text-ink">{id}</span>
           {name !== id && <span className="text-xs text-muted">{name}</span>}
@@ -28,7 +27,7 @@ function EmptyRow({ id, name, href }: { id: string; name: string; href: string }
       <td className="px-4 py-3 text-right text-muted">{EMPTY}</td>
       <td className="px-4 py-3 text-muted">{EMPTY}</td>
       <td className="num px-4 py-3 text-right">{formatAmount(0)}</td>
-    </RowLink>
+    </tr>
   );
 }
 
@@ -87,9 +86,9 @@ export default async function MarketsPage() {
               const claim = findClass(classes, asset.assetId);
               if (!current) return <EmptyRow key={asset.assetId} id={asset.assetId} name={asset.name} href={`/assets/${asset.assetId}`} />;
               return (
-                <RowLink key={asset.assetId} href={`/assets/${asset.assetId}`} className="border-b border-line transition-colors last:border-b-0 duration-150 hover:bg-surface-2">
+                <tr key={asset.assetId} className="relative border-b border-line transition-colors last:border-b-0 duration-150 hover:bg-surface-2">
                   <th scope="row" className="px-4 py-3 text-left font-normal">
-                    <Link href={`/assets/${asset.assetId}`} className="flex items-center gap-2.5">
+                    <Link href={`/assets/${asset.assetId}`} className="flex items-center gap-2.5 after:absolute after:inset-0 after:content-['']">
                       <CoinIcon id={asset.assetId} />
                       <span className="font-medium text-ink">{asset.assetId}</span>
                       {asset.name !== asset.assetId && <span className="text-xs text-muted">{asset.name}</span>}
@@ -100,7 +99,7 @@ export default async function MarketsPage() {
                   <td className="px-4 py-3 text-right"><LiveChange kind="reference" id={asset.assetId} committed={standingOf(reference)} /></td>
                   <td className="px-4 py-3"><LiveSparkline kind="reference" id={asset.assetId} fallback={reference.slice(-SPARK)} /></td>
                   <td className="num px-4 py-3 text-right">{formatAmount(claim.backing)}</td>
-                </RowLink>
+                </tr>
               );
             })}
           </tbody>
