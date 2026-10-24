@@ -421,7 +421,7 @@ export interface CoxApiErrorBody {
   error: { code: CoxErrorCode; message: string };
 }
 
-export type TransactionOperation = "deposit" | "switch" | "redeem" | "cancel" | "refund" | "withdraw" | "epoch-entry" | "epoch-withdraw" | "prepare-position";
+export type TransactionOperation = "deposit" | "switch" | "redeem" | "cancel" | "refund" | "withdraw" | "epoch-entry" | "epoch-withdraw" | "epoch-refund" | "prepare-position";
 
 export interface DepositInput {
   owner: string;
@@ -551,6 +551,7 @@ export const EPOCH_BASKET_SIZE = 30;
 
 export type EpochPhase = "draft" | "open" | "scoring" | "allocating" | "settled" | "voided";
 export type EpochLotState = "pending" | "executed" | "scored" | "claimable" | "withdrawn";
+export type EpochRefundReason = "not-executed" | "voided";
 
 export interface EpochConfiguration {
   program: string;
@@ -599,6 +600,8 @@ export interface Epoch {
   settlementPot: BaseUnits | null;
   allZero: boolean | null;
   closingReferences: { assetId: string; reference: Scaled }[];
+  closingDeadline: UnixSeconds;
+  voidable: boolean;
   ledger: EpochLedger | null;
 }
 
@@ -622,6 +625,7 @@ export interface EpochLot {
   score: Scaled | null;
   weight: Scaled | null;
   claimable: BaseUnits | null;
+  refund: EpochRefundReason | null;
 }
 
 export interface EpochEntryInput {
@@ -630,6 +634,13 @@ export interface EpochEntryInput {
   grossStake: BaseUnits;
   basket: string[];
   backedAsset: string;
+  collateralMint?: string;
+}
+
+export interface EpochRefundInput {
+  owner: string;
+  opensAt: UnixSeconds;
+  nonce: string;
   collateralMint?: string;
 }
 

@@ -19,6 +19,7 @@ import type {
   EpochEntryInput,
   EpochLot,
   EpochOverview,
+  EpochRefundInput,
   EpochWithdrawInput,
   FaucetChallenge,
   FaucetClaim,
@@ -133,6 +134,7 @@ export function createCoxApiClient(options: CoxApiClientOptions) {
     buildPreparePosition: (input: PreparePositionInput) => post<UnsignedTransaction>("transactions/prepare-position", input),
     buildEpochEntry: (input: EpochEntryInput) => post<UnsignedTransaction>("transactions/epoch-entry", input),
     buildEpochWithdraw: (input: EpochWithdrawInput) => post<UnsignedTransaction>("transactions/epoch-withdraw", input),
+    buildEpochRefund: (input: EpochRefundInput) => post<UnsignedTransaction>("transactions/epoch-refund", input),
     preview: () => get<Preview>("preview"),
     previewHistory: (from: number, to: number, step: 1 | 60 | 300 | 3600) => get<PreviewHistory>(`preview/history?from=${from}&to=${to}&step=${step}`),
     previewPortfolio: (owner: string) => {
