@@ -1,4 +1,4 @@
-import type { Epoch, EpochLot } from "@eox/app-api";
+import { EPOCH_BASKET_SIZE, type Epoch, type EpochLot } from "@eox/app-api";
 
 export const SCORE_DIGITS = 12;
 export const CLOSING_GRACE_SECONDS = 86_400;
@@ -16,6 +16,17 @@ export function stageOf(epoch: Epoch, now: number): Stage {
   if (now < epoch.closesAt) return "open";
   if (now > epoch.closesAt + CLOSING_GRACE_SECONDS) return "expired";
   return "closing";
+}
+
+export function epochBasket(epoch: Epoch): string[] {
+  if (epoch.universe.length > 0) return epoch.universe.map((member) => member.assetId);
+  return epoch.closingReferences.map((item) => item.assetId);
+}
+
+export function basketProblem(basket: readonly string[]): string | null {
+  if (basket.length === EPOCH_BASKET_SIZE) return null;
+  if (basket.length > EPOCH_BASKET_SIZE) return `This Epoch offers ${basket.length} coins. Choosing ${EPOCH_BASKET_SIZE} of them is not supported in the app yet.`;
+  return "This Epoch's asset list is not available yet.";
 }
 
 export function refundStage(stage: Stage): boolean {

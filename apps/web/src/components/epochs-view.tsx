@@ -10,7 +10,7 @@ import { createPortal } from "react-dom";
 import { walletEpochLots } from "@/app/actions";
 import { parseScaled } from "@/lib/amounts";
 import { COLLATERAL } from "@/lib/config";
-import { type LotGroup, type Move, type Stage, STAGE_LABEL, type VaultBalances, TIMELINE, countdown, executionReferences, feeOf, finalPayout, lotView, moves, refundStage, scoreOf, stageOf, timelineStep, units, utcTime, windowText, withdrawSource } from "@/lib/epoch";
+import { type LotGroup, type Move, type Stage, STAGE_LABEL, type VaultBalances, TIMELINE, basketProblem, countdown, epochBasket, executionReferences, feeOf, finalPayout, lotView, moves, refundStage, scoreOf, stageOf, timelineStep, units, utcTime, windowText, withdrawSource } from "@/lib/epoch";
 import { historyEstimates } from "@/lib/estimate";
 import { formatAmount } from "@/lib/format";
 import { type Collateral, collateralsOf } from "@/lib/market";
@@ -62,12 +62,6 @@ function tone(value: number | null): string {
 
 function chip(value: number | null): string {
   return value === null || value === 0 ? "bg-surface-2 text-muted" : value > 0 ? "bg-up/15 text-up" : "bg-down/15 text-down";
-}
-
-function coinsOf(epoch: Epoch, roster: readonly string[]): string[] {
-  if (epoch.universe.length > 0) return epoch.universe.map((member) => member.assetId);
-  if (epoch.closingReferences.length > 0) return epoch.closingReferences.map((item) => item.assetId);
-  return [...roster];
 }
 
 function pickDefault(epochs: readonly Epoch[], now: number): string | null {
@@ -610,8 +604,8 @@ function SettlementCard({ epoch, now }: { epoch: Epoch; now: number }) {
   );
 }
 
-function EntryPanel(props: { epoch: Epoch; coins: string[]; now: number; decimals: number; fee: { bps: number; cap: string }; collaterals: Collateral[]; next: Epoch | null; backed: string | null; anchored?: boolean; onBacked: (id: string) => void; onSelect: (address: string) => void; onSent: () => void; onClose?: () => void }) {
-  const { epoch, coins, now, decimals, fee, backed, collaterals } = props;
+function EntryPanel(props: { epoch: Epoch; basket: string[]; now: number; decimals: number; fee: { bps: number; cap: string }; collaterals: Collateral[]; next: Epoch | null; backed: string | null; anchored?: boolean; onBacked: (id: string) => void; onSelect: (address: string) => void; onSent: () => void; onClose?: () => void }) {
+  const { epoch, basket: coins, now, decimals, fee, backed, collaterals } = props;
   const { owner } = useAccount();
   const [amount, setAmount] = useState("");
   const [review, setReview] = useState(false);
@@ -626,9 +620,10 @@ function EntryPanel(props: { epoch: Epoch; coins: string[]; now: number; decimal
   const gross = amount.trim() === "" ? null : parseScaled(amount, decimals);
   const charge = gross !== null && gross > 0n ? feeOf(gross, fee.bps, BigInt(fee.cap)) : null;
   const net = gross !== null && charge !== null ? gross - charge : null;
-  const exact = coins.length === BASKET_SIZE;
+  const basketIssue = basketProblem(coins);
+  const exact = basketIssue === null;
   const short = wallet !== null && gross !== null && Number(gross) / 10 ** decimals > wallet;
-  const problem = !backed ? "Choose the asset to back." : gross === null || gross <= 0n ? "Enter a stake above zero." : !exact ? "This Epoch's asset list is not available yet." : short ? `Your wallet has ${formatAmount(wallet ?? 0, 2)} ${symbol}.` : null;
+  const problem = !backed ? "Choose the asset to back." : gross === null || gross <= 0n ? "Enter a stake above zero." : basketIssue ? basketIssue : short ? `Your wallet has ${formatAmount(wallet ?? 0, 2)} ${symbol}.` : null;
   const collateralMint = collaterals.length > 1 && chosen ? chosen.mint : undefined;
   const intent: Intent | null = open && problem === null && gross !== null && backed !== null ? { operation: "epoch-entry", opensAt: epoch.opensAt, grossStake: gross.toString(), basket: coins, backedAsset: backed, collateralMint } : null;
   const show = (value: bigint | null) => (value === null ? "—" : `${formatAmount(Number(value) / 10 ** decimals, 2)} ${symbol}`);
@@ -746,7 +741,7 @@ function EntryPanel(props: { epoch: Epoch; coins: string[]; now: number; decimal
             <span className="num text-[11px] text-muted">{coins.length} / {BASKET_SIZE}</span>
           </div>
           <div className="flex items-center justify-between gap-3">
-            <span className="text-sm">{exact ? `30 coins · 1 backed + 29 comparison` : "Asset list not available"}</span>
+            <span className="text-sm">{exact ? `30 coins · 1 backed + 29 comparison` : coins.length > BASKET_SIZE ? `${coins.length} coins offered` : "Asset list not available"}</span>
             {exact && <button type="button" onClick={() => setShowBasket(!showBasket)} className="cursor-pointer text-xs text-accent underline-offset-4 hover:underline">{showBasket ? "Hide" : "View basket"}</button>}
           </div>
           {exact && <p className="text-[11px] text-muted">All 30 eligible coins are included this Epoch. Your score compares your coin's rise with the rises of all 30, including your own.</p>}
@@ -1024,7 +1019,8 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
   const [explain, setExplain] = useState(false);
   const closeExplain = useCallback(() => setExplain(false), []);
   const epoch = epochs.find((item) => item.address === selected) ?? epochs[0] ?? null;
-  const coins = epoch ? coinsOf(epoch, roster) : [];
+  const basket = epoch ? epochBasket(epoch) : [];
+  const coins = basket.length > 0 ? basket : [...roster];
   const stage: Stage | null = epoch ? stageOf(epoch, now) : null;
   const open = stage === "open" && Boolean(epoch?.entriesOpen);
   const next = epochs.find((item) => stageOf(item, now) === "open" && item.entriesOpen) ?? epochs.find((item) => stageOf(item, now) === "upcoming") ?? null;
@@ -1063,7 +1059,7 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
 
   const entryProps = {
     epoch,
-    coins,
+    basket,
     now,
     decimals,
     fee: overview.configuration.entryFee,
