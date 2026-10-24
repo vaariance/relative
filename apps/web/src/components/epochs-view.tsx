@@ -492,11 +492,11 @@ function MovesCard({ epoch, coins, now, backed, canPick, onPick }: { epoch: Epoc
               </span>
               <p className={`num text-[2.5rem] font-semibold leading-none tracking-tight ${tone(focus.change)}`}>{pct(focus.change)}</p>
             </div>
-            <dl className="grid flex-1 grid-cols-2 gap-px overflow-hidden rounded-xl bg-white/[0.06] sm:max-w-xl sm:grid-cols-4">
+            <dl className="flex min-w-0 max-w-xl flex-1 basis-[35rem] divide-x divide-white/[0.06] overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {stats.map((stat) => (
-                <div key={stat.label} className="flex flex-col gap-1.5 bg-surface px-3 py-2.5">
-                  <dt className="text-[11px] text-muted">{stat.label}</dt>
-                  <dd className="flex items-center gap-1.5">
+                <div key={stat.label} className="flex min-w-[8.75rem] flex-1 shrink-0 flex-col gap-1.5 px-3 py-2.5">
+                  <dt className="whitespace-nowrap text-[11px] text-muted">{stat.label}</dt>
+                  <dd className="flex items-center gap-1.5 whitespace-nowrap">
                     <span className="num text-sm font-medium">{stat.value}</span>
                     {stat.change !== null && <span className={`num rounded-pill px-1.5 py-0.5 text-[10px] ${chip(stat.change)}`}>{pct(stat.change, 2)}</span>}
                   </dd>
