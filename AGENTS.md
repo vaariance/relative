@@ -1797,3 +1797,18 @@ another agent needs to know.
   - **Joel:** `/v1/preview/history` now starts at 08:47 UTC; preview history from before the asset list changed was dropped, so every chart's estimate history is short for now. The API also returns `assets` for the current list only, so a point from before a change cannot be matched to coins.
   - **Joel:** `/v1/assets` gives LIT no full name.
 - **Refs:** commits `0d3d0e1`..`5a42d66`.
+
+### 2026-10-24 · Godwin (Claude Code) · Epoch page: hero banner, rounds list, entry timeline
+
+- **Area:** `apps/web` (`epochs-view.tsx`, new `src/components/empty-market.tsx`, `src/app/(app)/epochs/loading.tsx`).
+- **What:** At Godwin's request, the Epoch page follows a new layout. Supersedes the layout in Godwin's 2026-10-23 "Epoch page rebuilt as a dashboard" entry; data, routes, entry logic and the final score and payout arithmetic are unchanged.
+  - **Header:** "Epoch" with the line "Your entry counts from its execution to the fixed Epoch close.", and the Basic / Epoch switch.
+  - **Hero banner:** the selected round's status, date and UTC window, clock, pot, entries and queued stake, with New entry and How payouts work. A sphere of coin logos shows from 640px up.
+  - **Rounds and timeline:** a dated rounds list replaces Previous / Next. Beside it, a timeline draws each of the wallet's entries from its execution to the fixed close; pending entries are dashed.
+  - **Empty moves:** when the moves card has nothing to rank, it shows the reusable `EmptyMarket` illustration with a title and the reason. The footnote under the card is removed.
+  - **Palette:** the page uses only the app's black and orange; the orange-to-violet gradient and the explainer's violet glow are gone.
+  - **Verified:** 82 web tests and the type check pass. Checked at 1440px and 390px locally, and on production.
+  - **Deployed:** `d8994bd` to production at <https://getrelative.trade> (deployment `cox-leougvuwy-gef-228639f6`).
+- **Rules for agents:** Keep the Epoch page to the app palette (`accent`, `surface`, `ink`, `muted` and the status colours); do not reintroduce violet. Use `EmptyMarket` for other no-data states rather than a new drawing.
+- **Open:** The entry bars on the timeline and the open-round banner were seen only with temporary fake data, removed before commit; no wallet with real entries has been connected.
+- **Refs:** commits `80411e9`, `d8994bd`.
