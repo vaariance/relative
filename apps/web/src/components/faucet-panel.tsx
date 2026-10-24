@@ -206,13 +206,15 @@ export function FaucetPanel() {
             ? `You claimed in the last 24 hours. Your next claim opens in ${wait((nextAt ?? now) - now)}.`
             : confirming
               ? "Your last claim is still confirming. Check back in a moment."
-              : `One free claim every 24 hours. You sign a message to prove the wallet is yours; nothing is charged. Wallets low on SOL also get 0.01 devnet SOL for fees.`
-      : locked
+              : `One free claim every 24 hours. You sign a message to prove the wallet is yours; nothing is charged. Wallets low on SOL also get 0.01 devnet SOL.`
+      : picked === "sol" && needsGas && gas !== null
+        ? `You have ${gas.sol.toFixed(4)} SOL. A first trade needs about ${MIN_GAS_SOL} SOL to open your position on chain.`
+        : locked
         ? checking
           ? "Checking your SOL balance."
           : gas === null
             ? "Your SOL balance could not be checked. Please try again shortly."
-            : `Get at least ${MIN_GAS_SOL} devnet SOL for network fees first. Pick SOL above.`
+            : `Get at least ${MIN_GAS_SOL} devnet SOL first: a first trade uses about that much to open your position on chain. Pick SOL above.`
         : picked === "usdc"
           ? "Opens Circle's faucet with your address copied. Choose USDC and Solana Devnet, then paste it."
           : "Opens Solana's faucet with your address copied. Paste it there. Every trade costs a tiny fee in SOL.";
@@ -304,6 +306,12 @@ export function FaucetPanel() {
             )
           )}
           <p className="num text-center text-xs text-muted">{note}</p>
+          {picked === "rlusd" && needsGas && gas !== null && (
+            <p className="text-center text-xs text-warn">
+              You have {gas.sol.toFixed(4)} SOL. A first trade needs about {MIN_GAS_SOL} SOL to open your position on chain.{" "}
+              <button type="button" onClick={() => setPicked("sol")} className="cursor-pointer underline underline-offset-4">Get SOL</button>
+            </p>
+          )}
         </div>
       </div>
     </div>

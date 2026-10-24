@@ -12,7 +12,7 @@ export const CIRCLE_FAUCET_URL = "https://faucet.circle.com";
 export const SOL_FAUCET_URL = "https://faucet.solana.com";
 
 export const TEST_COLLATERAL = { symbol: "rlUSD", name: "Relative test USD", mint: "5rpGrekfBLHdF8PD8eKLzXQPPmhyF7FCKeE1VA5CwV3X", decimals: 6 };
-export const MIN_GAS_SOL = 0.01;
+export const MIN_GAS_SOL = 0.03;
 
 export function epochsEnabled(): boolean {
   if (process.env.NODE_ENV === "development") return true;
