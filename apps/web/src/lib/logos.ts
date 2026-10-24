@@ -29,6 +29,7 @@ export const COINGECKO_IDS: Record<string, string> = {
   RENDER: "render-token",
   TIA: "celestia",
   W: "wormhole",
+  LIT: "lighter",
 };
 
 const LLAMA_PATHS: Record<string, string> = {
