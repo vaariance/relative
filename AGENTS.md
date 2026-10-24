@@ -1696,3 +1696,9 @@ another agent needs to know.
   - **Verified:** 45 parallel requests straight to the Cloud Run address, each with a different faked first `X-Forwarded-For` entry, gave 30 accepted and 15 `RATE_LIMITED`. 45 through the gateway a minute later gave the same split. All three domains answer as before (the signer still refuses calls without a token), and the API is fresh with the change feed healthy.
 - **Rules for agents:** Rotate by adding a new secret version, putting it in the Worker first and then pointing Cloud Run at it; while the two differ, gateway visitors count under Cloudflare's address. Never log or commit the value.
 - **Refs:** commits `b019a0b`, `636dd3f`; `apps/app-api/README.md` (Configuration).
+
+### 2026-10-23 · Godwin (Claude Code) · Epoch page rebuilt as a dashboard
+
+- **Area:** `apps/web` (`epochs-view.tsx`).
+- **What:** At Godwin's request, the Epoch page follows a trading-dashboard layout with light use of the Relative orange gradient. Header plus a dismissible status banner. Top row: Epoch clock card (large countdown with dimmed seconds, stage chip, local close time, New entry / Previous / Next), Pot card (net or settlement pot, entries, queued, five-step progress bar) and one gradient card that opens How payouts work. Main column: Relative moves (leading or backed asset as the headline figure, Leader / Laggard / ahead / behind $CRYPTO stats, ranked list capped at 440px with its own scroll) and My entries as a table (asset, Epoch, status, stake, basis, score, payout, withdraw, basket). Side column: Create entry (Back / VS / Against boxes, stake, fee, gradient Review) and the Settlement timeline. Supersedes the layouts in Godwin's 2026-10-23 Epoch page entries; data, routes and entry logic are unchanged. Checked at 1440px and phone width with a temporary fake open round (removed before commit); no real entry sent. Still on only in local development.
+- **Refs:** commit before this entry.
