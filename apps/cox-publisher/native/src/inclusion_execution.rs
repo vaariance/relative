@@ -109,7 +109,8 @@ impl Approved {
             || schedule.predecessor_digest != previous.digest
             || schedule.source_methodology != previous.source_methodology
             || usize::from(schedule.expected_instruments) != instruments.len()
-            || cox::instrument_identities_digest(&instruments).map_err(err)?
+            || cox::instrument_identities_digest_for_schema(previous.schema_version, &instruments)
+                .map_err(err)?
                 != schedule.identities_digest
             || self
                 .capture_request
@@ -172,7 +173,7 @@ pub type Shared = Arc<Mutex<Controller>>;
 pub enum Action {
     Instructions(Vec<Instruction>),
     Waiting,
-    Restart,
+    Adopt,
 }
 fn err<T>(_: T) -> worker::Error {
     worker::Error::Snapshot
@@ -655,6 +656,25 @@ pub async fn plan(
         .map_err(err)?
         .as_ref()
         == Some(&prepared.receipt);
+    let next_registry_version =
+        if state.basic.pool.asset_registry != anchor_lang::prelude::Pubkey::default() {
+            let key = anchor_lang::prelude::Pubkey::find_program_address(
+                &[
+                    b"asset-version",
+                    state.basic.pool.asset_registry.as_ref(),
+                    &next.digest,
+                ],
+                &cox::ID,
+            )
+            .0;
+            let (_, row) = account(rpc, Address::new_from_array(key.to_bytes()), slot).await?;
+            row.map(|(bytes, _)| {
+                cox::AssetRegistryVersion::try_deserialize(&mut bytes.as_slice()).map_err(err)
+            })
+            .transpose()?
+        } else {
+            None
+        };
     let result = inclusion_rollout::plan(
         &prepared,
         &state.basic.accounts,
@@ -675,6 +695,7 @@ pub async fn plan(
                 .map(|(value, space)| (value, *space)),
             epoch_stage_present: epoch_stage,
             receipt_persisted,
+            next_registry_version: next_registry_version.as_ref(),
         },
         stored.cursor.as_ref(),
     );
@@ -705,7 +726,7 @@ pub async fn plan(
             prepared.receipt.persist(&directory).map_err(err)?;
             Ok(Action::Waiting)
         }
-        Status::Complete => Ok(Action::Restart),
+        Status::Complete => Ok(Action::Adopt),
         Status::RescheduleRequired(reason) => {
             shared
                 .lock()

@@ -28,6 +28,7 @@ pub enum Phase {
     Seal,
     GrowPool,
     PersistReceipt,
+    RegisterRegistryVersion,
     Activate,
     Complete,
     RescheduleRequired,
@@ -67,6 +68,7 @@ pub struct Confirmed<'a> {
     pub next_methodology: Option<(&'a Methodology, usize)>,
     pub epoch_stage_present: bool,
     pub receipt_persisted: bool,
+    pub next_registry_version: Option<&'a cox::AssetRegistryVersion>,
 }
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
@@ -410,6 +412,46 @@ pub fn plan(
     if !state.receipt_persisted {
         return Ok(emit(Phase::PersistReceipt, Status::PersistReceipt, vec![]));
     }
+    let registry_key = state.pool.asset_registry;
+    let next_version = Pubkey::find_program_address(
+        &[b"asset-version", registry_key.as_ref(), &next.digest],
+        &cox::ID,
+    )
+    .0;
+    let previous_version = Pubkey::find_program_address(
+        &[b"asset-version", registry_key.as_ref(), &previous.digest],
+        &cox::ID,
+    )
+    .0;
+    if registry_key != Pubkey::default() {
+        if let Some(version) = state.next_registry_version {
+            if version.registry != registry_key
+                || version.generation != state.pool.generation
+                || version.methodology != next_key
+                || version.digest != next.digest
+                || version.predecessor != previous.digest
+                || version.effective_from != next.capture.timestamp
+                || version.sealed
+            {
+                return Err(Error::Conflict);
+            }
+        } else {
+            return Ok(transact(
+                Phase::RegisterRegistryVersion,
+                cox::instruction::RegisterAssetRegistryVersion {}.data(),
+                cox::accounts::RegisterAssetRegistryVersion {
+                    payer: runtime,
+                    registry,
+                    pool,
+                    asset_registry: registry_key,
+                    methodology: next_key,
+                    version: next_version,
+                    system_program: anchor_lang::system_program::ID,
+                }
+                .to_account_metas(None),
+            ));
+        }
+    }
     Ok(transact(
         Phase::Activate,
         cox::instruction::ActivateUniverse {}.data(),
@@ -422,6 +464,10 @@ pub fn plan(
             vault: pubkey(accounts.vault),
             schedule: schedule_key,
             test_vault: accounts.test_vault.map(pubkey),
+            asset_registry: (registry_key != Pubkey::default()).then_some(registry_key),
+            next_registry_version: (registry_key != Pubkey::default()).then_some(next_version),
+            previous_registry_version: (registry_key != Pubkey::default())
+                .then_some(previous_version),
         }
         .to_account_metas(None),
     ))

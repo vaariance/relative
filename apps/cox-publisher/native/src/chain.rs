@@ -179,22 +179,20 @@ fn advance_prefix(start: u64, phase: Phase, states: &[LotState]) -> u64 {
             .count() as u64
 }
 fn completed(epoch: &EpochAccount, now: u64) -> bool {
-    epoch.state.as_ref().map_or(
-        now > epoch.opens_at.saturating_add(cox_epoch::EPOCH_SECONDS),
-        |state| {
+    epoch.empty_finalized
+        || epoch.state.as_ref().map_or(false, |state| {
             now >= state.closes_at()
                 && state.ledger().pending_gross == 0
                 && state.ledger().active_net == 0
                 && state.ledger().held_fees == 0
-                && matches!(state.phase(), Phase::Settled | Phase::Voided | Phase::Open)
-        },
-    )
+                && matches!(state.phase(), Phase::Settled | Phase::Voided)
+        })
 }
 #[derive(Clone, PartialEq, Eq)]
-struct Raw {
-    address: Address,
-    owner: Address,
-    data: Vec<u8>,
+pub(crate) struct Raw {
+    pub(crate) address: Address,
+    pub(crate) owner: Address,
+    pub(crate) data: Vec<u8>,
 }
 fn address(key: anchor_lang::prelude::Pubkey) -> Address {
     Address::new_from_array(key.to_bytes())
@@ -238,14 +236,25 @@ fn raw(value: &Value, key: Address) -> Result<Raw, Error> {
     })
 }
 fn clock_timestamp_ms(row: &Raw) -> Result<u64, Error> {
-    let address: Address = "SysvarC1ock11111111111111111111111111111111".parse().map_err(|_| Error::InvalidAccount)?;
-    let owner: Address = "Sysvar1111111111111111111111111111111111111".parse().map_err(|_| Error::InvalidAccount)?;
+    let address: Address = "SysvarC1ock11111111111111111111111111111111"
+        .parse()
+        .map_err(|_| Error::InvalidAccount)?;
+    let owner: Address = "Sysvar1111111111111111111111111111111111111"
+        .parse()
+        .map_err(|_| Error::InvalidAccount)?;
     if row.address != address || row.owner != owner || row.data.len() != 40 {
         return Err(Error::InvalidAccount);
     }
-    let timestamp = i64::from_le_bytes(row.data[32..40].try_into().map_err(|_| Error::InvalidAccount)?);
-    u64::try_from(timestamp).ok().filter(|timestamp| *timestamp > 0)
-        .and_then(|timestamp| timestamp.checked_mul(1000)).ok_or(Error::InvalidAccount)
+    let timestamp = i64::from_le_bytes(
+        row.data[32..40]
+            .try_into()
+            .map_err(|_| Error::InvalidAccount)?,
+    );
+    u64::try_from(timestamp)
+        .ok()
+        .filter(|timestamp| *timestamp > 0)
+        .and_then(|timestamp| timestamp.checked_mul(1000))
+        .ok_or(Error::InvalidAccount)
 }
 impl ChainReader {
     async fn multiple(&self, keys: &[Address], minimum: u64) -> Result<(u64, Vec<Raw>), Error> {
@@ -273,7 +282,7 @@ impl ChainReader {
                 .collect::<Result<_, _>>()?,
         ))
     }
-    async fn optional_accounts(
+    pub(crate) async fn optional_accounts(
         &self,
         keys: &[Address],
         minimum: u64,
@@ -549,9 +558,6 @@ impl ChainReader {
             {
                 return Err(Error::WrongAddress);
             }
-            let Some(engine) = epoch.state.as_ref() else {
-                continue;
-            };
             if completed(&epoch, now) {
                 continue;
             }
@@ -572,13 +578,26 @@ impl ChainReader {
                 0,
             )?;
             if first.checked_add(second).ok_or(Error::Overflow)?
-                < engine
-                    .ledger()
-                    .liabilities()
+                < epoch
+                    .state
+                    .as_ref()
+                    .map(|engine| engine.ledger().liabilities())
+                    .transpose()
                     .map_err(|_| Error::InvalidAccount)?
+                    .unwrap_or(0)
             {
                 return Err(Error::InvalidAccount);
             }
+            let Some(engine) = epoch.state.as_ref() else {
+                observed.push(row);
+                observed.extend(vault_rows);
+                epochs.push(EpochState {
+                    accounts,
+                    epoch,
+                    lots: vec![],
+                });
+                continue;
+            };
             let mut offset = discovery.cursor(opens, engine.phase(), engine.next_nonce())?;
             let mut lots = Vec::new();
             for _ in 0..MAX_LOT_PAGES {
@@ -649,9 +668,14 @@ impl ChainReader {
                 lots,
             });
         }
-        let clock_key = "SysvarC1ock11111111111111111111111111111111".parse().map_err(|_| Error::InvalidAccount)?;
+        let clock_key = "SysvarC1ock11111111111111111111111111111111"
+            .parse()
+            .map_err(|_| Error::InvalidAccount)?;
         let (s, verified) = self
-            .multiple(&[registry_key, pool_key, self.epoch_config, clock_key], slot)
+            .multiple(
+                &[registry_key, pool_key, self.epoch_config, clock_key],
+                slot,
+            )
             .await?;
         slot = s;
         let confirmed_timestamp_ms = clock_timestamp_ms(&verified[3])?;
@@ -759,7 +783,10 @@ fn validate_basic(
 impl ChainState {
     pub fn work(&self, now_ms: u64) -> Result<Vec<Work>, Error> {
         let mut work = Vec::new();
-        if !self.basic.registry.paused {
+        if !self.basic.registry.paused
+            && cox::pool_lifecycle(&self.basic.pool).map_err(|_| Error::InvalidAccount)?
+                != cox::InstanceLifecycle::Archived
+        {
             if self.basic.batch.is_some() {
                 work.push(Work::Maintenance {
                     id: "basic:accepted-stage".into(),
@@ -858,6 +885,19 @@ impl ChainState {
         }
         for epoch in &self.epochs {
             let Some(state) = epoch.epoch.state.as_ref() else {
+                if !epoch.epoch.empty_finalized
+                    && now_ms
+                        >= epoch
+                            .epoch
+                            .opens_at
+                            .saturating_add(cox_epoch::EPOCH_SECONDS)
+                            .saturating_mul(1000)
+                {
+                    work.push(Work::Maintenance {
+                        id: format!("epoch:{}:finalize-empty", epoch.epoch.opens_at),
+                        pool: WorkPool::Epoch,
+                    });
+                }
                 continue;
             };
             if state.phase() == Phase::Open {
@@ -867,6 +907,14 @@ impl ChainState {
                         id: format!("epoch:{}:refund", epoch.epoch.opens_at),
                         pool: WorkPool::Epoch,
                     });
+                }
+                if state.executed_lots() == 0 {
+                    if now_ms >= closing_ms && state.ledger().pending_gross == 0 {
+                        work.push(Work::Maintenance {
+                            id: format!("epoch:{}:finalize-empty", epoch.epoch.opens_at),
+                            pool: WorkPool::Epoch,
+                        });
+                    }
                 }
                 let void_ms = closing_ms
                     .checked_add(
@@ -1062,8 +1110,25 @@ fn plan_maintenance_inner(
             break;
         }
         let Some(current) = epoch.epoch.state.as_ref() else {
+            if !epoch.epoch.empty_finalized
+                && now
+                    >= epoch
+                        .epoch
+                        .opens_at
+                        .saturating_add(cox_epoch::EPOCH_SECONDS)
+            {
+                instructions.push(epoch.accounts.finalize_empty());
+            }
             continue;
         };
+        if current.phase() == Phase::Open
+            && now >= current.closes_at()
+            && current.executed_lots() == 0
+            && current.ledger().pending_gross == 0
+        {
+            instructions.push(epoch.accounts.finalize_empty());
+            continue;
+        }
         if current.phase() == Phase::Open
             && now
                 > current
@@ -1135,8 +1200,12 @@ pub(crate) mod tests {
     #[test]
     fn confirmed_clock_rejects_wrong_identity_owner_shape_and_timestamp() {
         let mut row = Raw {
-            address: "SysvarC1ock11111111111111111111111111111111".parse().unwrap(),
-            owner: "Sysvar1111111111111111111111111111111111111".parse().unwrap(),
+            address: "SysvarC1ock11111111111111111111111111111111"
+                .parse()
+                .unwrap(),
+            owner: "Sysvar1111111111111111111111111111111111111"
+                .parse()
+                .unwrap(),
             data: vec![0; 40],
         };
         row.data[32..40].copy_from_slice(&14_410i64.to_le_bytes());
@@ -1148,10 +1217,14 @@ pub(crate) mod tests {
         row.data[32..40].copy_from_slice(&14_410i64.to_le_bytes());
         row.owner = key(4);
         assert_eq!(clock_timestamp_ms(&row), Err(Error::InvalidAccount));
-        row.owner = "Sysvar1111111111111111111111111111111111111".parse().unwrap();
+        row.owner = "Sysvar1111111111111111111111111111111111111"
+            .parse()
+            .unwrap();
         row.address = key(5);
         assert_eq!(clock_timestamp_ms(&row), Err(Error::InvalidAccount));
-        row.address = "SysvarC1ock11111111111111111111111111111111".parse().unwrap();
+        row.address = "SysvarC1ock11111111111111111111111111111111"
+            .parse()
+            .unwrap();
         row.data.pop();
         assert_eq!(clock_timestamp_ms(&row), Err(Error::InvalidAccount));
     }
@@ -1489,35 +1562,75 @@ pub(crate) mod tests {
         let boundary = 18_000_000;
         let checkpoint = crate::scheduler::Checkpoint::default();
         let work = state.work(boundary - 1).unwrap();
-        assert_eq!(work, vec![Work::Entry {
-            id: "basic:hourly-refresh".into(),
-            pool: WorkPool::Basic,
-            eligible_after_ms: boundary - 1,
-        }]);
-        assert_eq!(crate::scheduler::decide(boundary - 1, &checkpoint, &work, 4).unwrap(),
-            crate::scheduler::Decision::Idle { wake_ms: Some(boundary) });
-        assert!(matches!(crate::scheduler::decide(boundary, &checkpoint, &work, 4).unwrap(),
-            crate::scheduler::Decision::Publish { closing_ms: None, .. }));
+        assert_eq!(
+            work,
+            vec![Work::Entry {
+                id: "basic:hourly-refresh".into(),
+                pool: WorkPool::Basic,
+                eligible_after_ms: boundary - 1,
+            }]
+        );
+        assert_eq!(
+            crate::scheduler::decide(boundary - 1, &checkpoint, &work, 4).unwrap(),
+            crate::scheduler::Decision::Idle {
+                wake_ms: Some(boundary)
+            }
+        );
+        assert!(matches!(
+            crate::scheduler::decide(boundary, &checkpoint, &work, 4).unwrap(),
+            crate::scheduler::Decision::Publish {
+                closing_ms: None,
+                ..
+            }
+        ));
         state.basic.pool.last_batch = 18_002 - state.basic.pool.origin;
         let work = state.work(boundary + 3_000).unwrap();
-        assert_eq!(crate::scheduler::decide(boundary + 3_000, &checkpoint, &work, 4).unwrap(),
-            crate::scheduler::Decision::Idle { wake_ms: Some(21_600_000) });
+        assert_eq!(
+            crate::scheduler::decide(boundary + 3_000, &checkpoint, &work, 4).unwrap(),
+            crate::scheduler::Decision::Idle {
+                wake_ms: Some(21_600_000)
+            }
+        );
     }
 
     #[test]
     fn hourly_refresh_coalesces_missed_hours_and_preserves_pause_and_stage() {
         let mut state = state();
         let now = 36_000_000;
-        assert!(matches!(crate::scheduler::decide(now, &crate::scheduler::Checkpoint::default(), &state.work(now).unwrap(), 4).unwrap(),
-            crate::scheduler::Decision::Publish { closing_ms: None, .. }));
+        assert!(matches!(
+            crate::scheduler::decide(
+                now,
+                &crate::scheduler::Checkpoint::default(),
+                &state.work(now).unwrap(),
+                4
+            )
+            .unwrap(),
+            crate::scheduler::Decision::Publish {
+                closing_ms: None,
+                ..
+            }
+        ));
         state.basic.pool.last_batch = 36_001 - state.basic.pool.origin;
-        assert_eq!(crate::scheduler::decide(now + 2_000, &crate::scheduler::Checkpoint::default(), &state.work(now + 2_000).unwrap(), 4).unwrap(),
-            crate::scheduler::Decision::Idle { wake_ms: Some(39_600_000) });
+        assert_eq!(
+            crate::scheduler::decide(
+                now + 2_000,
+                &crate::scheduler::Checkpoint::default(),
+                &state.work(now + 2_000).unwrap(),
+                4
+            )
+            .unwrap(),
+            crate::scheduler::Decision::Idle {
+                wake_ms: Some(39_600_000)
+            }
+        );
         state.basic.registry.paused = true;
         assert!(state.work(now).unwrap().is_empty());
         state.basic.registry.paused = false;
         state.basic.batch = Some(zero());
-        assert!(matches!(state.work(now).unwrap().as_slice(), [Work::Maintenance { .. }]));
+        assert!(matches!(
+            state.work(now).unwrap().as_slice(),
+            [Work::Maintenance { .. }]
+        ));
         state.basic.batch = None;
         state.basic.pool.origin = u64::MAX;
         assert_eq!(state.work(now), Err(Error::Overflow));
@@ -1554,7 +1667,11 @@ pub(crate) mod tests {
         s.basic.pool.fee_version = 1;
         s.basic.pool.fee_bps = 2;
         s.basic.pool.fee_cap = 200_000;
-        assert!(!s.work(cutoff_ms + 1_000).unwrap().iter().any(|item| matches!(item, Work::Entry { id, .. } if id == "basic:fee-activation")));
+        assert!(!s
+            .work(cutoff_ms + 1_000)
+            .unwrap()
+            .iter()
+            .any(|item| matches!(item, Work::Entry { id, .. } if id == "basic:fee-activation")));
     }
     #[test]
     fn pending_fee_activation_respects_pause_accepted_stage_and_checked_cutoff() {
@@ -1660,24 +1777,40 @@ pub(crate) mod tests {
             sequence: 1,
             oracle_timestamp: 14_402,
             benchmark: 1_000_000,
-            prices: (0..30).map(|asset_id| cox_epoch::Price {
-                asset_id,
-                feed_id: [asset_id as u8 + 1; 32],
-                value: 1_000_000,
-            }).collect(),
+            prices: (0..30)
+                .map(|asset_id| cox_epoch::Price {
+                    asset_id,
+                    feed_id: [asset_id as u8 + 1; 32],
+                    value: 1_000_000,
+                })
+                .collect(),
         };
         let epoch = &mut s.epochs[0];
-        epoch.epoch.state.as_mut().unwrap().execute(
-            [7; 32], epoch.lots[0].state.as_mut().unwrap(), &entry, 14_402, 1_000_000,
-        ).unwrap();
+        epoch
+            .epoch
+            .state
+            .as_mut()
+            .unwrap()
+            .execute(
+                [7; 32],
+                epoch.lots[0].state.as_mut().unwrap(),
+                &entry,
+                14_402,
+                1_000_000,
+            )
+            .unwrap();
         assert!(matches!(
             crate::scheduler::decide(
                 28_800_000,
                 &crate::scheduler::Checkpoint::default(),
                 &s.work(28_800_000).unwrap(),
                 4,
-            ).unwrap(),
-            crate::scheduler::Decision::Publish { closing_ms: Some(28_800_000), .. }
+            )
+            .unwrap(),
+            crate::scheduler::Decision::Publish {
+                closing_ms: Some(28_800_000),
+                ..
+            }
         ));
     }
     #[test]
@@ -2028,6 +2161,44 @@ pub(crate) mod tests {
             vec![state.epochs[0]
                 .accounts
                 .process_lot(1, EpochLotOperation::Refund)]
+        );
+    }
+    #[test]
+    fn empty_round_remains_discoverable_until_actual_terminal_transition() {
+        let mut state = state();
+        state.basic.registry.paused = true;
+        state.epochs.push(epoch(false));
+        assert!(!completed(&state.epochs[0].epoch, 28_800));
+        let work = state.work(28_800_000).unwrap();
+        assert_eq!(
+            work,
+            vec![Work::Maintenance {
+                id: "epoch:14400:finalize-empty".into(),
+                pool: WorkPool::Epoch
+            }]
+        );
+        assert_eq!(
+            plan_maintenance_for(&state, key(7), 28_800, 1, &work).unwrap(),
+            vec![state.epochs[0].accounts.finalize_empty()]
+        );
+        state.epochs[0]
+            .epoch
+            .state
+            .as_mut()
+            .unwrap()
+            .finalize_empty(28_800, 0)
+            .unwrap();
+        state.epochs[0].epoch.empty_finalized = true;
+        assert!(completed(&state.epochs[0].epoch, 28_800));
+        assert!(state.work(28_800_000).unwrap().is_empty());
+        let mut unfinished = epoch(false);
+        unfinished.epoch.state = None;
+        state.epochs = vec![unfinished];
+        assert!(!completed(&state.epochs[0].epoch, 28_800));
+        assert_eq!(state.work(28_800_000).unwrap(), work);
+        assert_eq!(
+            plan_maintenance_for(&state, key(7), 28_800, 1, &work).unwrap(),
+            vec![state.epochs[0].accounts.finalize_empty()]
         );
     }
 }

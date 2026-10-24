@@ -397,6 +397,60 @@ impl EpochAccounts {
             test_vault: pda(&program, &[b"test-vault", epoch.as_ref()]),
         })
     }
+    pub fn initialize_current(
+        &self,
+        payer: Address,
+        registry: Address,
+        version: Address,
+        methodology: Address,
+        mint: Address,
+        test_mint: Address,
+        opens: u64,
+    ) -> Instruction {
+        instruction(
+            self.program,
+            "initialize_current_epoch",
+            vec![
+                AccountMeta::new(payer, true),
+                readonly(self.config),
+                readonly(registry),
+                readonly(version),
+                readonly(methodology),
+                readonly(mint),
+                readonly(test_mint),
+                writable(self.epoch),
+                writable(self.vault),
+                writable(self.test_vault),
+                readonly(Address::new_from_array(anchor_spl::token::ID.to_bytes())),
+                readonly(SYSTEM_PROGRAM),
+            ],
+            &opens.to_le_bytes(),
+        )
+    }
+    pub fn manage_current(
+        &self,
+        payer: Address,
+        registry: Address,
+        version: Address,
+        methodology: Address,
+        name: &str,
+        args: &[u8],
+    ) -> Instruction {
+        instruction(
+            self.program,
+            name,
+            vec![
+                AccountMeta::new(payer, true),
+                readonly(self.config),
+                readonly(registry),
+                readonly(version),
+                readonly(methodology),
+                writable(self.epoch),
+                readonly(SYSTEM_PROGRAM),
+            ],
+            args,
+        )
+    }
     pub fn snapshot(&self, sequence: u64) -> Address {
         pda(
             &self.program,
@@ -588,6 +642,9 @@ impl EpochAccounts {
     }
     pub fn finalize_scores(&self) -> Instruction {
         instruction(self.program, "finalize_scores", self.custody(), &[])
+    }
+    pub fn finalize_empty(&self) -> Instruction {
+        instruction(self.program, "finalize_empty", self.custody(), &[])
     }
     pub fn void_epoch(&self) -> Instruction {
         instruction(self.program, "void_epoch", self.custody(), &[])

@@ -369,3 +369,122 @@ fn only_valid_signature_over_exact_compiled_message_is_attached() {
         Err(Error::InvalidSignature)
     );
 }
+
+#[test]
+fn permissionless_round_preparation_and_empty_finalization_match_program_abi() {
+    use anchor_lang::{prelude::Pubkey, InstructionData, ToAccountMetas};
+    let epoch = EpochAccounts::derive(address(3), address(4), 1_800_000_000).unwrap();
+    let pk = |value: Address| Pubkey::new_from_array(value.to_bytes());
+    let registry = address(5);
+    let version = address(6);
+    let methodology = address(7);
+    let payer = address(9);
+    let initialize = epoch.initialize_current(
+        payer,
+        registry,
+        version,
+        methodology,
+        address(10),
+        address(11),
+        1_800_000_000,
+    );
+    assert_eq!(
+        initialize.data,
+        relative_epoch::instruction::InitializeCurrentEpoch {
+            opens_at: 1_800_000_000
+        }
+        .data()
+    );
+    let expected = relative_epoch::accounts::InitializeCurrentEpoch {
+        payer: pk(payer),
+        config: pk(epoch.config),
+        asset_registry: pk(registry),
+        registry_version: pk(version),
+        methodology: pk(methodology),
+        mint: pk(address(10)),
+        test_mint: pk(address(11)),
+        epoch: pk(epoch.epoch),
+        vault: pk(epoch.vault),
+        test_vault: pk(epoch.test_vault),
+        token_program: anchor_spl::token::ID,
+        system_program: anchor_lang::system_program::ID,
+    }
+    .to_account_metas(None);
+    assert_eq!(
+        initialize
+            .accounts
+            .iter()
+            .map(|a| (a.pubkey.to_bytes(), a.is_signer, a.is_writable))
+            .collect::<Vec<_>>(),
+        expected
+            .iter()
+            .map(|a| (a.pubkey.to_bytes(), a.is_signer, a.is_writable))
+            .collect::<Vec<_>>()
+    );
+    let steps = [
+        (
+            "grow_current_epoch",
+            (relative_epoch::MAX_GROWTH as u32).to_le_bytes().to_vec(),
+            relative_epoch::instruction::GrowCurrentEpoch {
+                additional_bytes: relative_epoch::MAX_GROWTH as u32,
+            }
+            .data(),
+        ),
+        (
+            "copy_registry_assets",
+            [16u16.to_le_bytes(), 15u16.to_le_bytes()].concat(),
+            relative_epoch::instruction::CopyRegistryAssets {
+                start: 16,
+                count: 15,
+            }
+            .data(),
+        ),
+        (
+            "seal_current_epoch",
+            vec![],
+            relative_epoch::instruction::SealCurrentEpoch {}.data(),
+        ),
+    ];
+    let expected = relative_epoch::accounts::ManageCurrentEpochDraft {
+        payer: pk(payer),
+        config: pk(epoch.config),
+        asset_registry: pk(registry),
+        registry_version: pk(version),
+        methodology: pk(methodology),
+        epoch: pk(epoch.epoch),
+        system_program: anchor_lang::system_program::ID,
+    }
+    .to_account_metas(None);
+    for (name, args, data) in steps {
+        let instruction = epoch.manage_current(payer, registry, version, methodology, name, &args);
+        assert_eq!(instruction.data, data);
+        assert_eq!(
+            instruction
+                .accounts
+                .iter()
+                .map(|a| (a.pubkey.to_bytes(), a.is_signer, a.is_writable))
+                .collect::<Vec<_>>(),
+            expected
+                .iter()
+                .map(|a| (a.pubkey.to_bytes(), a.is_signer, a.is_writable))
+                .collect::<Vec<_>>()
+        );
+        compile(
+            payer,
+            Hash::new_from_array([8; 32]),
+            &[instruction],
+            &[epoch.program],
+            budget(),
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        epoch.finalize_empty().data,
+        relative_epoch::instruction::FinalizeEmpty {}.data()
+    );
+    assert!(epoch
+        .finalize_empty()
+        .accounts
+        .iter()
+        .all(|account| !account.is_signer));
+}

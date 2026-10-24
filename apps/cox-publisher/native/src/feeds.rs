@@ -333,10 +333,20 @@ pub fn signed_pyth_payload(
 pub async fn run_pyth(
     config: PythConfig,
     output: mpsc::Sender<Vec<u8>>,
+    stop: watch::Receiver<bool>,
+) -> Result<(), FeedError> {
+    let (_sender, updates) = watch::channel(config.feed_ids.clone());
+    run_pyth_dynamic(config, updates, output, stop).await
+}
+pub async fn run_pyth_dynamic(
+    mut config: PythConfig,
+    mut updates: watch::Receiver<Vec<u32>>,
+    output: mpsc::Sender<Vec<u8>>,
     mut stop: watch::Receiver<bool>,
 ) -> Result<(), FeedError> {
+    config.feed_ids = updates.borrow_and_update().clone();
     let request = pyth_subscription(&config)?;
-    let mut client = PythLazerStreamClientBuilder::new(config.token)
+    let mut client = PythLazerStreamClientBuilder::new(config.token.clone())
         .with_num_connections(3)
         .with_channel_capacity(16)
         .with_timeout(Duration::from_secs(10))
@@ -348,7 +358,18 @@ pub async fn run_pyth(
         .await
         .map_err(|_| FeedError::Subscribe)?;
     loop {
-        let response = tokio::select! { _ = wait_stop(&mut stop) => return Ok(()), item = receiver.recv() => item.ok_or(FeedError::Disconnected)? };
+        let response = tokio::select! {
+            _ = wait_stop(&mut stop) => return Ok(()),
+            changed = updates.changed() => {
+                changed.map_err(|_|FeedError::ConsumerStopped)?;
+                config.feed_ids = updates.borrow_and_update().clone();
+                let request = pyth_subscription(&config)?;
+                client.unsubscribe(SubscriptionId(config.subscription_id)).await.map_err(|_|FeedError::Subscribe)?;
+                client.subscribe(request).await.map_err(|_|FeedError::Subscribe)?;
+                continue;
+            },
+            item = receiver.recv() => item.ok_or(FeedError::Disconnected)?,
+        };
         match signed_pyth_payload(response, config.subscription_id) {
             Ok(Some(bytes)) => {
                 tokio::select! { _ = wait_stop(&mut stop) => return Ok(()), sent = output.send(bytes) => sent.map_err(|_| FeedError::ConsumerStopped)? }

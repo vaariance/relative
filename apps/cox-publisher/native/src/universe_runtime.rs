@@ -6,7 +6,7 @@ use crate::{
     origin, preparation,
     rpc::DEVNET_GENESIS,
 };
-use cox::{UniverseVersion, DYNAMIC_CRYPTO_CLASS};
+use cox::UniverseVersion;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fs, path::Path};
@@ -14,6 +14,7 @@ use std::{fs, path::Path};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct View {
     pub digest: [u8; 32],
+    pub crypto_class: u16,
     pub source_methodology: [u8; 32],
     pub anchor: Anchor,
     pub mapping: Vec<AssetMapping>,
@@ -70,38 +71,80 @@ pub fn prepare_genesis(request: GenesisRequest) -> Result<Receipt, Error> {
     let policy = &request.methodology.request;
     if request.capture.timestamp_us != policy.anchor.timestamp_us
         || request.capture.assets.len() != policy.anchor.assets.len()
-        || request.capture.assets.iter().zip(&policy.anchor.assets).any(|(actual, expected)| {
-            actual.id != expected.id || actual.feed_id != expected.feed_id
-                || actual.price_e8 != expected.origin_price_e8
-        })
+        || request
+            .capture
+            .assets
+            .iter()
+            .zip(&policy.anchor.assets)
+            .any(|(actual, expected)| {
+                actual.id != expected.id
+                    || actual.feed_id != expected.feed_id
+                    || actual.price_e8 != expected.origin_price_e8
+            })
     {
         return Err(Error::Evidence);
     }
-    let pool: Pubkey = request.methodology.pool_admission.pool_address.parse().map_err(|_| Error::Manifest)?;
+    let pool: Pubkey = request
+        .methodology
+        .pool_admission
+        .pool_address
+        .parse()
+        .map_err(|_| Error::Manifest)?;
     let operator: Pubkey = policy.operator.parse().map_err(|_| Error::Manifest)?;
-    let source_methodology = hex::decode(&request.methodology.digest).map_err(|_| Error::Manifest)?
-        .try_into().map_err(|_| Error::Manifest)?;
-    let signed_payload_digest = hex::decode(&request.capture.signed_payload_sha256).map_err(|_| Error::Evidence)?
-        .try_into().map_err(|_| Error::Evidence)?;
-    let mut universe = UniverseVersion::draft(0, pool, operator, source_methodology, 1, [0; 32],
-        policy.anchor.assets.len() as u16, UniverseCapture {
+    let source_methodology = hex::decode(&request.methodology.digest)
+        .map_err(|_| Error::Manifest)?
+        .try_into()
+        .map_err(|_| Error::Manifest)?;
+    let signed_payload_digest = hex::decode(&request.capture.signed_payload_sha256)
+        .map_err(|_| Error::Evidence)?
+        .try_into()
+        .map_err(|_| Error::Evidence)?;
+    let mut universe = UniverseVersion::draft(
+        0,
+        pool,
+        operator,
+        source_methodology,
+        1,
+        [0; 32],
+        policy.anchor.assets.len() as u16,
+        UniverseCapture {
             price_universe_digest: policy.anchor.universe_digest,
             timestamp: policy.anchor.timestamp_us / 1_000_000,
             benchmark: policy.anchor.benchmark,
-            prices_e8: policy.anchor.assets.iter().map(|asset| asset.origin_price_e8).collect(),
+            prices_e8: policy
+                .anchor
+                .assets
+                .iter()
+                .map(|asset| asset.origin_price_e8)
+                .collect(),
             signed_payload_digest,
             trusted_storage_digest: trusted_storage_digest(&request.capture)?,
             predecessor_sequence: request.predecessor_sequence,
             predecessor_state_digest: request.predecessor_state_digest,
-        }).map_err(|_| Error::Manifest)?;
-    universe.instruments = policy.anchor.assets.iter().zip(&policy.mapping).map(|(asset, mapping)| Instrument {
-        stable_id: asset.id.to_ascii_lowercase(), symbol: asset.id.clone(),
-        class_id: u16::from(mapping.basic_id), epoch_id: mapping.epoch_id,
-        pyth_pro_feed_id: asset.feed_id, pyth_core_feed_id: mapping.epoch_feed_id,
-        token_mint: None, original_price_e8: asset.origin_price_e8,
-        original_benchmark: policy.anchor.benchmark, original_timestamp: policy.anchor.timestamp_us / 1_000_000,
-    }).collect();
-    universe.seal_initial(&request.methodology.seal_config.protocol_config()).map_err(|_| Error::Manifest)?;
+        },
+    )
+    .map_err(|_| Error::Manifest)?;
+    universe.instruments = policy
+        .anchor
+        .assets
+        .iter()
+        .zip(&policy.mapping)
+        .map(|(asset, mapping)| Instrument {
+            stable_id: asset.id.to_ascii_lowercase(),
+            symbol: asset.id.clone(),
+            class_id: u16::from(mapping.basic_id),
+            epoch_id: mapping.epoch_id,
+            pyth_pro_feed_id: asset.feed_id,
+            pyth_core_feed_id: mapping.epoch_feed_id,
+            token_mint: None,
+            original_price_e8: asset.origin_price_e8,
+            original_benchmark: policy.anchor.benchmark,
+            original_timestamp: policy.anchor.timestamp_us / 1_000_000,
+        })
+        .collect();
+    universe
+        .seal_initial(&request.methodology.seal_config.protocol_config())
+        .map_err(|_| Error::Manifest)?;
     let receipt = Receipt {
         schema: "relative.runtime-universe-receipt/v1".into(),
         genesis_hash: DEVNET_GENESIS.into(),
@@ -111,6 +154,130 @@ pub fn prepare_genesis(request: GenesisRequest) -> Result<Receipt, Error> {
     };
     receipt.validate_for_operator(&operator)?;
     Ok(receipt)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FreshGenesisRequest {
+    pub schema: String,
+    pub basic_program: String,
+    pub basic_pool_id: u64,
+    pub operator: String,
+    pub policy_digest: [u8; 32],
+    pub universe_digest: [u8; 32],
+    pub mapping: Vec<AssetMapping>,
+    pub capture: origin::Captured,
+}
+
+pub fn prepare_fresh_genesis(request: FreshGenesisRequest) -> Result<Receipt, Error> {
+    use anchor_lang::prelude::Pubkey;
+    use cox::{Instrument, UniverseCapture};
+    if request.schema != "relative.fresh-genesis-universe-request/v1"
+        || request.basic_pool_id < 2
+        || request.policy_digest == [0; 32]
+        || request.universe_digest == [0; 32]
+        || !(30..=255).contains(&request.capture.assets.len())
+        || request.mapping.len() != request.capture.assets.len()
+    {
+        return Err(Error::Manifest);
+    }
+    origin::validate_capture(&request.capture).map_err(|_| Error::Evidence)?;
+    let program: Pubkey = request.basic_program.parse().map_err(|_| Error::Manifest)?;
+    let operator: Pubkey = request.operator.parse().map_err(|_| Error::Manifest)?;
+    if program == Pubkey::default() || operator == Pubkey::default() {
+        return Err(Error::Manifest);
+    }
+    let pool =
+        Pubkey::find_program_address(&[b"pool", &request.basic_pool_id.to_le_bytes()], &program).0;
+    let signed_payload_digest = hex::decode(&request.capture.signed_payload_sha256)
+        .map_err(|_| Error::Evidence)?
+        .try_into()
+        .map_err(|_| Error::Evidence)?;
+    let timestamp = request.capture.timestamp_us / 1_000_000;
+    let benchmark = 100 * cox_math::SCALE;
+    let mut universe = UniverseVersion::draft(
+        0,
+        pool,
+        operator,
+        request.policy_digest,
+        1,
+        [0; 32],
+        request.capture.assets.len() as u16,
+        UniverseCapture {
+            price_universe_digest: request.universe_digest,
+            timestamp,
+            benchmark,
+            prices_e8: request
+                .capture
+                .assets
+                .iter()
+                .map(|asset| asset.price_e8)
+                .collect(),
+            signed_payload_digest,
+            trusted_storage_digest: trusted_storage_digest(&request.capture)?,
+            predecessor_sequence: 0,
+            predecessor_state_digest: [0; 32],
+        },
+    )
+    .map_err(|_| Error::Manifest)?;
+    universe.schema_version = 2;
+    universe.instruments = request
+        .capture
+        .assets
+        .iter()
+        .zip(request.mapping)
+        .map(|(asset, mapping)| Instrument {
+            stable_id: asset.id.to_ascii_lowercase(),
+            symbol: asset.id.clone(),
+            class_id: mapping.basic_id,
+            epoch_id: mapping.epoch_id,
+            pyth_pro_feed_id: asset.feed_id,
+            pyth_core_feed_id: mapping.epoch_feed_id,
+            token_mint: None,
+            original_price_e8: asset.price_e8,
+            original_benchmark: benchmark,
+            original_timestamp: timestamp,
+        })
+        .collect();
+    universe.seal_genesis().map_err(|_| Error::Manifest)?;
+    let receipt = Receipt {
+        schema: "relative.runtime-universe-receipt/v1".into(),
+        genesis_hash: DEVNET_GENESIS.into(),
+        canonical: universe.canonical_bytes().map_err(|_| Error::Manifest)?,
+        previous_canonical: None,
+        evidence: Evidence::Genesis(request.capture),
+    };
+    receipt.validate_for_operator(&operator)?;
+    Ok(receipt)
+}
+
+pub fn prepare_fresh_genesis_file(input: &Path, output: &Path) -> Result<Receipt, Error> {
+    let request = preparation::read_request(input).map_err(|_| Error::Manifest)?;
+    let receipt = prepare_fresh_genesis(request)?;
+    preparation::persist(output, &receipt).map_err(|_| Error::Storage)?;
+    Ok(receipt)
+}
+
+pub fn initial_receipt(directory: &Path, canonical: &[u8]) -> Result<Receipt, Error> {
+    let mut canonical = canonical.to_vec();
+    for _ in 0..255 {
+        let current = view(&canonical)?;
+        let receipt: Receipt = journal::read(
+            &directory
+                .join("universes")
+                .join(format!("{}.json", hex::encode(current.digest))),
+        )
+        .map_err(|_| Error::Storage)?
+        .ok_or(Error::Storage)?;
+        if receipt.canonical != canonical || receipt.validate()? != current {
+            return Err(Error::Lineage);
+        }
+        match receipt.previous_canonical.as_ref() {
+            None => return Ok(receipt),
+            Some(previous) => canonical = previous.clone(),
+        }
+    }
+    Err(Error::Lineage)
 }
 
 pub fn prepare_genesis_file(input: &Path, output: &Path) -> Result<Receipt, Error> {
@@ -134,6 +301,7 @@ pub fn view(canonical: &[u8]) -> Result<View, Error> {
         .collect();
     Ok(View {
         digest: universe.digest,
+        crypto_class: universe.crypto_class(),
         source_methodology: universe.source_methodology,
         anchor: Anchor {
             universe_digest: universe.capture.price_universe_digest,
@@ -251,7 +419,7 @@ impl Receipt {
                         || price.price_e8 != asset.origin_price_e8
                 })
             || current.instruments.iter().any(|asset| {
-                asset.class_id == DYNAMIC_CRYPTO_CLASS
+                asset.class_id == current.crypto_class()
                     || asset.original_timestamp > current.capture.timestamp
             })
         {
@@ -357,7 +525,9 @@ pub fn reconcile_committed(
     history
         .activate(&expected.anchor)
         .map_err(|_| Error::Storage)?;
-    let resumed = history.latest_staged(&expected.anchor).map_err(|_| Error::Storage)?
+    let resumed = history
+        .latest_staged(&expected.anchor)
+        .map_err(|_| Error::Storage)?
         .unwrap_or(receipt.captured_observation()?);
     if history
         .latest()
@@ -367,9 +537,7 @@ pub fn reconcile_committed(
                 || latest.timestamp_us < resumed.timestamp_us
         })
     {
-        history
-            .append(&resumed)
-            .map_err(|_| Error::Storage)?;
+        history.append(&resumed).map_err(|_| Error::Storage)?;
     }
     history
         .latest_for_anchor(&expected.anchor)

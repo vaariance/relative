@@ -129,7 +129,9 @@ impl Config {
             || epoch.len() != ids.len()
             || feeds.len() != ids.len()
             || self.mapping.iter().any(|asset| {
-                asset.basic_id >= 30 || asset.epoch_id >= 256 || asset.epoch_feed_id == [0; 32]
+                asset.basic_id >= 256
+                    || asset.epoch_id >= 256
+                    || asset.epoch_feed_id == [0; 32]
             })
         {
             return Err(Error::Configuration);
@@ -186,32 +188,63 @@ impl StateLock {
 }
 #[derive(Clone)]
 pub struct SnapshotArchive {
-    anchor: Anchor,
+    anchor: Arc<RwLock<Anchor>>,
     history: FileHistory,
+    feed_updates: Option<watch::Sender<Vec<u32>>>,
     latest: Arc<RwLock<Option<Observation>>>,
     max_age_ms: u64,
     trusted_signers: Arc<RwLock<Option<Vec<pyth::TrustedSigner>>>>,
     max_feed_age_us: u64,
 }
 impl SnapshotArchive {
-    pub(crate) fn new(
-        anchor: Anchor,
-        history: FileHistory,
-        max_age_ms: u64,
-    ) -> Result<Self, Error> {
+    pub fn new(anchor: Anchor, history: FileHistory, max_age_ms: u64) -> Result<Self, Error> {
         let resumed = history
             .latest_for_anchor(&anchor)
             .map_err(|_| Error::Storage)?;
         Benchmark::new(anchor.clone(), MemoryHistory, resumed.clone())
             .map_err(|_| Error::Storage)?;
         Ok(Self {
-            anchor,
+            anchor: Arc::new(RwLock::new(anchor)),
             history,
+            feed_updates: None,
             latest: Arc::new(RwLock::new(resumed)),
             max_age_ms,
             trusted_signers: Arc::new(RwLock::new(None)),
             max_feed_age_us: 60_000_000,
         })
+    }
+    pub fn adopt_committed(
+        &self,
+        canonical: &[u8],
+        initial_anchor: &Anchor,
+    ) -> Result<crate::universe_runtime::View, worker::Error> {
+        let mut anchor = self.anchor.write().map_err(|_| worker::Error::Storage)?;
+        let directory = self
+            .history
+            .directory
+            .parent()
+            .ok_or(worker::Error::Storage)?;
+        let view =
+            crate::universe_runtime::reconcile_committed(directory, canonical, initial_anchor)
+                .map_err(|_| worker::Error::Storage)?;
+        let resumed = self
+            .history
+            .latest_for_anchor(&view.anchor)
+            .map_err(|_| worker::Error::Storage)?;
+        *self.latest.write().map_err(|_| worker::Error::Storage)? = resumed;
+        *anchor = view.anchor.clone();
+        if let Some(sender) = &self.feed_updates {
+            let feeds = anchor.assets.iter().map(|asset| asset.feed_id).collect();
+            sender.send_if_modified(|current| {
+                if *current == feeds {
+                    false
+                } else {
+                    *current = feeds;
+                    true
+                }
+            });
+        }
+        Ok(view)
     }
     pub(crate) fn trusted_keys(&self) -> Result<Vec<pyth::TrustedSigner>, worker::Error> {
         self.trusted_signers
@@ -221,19 +254,28 @@ impl SnapshotArchive {
             .ok_or(worker::Error::Snapshot)
     }
     pub(crate) fn accepted(&self, timestamp_us: u64) -> Result<Observation, worker::Error> {
+        let anchor = self.anchor.read().map_err(|_| worker::Error::Storage)?;
         let value = self
             .history
-            .exact(&self.anchor.universe_digest, timestamp_us)
+            .exact(&anchor.universe_digest, timestamp_us)
             .map_err(|_| worker::Error::Storage)?
             .ok_or(worker::Error::Snapshot)?;
-        self.validate(&value)?;
+        self.validate_for_anchor(&anchor, &value)?;
         Ok(value)
     }
     pub(crate) fn validate(&self, value: &Observation) -> Result<(), worker::Error> {
+        let anchor = self.anchor.read().map_err(|_| worker::Error::Storage)?;
+        self.validate_for_anchor(&anchor, value)
+    }
+    fn validate_for_anchor(
+        &self,
+        anchor: &Anchor,
+        value: &Observation,
+    ) -> Result<(), worker::Error> {
         if value.timestamp_us % 1_000_000 != 0 {
             return Err(worker::Error::Snapshot);
         }
-        Benchmark::new(self.anchor.clone(), MemoryHistory, Some(value.clone()))
+        Benchmark::new(anchor.clone(), MemoryHistory, Some(value.clone()))
             .map_err(|_| worker::Error::Snapshot)?;
         if let Some(signers) = self
             .trusted_signers
@@ -248,10 +290,10 @@ impl SnapshotArchive {
                 self.max_feed_age_us,
             )
             .map_err(|_| worker::Error::Snapshot)?;
-            if batch.prices.len() != self.anchor.assets.len() {
+            if batch.prices.len() != anchor.assets.len() {
                 return Err(worker::Error::Snapshot);
             }
-            let mut calculator = Benchmark::new(self.anchor.clone(), MemoryHistory, None)
+            let mut calculator = Benchmark::new(anchor.clone(), MemoryHistory, None)
                 .map_err(|_| worker::Error::Snapshot)?;
             if calculator
                 .observe(&batch, |_| Ok(()))
@@ -274,13 +316,14 @@ impl Snapshots for SnapshotArchive {
         closing_ms: Option<u64>,
         now_ms: u64,
     ) -> Result<Option<Observation>, worker::Error> {
+        let anchor = self.anchor.read().map_err(|_| worker::Error::Storage)?;
         let mut value = if let Some(close) = closing_ms {
             if close > now_ms {
                 return Ok(None);
             }
             self.history
                 .exact(
-                    &self.anchor.universe_digest,
+                    &anchor.universe_digest,
                     close.checked_mul(1000).ok_or(worker::Error::Clock)?,
                 )
                 .map_err(|_| worker::Error::Storage)?
@@ -298,7 +341,7 @@ impl Snapshots for SnapshotArchive {
             value = self
                 .history
                 .exact(
-                    &self.anchor.universe_digest,
+                    &anchor.universe_digest,
                     (now_ms / 1000)
                         .checked_mul(1_000_000)
                         .ok_or(worker::Error::Clock)?,
@@ -306,7 +349,7 @@ impl Snapshots for SnapshotArchive {
                 .map_err(|_| worker::Error::Storage)?;
         }
         let Some(value) = value else { return Ok(None) };
-        self.validate(&value)?;
+        self.validate_for_anchor(&anchor, &value)?;
         let timestamp = value.timestamp_us / 1000;
         if timestamp > now_ms {
             return Ok(None);
@@ -381,9 +424,13 @@ async fn benchmark_task(
     usage_path: PathBuf,
     mut stop: watch::Receiver<bool>,
 ) -> Result<(), Error> {
-    let resumed = archive.latest.read().map_err(|_| Error::Storage)?.clone();
-    let mut benchmark = Benchmark::new(archive.anchor.clone(), archive.history.clone(), resumed)
-        .map_err(|_| Error::Storage)?;
+    let (mut active_anchor, mut benchmark) = {
+        let anchor = archive.anchor.read().map_err(|_| Error::Storage)?;
+        let resumed = archive.latest.read().map_err(|_| Error::Storage)?.clone();
+        let benchmark = Benchmark::new(anchor.clone(), archive.history.clone(), resumed)
+            .map_err(|_| Error::Storage)?;
+        (anchor.clone(), benchmark)
+    };
     let mut signers = archive
         .trusted_signers
         .read()
@@ -418,13 +465,20 @@ async fn benchmark_task(
                     }
                     rpc.persist_usage(&usage_path).map_err(|_|Error::Storage)?;
                 }
+                let anchor=archive.anchor.read().map_err(|_|Error::Storage)?;
+                if *anchor != active_anchor {
+                    active_anchor=anchor.clone();
+                    let resumed=archive.latest.read().map_err(|_|Error::Storage)?.clone();
+                    benchmark=Benchmark::new(active_anchor.clone(),archive.history.clone(),resumed).map_err(|_|Error::Storage)?;
+                }
                 let Ok(batch)=pyth::verify_payload(&bytes,&signers,now/1000,max_feed_age_ms*1000)else{continue};
                 if batch.timestamp_us%1_000_000!=0 || batch.timestamp_us>now*1000 || now*1000-batch.timestamp_us>60_000_000
-                    || batch.prices.len()!=archive.anchor.assets.len(){continue;}
+                    || batch.prices.len()!=active_anchor.assets.len(){continue;}
                 match benchmark.observe(&batch,|_|Ok(())){
                     Ok(value)=>*archive.latest.write().map_err(|_|Error::Storage)?=Some(value),
                     Err(crate::benchmark::Error::TimeRegression)=>{},
                     Err(crate::benchmark::Error::Conflict|crate::benchmark::Error::Persistence)=>return Err(Error::Storage),
+                    Err(crate::benchmark::Error::Incomplete|crate::benchmark::Error::InvalidPrice)=>{},
                     Err(_)=>return Err(Error::Feed),
                 }
             }
@@ -434,23 +488,34 @@ async fn benchmark_task(
 pub(crate) async fn pyth_task(
     config: PythConfig,
     prices: mpsc::Sender<Vec<u8>>,
+    stop: watch::Receiver<bool>,
+) -> Result<(), Error> {
+    let (_sender, feeds) = watch::channel(config.feed_ids.clone());
+    pyth_dynamic_task(config, feeds, prices, stop).await
+}
+async fn pyth_dynamic_task(
+    config: PythConfig,
+    feeds: watch::Receiver<Vec<u32>>,
+    prices: mpsc::Sender<Vec<u8>>,
     mut stop: watch::Receiver<bool>,
 ) -> Result<(), Error> {
     loop {
         if *stop.borrow() {
             return Ok(());
         }
-        if let Err(error) = feeds::run_pyth(
+        let current_feeds = feeds.borrow().clone();
+        let outcome = feeds::run_pyth_dynamic(
             PythConfig {
                 token: config.token.clone(),
-                feed_ids: config.feed_ids.clone(),
+                feed_ids: current_feeds,
                 subscription_id: config.subscription_id,
             },
+            feeds.clone(),
             prices.clone(),
             stop.clone(),
         )
-        .await
-        {
+        .await;
+        if let Err(error) = outcome {
             if matches!(
                 error,
                 feeds::FeedError::Configuration
@@ -606,25 +671,41 @@ pub async fn run(path: &Path) -> Result<(), Error> {
     let dynamic = if boot_state.basic.pool.schema_version == 5 {
         let universe = cox::read_dynamic_manifest(&boot_state.basic.methodology)
             .map_err(|_| Error::Configuration)?;
-        let root =
-            crate::rpc::with_trigger("startup", reader.methodology(universe.source_methodology))
-                .await
-                .map_err(|_| Error::Network)?;
-        crate::executor::validate_methodology_policy(
-            &root,
-            &config.anchor,
-            &config.mapping,
-            config.max_price_age_ms,
-            config.max_feed_age_ms,
+        let genesis = crate::universe_runtime::initial_receipt(
+            &config.state_directory,
+            &boot_state.basic.methodology.canonical,
         )
-        .map_err(|_| Error::Configuration)?;
+        .map_err(|_| Error::Storage)?;
+        let origin = cox::UniverseVersion::from_canonical(&genesis.canonical)
+            .map_err(|_| Error::Configuration)?;
+        if origin.capture.predecessor_sequence == 0 {
+            let initial = genesis.validate().map_err(|_| Error::Configuration)?;
+            if initial.anchor != config.anchor || initial.mapping != config.mapping {
+                return Err(Error::Configuration);
+            }
+        } else {
+            let root = crate::rpc::with_trigger(
+                "startup",
+                reader.methodology(universe.source_methodology),
+            )
+            .await
+            .map_err(|_| Error::Network)?;
+            crate::executor::validate_methodology_policy(
+                &root,
+                &config.anchor,
+                &config.mapping,
+                config.max_price_age_ms,
+                config.max_feed_age_ms,
+            )
+            .map_err(|_| Error::Configuration)?;
+        }
         let view = crate::universe_runtime::reconcile_committed(
             &config.state_directory,
             &boot_state.basic.methodology.canonical,
             &config.anchor,
         )
         .map_err(|_| Error::Storage)?;
-        if view.source_methodology != root.digest {
+        if view.source_methodology != universe.source_methodology {
             return Err(Error::Configuration);
         }
         Some(view)
@@ -705,6 +786,13 @@ pub async fn run(path: &Path) -> Result<(), Error> {
     } else {
         chain
     };
+    let (feed_updates, feed_receiver) = watch::channel(
+        active_anchor
+            .assets
+            .iter()
+            .map(|asset| asset.feed_id)
+            .collect::<Vec<_>>(),
+    );
     let mut archive = SnapshotArchive::new(
         active_anchor.clone(),
         FileHistory {
@@ -713,6 +801,7 @@ pub async fn run(path: &Path) -> Result<(), Error> {
         config.max_price_age_ms,
     )?;
     archive.max_feed_age_us = config.max_feed_age_ms * 1000;
+    archive.feed_updates = Some(feed_updates);
     *archive
         .trusted_signers
         .write()
@@ -747,7 +836,7 @@ pub async fn run(path: &Path) -> Result<(), Error> {
         wakes,
         stop.clone(),
     ));
-    let mut pyth = tokio::spawn(pyth_task(
+    let mut pyth = tokio::spawn(pyth_dynamic_task(
         PythConfig {
             token: pyth_key.clone(),
             feed_ids: active_anchor
@@ -757,6 +846,7 @@ pub async fn run(path: &Path) -> Result<(), Error> {
                 .collect(),
             subscription_id: 1,
         },
+        feed_receiver,
         prices,
         stop.clone(),
     ));

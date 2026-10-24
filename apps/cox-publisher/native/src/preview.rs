@@ -23,8 +23,13 @@ pub struct AssetOrigin {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Universe {
+    #[serde(default = "legacy_crypto_class")]
+    pub crypto_class: u16,
     pub price_digest: [u8; 32],
     pub origins: Vec<AssetOrigin>,
+}
+fn legacy_crypto_class() -> u16 {
+    30
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -36,13 +41,16 @@ pub struct PreviewCutoff {
 impl PreviewCutoff {
     pub fn limit(&self, anchor: &Anchor, latest: u64) -> Result<u64, Error> {
         if self.schema != "relative.inclusion-preview-cutoff/v1"
-            || self.price_digest == [0; 32] || self.cutoff_timestamp == 0
+            || self.price_digest == [0; 32]
+            || self.cutoff_timestamp == 0
         {
             return Err(Error::Invalid);
         }
         Ok(if self.price_digest == anchor.universe_digest {
             latest.min(self.cutoff_timestamp)
-        } else { latest })
+        } else {
+            latest
+        })
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,6 +64,8 @@ pub struct LedgerClass {
 pub struct Ledger {
     pub program: String,
     pub pool: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<String>,
     pub methodology_digest: String,
     pub sequence: u64,
     pub state_digest: String,
@@ -74,15 +84,30 @@ impl Ledger {
             return Err(Error::Invalid);
         }
         let universe = if pool.schema_version == 5 {
-            let value = cox::read_dynamic_manifest(&basic.methodology).map_err(|_| Error::Invalid)?;
-            Some(Universe { price_digest: value.capture.price_universe_digest, origins: value.instruments.iter().map(|asset| AssetOrigin {
-                asset_id: asset.symbol.clone(), class_id: asset.class_id, price_e8: asset.original_price_e8, benchmark: asset.original_benchmark,
-            }).collect() })
-        } else { None };
+            let value =
+                cox::read_dynamic_manifest(&basic.methodology).map_err(|_| Error::Invalid)?;
+            Some(Universe {
+                crypto_class: value.crypto_class(),
+                price_digest: value.capture.price_universe_digest,
+                origins: value
+                    .instruments
+                    .iter()
+                    .map(|asset| AssetOrigin {
+                        asset_id: asset.symbol.clone(),
+                        class_id: asset.class_id,
+                        price_e8: asset.original_price_e8,
+                        benchmark: asset.original_benchmark,
+                    })
+                    .collect(),
+            })
+        } else {
+            None
+        };
         Ok(Self {
             universe,
             program: basic.accounts.program.to_string(),
             pool: basic.accounts.pool.to_string(),
+            generation: (pool.generation != [0; 32]).then(|| hex::encode(pool.generation)),
             methodology_digest: hex::encode(basic.methodology.digest),
             sequence: pool.sequence,
             state_digest: hex::encode(pool.state_digest),
@@ -153,6 +178,8 @@ pub struct Record {
     pub network: String,
     pub program: String,
     pub pool: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<String>,
     pub methodology_digest: String,
     pub universe_digest: String,
     pub scales: Scales,
@@ -196,18 +223,52 @@ impl Record {
             return Err(Error::Invalid);
         }
         if let Some(universe) = &ledger.universe {
-            if universe.price_digest != anchor.universe_digest || universe.origins.len() != anchor.assets.len() { return Err(Error::Invalid); }
-            for (index, (asset, origin)) in anchor.assets.iter().zip(&universe.origins).enumerate() {
-                let class_id = if index < 30 { index } else { index + 1 };
-                if origin.asset_id != asset.id || usize::from(origin.class_id) != class_id || origin.price_e8 == 0 || origin.benchmark <= 0 { return Err(Error::Invalid); }
+            if !matches!(universe.crypto_class, 0 | 30)
+                || universe.price_digest != anchor.universe_digest
+                || universe.origins.len() != anchor.assets.len()
+            {
+                return Err(Error::Invalid);
             }
-        } else if anchor.assets.len() > 30 || anchor.benchmark != 100 * SCALE { return Err(Error::Invalid); }
-        let crypto_class = if ledger.universe.is_some() { 30 } else { anchor.assets.len() as u16 };
+            for (index, (asset, origin)) in anchor.assets.iter().zip(&universe.origins).enumerate()
+            {
+                let class_id = if universe.crypto_class == 0 {
+                    index + 1
+                } else if index < 30 {
+                    index
+                } else {
+                    index + 1
+                };
+                if origin.asset_id != asset.id
+                    || usize::from(origin.class_id) != class_id
+                    || origin.price_e8 == 0
+                    || origin.benchmark <= 0
+                {
+                    return Err(Error::Invalid);
+                }
+            }
+        } else if anchor.assets.len() > 30 || anchor.benchmark != 100 * SCALE {
+            return Err(Error::Invalid);
+        }
+        let crypto_class = ledger
+            .universe
+            .as_ref()
+            .map_or(anchor.assets.len() as u16, |universe| universe.crypto_class);
         let mut assets = Vec::with_capacity(anchor.assets.len());
         for (index, (asset, price)) in anchor.assets.iter().zip(&value.prices_e8).enumerate() {
-            let origin = ledger.universe.as_ref().map(|universe| &universe.origins[index]);
-            let since_origin = ratio(i128::from(*price), SCALE, i128::from(origin.map(|o| o.price_e8).unwrap_or(asset.origin_price_e8)))?;
-            let benchmark_ratio = ratio(value.benchmark, SCALE, origin.map(|o| o.benchmark).unwrap_or(anchor.benchmark))?;
+            let origin = ledger
+                .universe
+                .as_ref()
+                .map(|universe| &universe.origins[index]);
+            let since_origin = ratio(
+                i128::from(*price),
+                SCALE,
+                i128::from(origin.map(|o| o.price_e8).unwrap_or(asset.origin_price_e8)),
+            )?;
+            let benchmark_ratio = ratio(
+                value.benchmark,
+                SCALE,
+                origin.map(|o| o.benchmark).unwrap_or(anchor.benchmark),
+            )?;
             assets.push(Asset {
                 class_id: origin.map(|o| o.class_id).unwrap_or(index as u16),
                 asset_id: asset.id.clone(),
@@ -223,7 +284,9 @@ impl Record {
         {
             let benchmark_gross = ratio(value.benchmark, SCALE, ledger.benchmark)?;
             let mut h = vec![SCALE; ledger.classes.len()];
-            for (index, (current, previous)) in value.prices_e8.iter().zip(&ledger.prices_e8).enumerate() {
+            for (index, (current, previous)) in
+                value.prices_e8.iter().zip(&ledger.prices_e8).enumerate()
+            {
                 h[usize::from(assets[index].class_id)] = ratio(
                     ratio(i128::from(*current), SCALE, i128::from(*previous))?,
                     SCALE,
@@ -242,7 +305,8 @@ impl Record {
                 cox_math::revalue_dynamic(&before, &h)
             } else {
                 cox_math::revalue(&before, &h)
-            }.map_err(|_| Error::Invalid)?;
+            }
+            .map_err(|_| Error::Invalid)?;
             Some(Projection {
                 sequence: ledger.sequence.to_string(),
                 state_digest: ledger.state_digest.clone(),
@@ -269,6 +333,7 @@ impl Record {
             network: "solana-devnet".into(),
             program: ledger.program.clone(),
             pool: ledger.pool.clone(),
+            generation: ledger.generation.clone(),
             methodology_digest: ledger.methodology_digest.clone(),
             universe_digest: hex::encode(anchor.universe_digest),
             scales: Scales {
@@ -315,16 +380,6 @@ fn regular_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Error>
 }
 pub async fn run(config_path: &Path, backup_path: &Path) -> Result<(), Error> {
     let config = crate::runtime::Config::read(config_path).map_err(|_| Error::Invalid)?;
-    if config.basic_pool_id != 2
-        || config.anchor.assets.len() != 30
-        || config
-            .mapping
-            .iter()
-            .enumerate()
-            .any(|(i, m)| usize::from(m.basic_id) != i)
-    {
-        return Err(Error::Invalid);
-    }
     let backup = backup::Config::read(backup_path).map_err(|_| Error::Invalid)?;
     if backup.state_directory != config.state_directory {
         return Err(Error::Invalid);
@@ -414,18 +469,26 @@ async fn produce(
             continue;
         }
         let ledger: Ledger = regular_json(&ledger_path)?;
-        let active_anchor = history.active_anchor().map_err(|_| Error::Storage)?.unwrap_or_else(|| anchor.clone());
+        let active_anchor = history
+            .active_anchor()
+            .map_err(|_| Error::Storage)?
+            .unwrap_or_else(|| anchor.clone());
         let anchor = &active_anchor;
         if ledger.program != program || ledger.pool != pool {
             return Err(Error::Invalid);
         }
         if ledger.prices_e8.len() != anchor.assets.len()
-            || ledger.universe.as_ref().is_some_and(|universe| universe.price_digest != anchor.universe_digest)
+            || ledger
+                .universe
+                .as_ref()
+                .is_some_and(|universe| universe.price_digest != anchor.universe_digest)
         {
             continue;
         }
-        let cutoff = journal::read::<Option<PreviewCutoff>>(&state.join("inclusion-preview-cutoff.json"))
-            .map_err(|_| Error::Storage)?.flatten();
+        let cutoff =
+            journal::read::<Option<PreviewCutoff>>(&state.join("inclusion-preview-cutoff.json"))
+                .map_err(|_| Error::Storage)?
+                .flatten();
         let latest_seconds = match cutoff {
             Some(cutoff) => cutoff.limit(anchor, latest_seconds)?,
             None => latest_seconds,

@@ -6,13 +6,25 @@ use std::{hint::black_box, time::Instant};
 #[tokio::main]
 async fn main() {
     let result = match std::env::args().nth(1).as_deref() {
-        Some("run") => match (std::env::args().nth(2).as_deref(),std::env::args().nth(3),std::env::args().nth(4)) {
-            (Some("--config"),Some(path),None) => match relative_publisher::runtime::run(std::path::Path::new(&path)).await {
-                Ok(())=>Ok(()),
-                Err(relative_publisher::runtime::Error::Disabled)=>{println!("Publisher is disabled");Ok(())},
-                Err(error)=>{eprintln!("Native runtime exit: {error:?}");Err("Native publisher stopped; configuration, custody, feed or recovery validation failed")},
-            },
-            _=>Err("Usage: relative-publisher run --config PATH"),
+        Some("run") => match (
+            std::env::args().nth(2).as_deref(),
+            std::env::args().nth(3),
+            std::env::args().nth(4),
+        ) {
+            (Some("--config"), Some(path), None) => {
+                match relative_publisher::runtime::run(std::path::Path::new(&path)).await {
+                    Ok(()) => Ok(()),
+                    Err(relative_publisher::runtime::Error::Disabled) => {
+                        println!("Publisher is disabled");
+                        Ok(())
+                    }
+                    Err(error) => {
+                        eprintln!("Native runtime exit: {error:?}");
+                        Err("Native publisher stopped; configuration, custody, feed or recovery validation failed")
+                    }
+                }
+            }
+            _ => Err("Usage: relative-publisher run --config PATH"),
         },
         Some("capture-origin") => capture_origin().await,
         Some("capture-activation") => capture_activation().await,
@@ -20,6 +32,7 @@ async fn main() {
         Some("prepare-inclusion") => prepare_inclusion(),
         Some("prepare-universe") => prepare_universe(),
         Some("prepare-genesis-universe") => prepare_genesis_universe(),
+        Some("prepare-fresh-genesis") => prepare_fresh_genesis(),
         Some("preview") => preview().await,
         Some("backup") => backup().await,
         Some("restore") => restore().await,
@@ -27,7 +40,9 @@ async fn main() {
         Some("probe-rpc") => probe().await,
         Some("probe-feeds") => probe_feeds().await,
         Some("probe-transaction") => probe_transaction().await,
-        _ => Err("Usage: relative-publisher run --config PATH | benchmark | probe-rpc | probe-feeds"),
+        _ => {
+            Err("Usage: relative-publisher run --config PATH | benchmark | probe-rpc | probe-feeds")
+        }
     };
     if let Err(error) = result {
         eprintln!("{error}");
@@ -266,11 +281,37 @@ fn prepare_universe() -> Result<(), &'static str> {
         std::path::Path::new(&arguments[1]),
         std::path::Path::new(&arguments[3]),
     ).map_err(|_| "Universe preparation failed; admission, approval schedule, signed capture or lineage validation failed")?;
-    println!("{}", serde_json::json!({
-        "prepared": true, "activated": false,
-        "digest": artifact.digest,
-        "submittedTransactions": 0,
-    }));
+    println!(
+        "{}",
+        serde_json::json!({
+            "prepared": true, "activated": false,
+            "digest": artifact.digest,
+            "submittedTransactions": 0,
+        })
+    );
+    Ok(())
+}
+
+fn prepare_fresh_genesis() -> Result<(), &'static str> {
+    let arguments = std::env::args().skip(2).collect::<Vec<_>>();
+    if arguments.len() != 4 || arguments[0] != "--request" || arguments[2] != "--output" {
+        return Err("Usage: relative-publisher prepare-fresh-genesis --request ABSOLUTE_PATH --output NEW_ABSOLUTE_PATH");
+    }
+    let receipt = relative_publisher::universe_runtime::prepare_fresh_genesis_file(
+        std::path::Path::new(&arguments[1]),
+        std::path::Path::new(&arguments[3]),
+    )
+    .map_err(|_| {
+        "Fresh genesis preparation failed; signed capture or identity validation failed"
+    })?;
+    let view = receipt
+        .validate()
+        .map_err(|_| "Genesis receipt validation failed")?;
+    println!(
+        "{}",
+        serde_json::json!({"prepared": true, "activated": false,
+        "digest": hex::encode(view.digest), "assetCount": view.mapping.len(), "submittedTransactions": 0})
+    );
     Ok(())
 }
 
@@ -282,9 +323,14 @@ fn prepare_genesis_universe() -> Result<(), &'static str> {
     let receipt = relative_publisher::universe_runtime::prepare_genesis_file(
         std::path::Path::new(&arguments[1]), std::path::Path::new(&arguments[3]),
     ).map_err(|_| "Genesis universe preparation failed; original methodology, capture or identity validation failed")?;
-    let view = receipt.validate().map_err(|_| "Genesis receipt validation failed")?;
-    println!("{}", serde_json::json!({"prepared": true, "activated": false,
-        "digest": hex::encode(view.digest), "assetCount": view.mapping.len(), "submittedTransactions": 0}));
+    let view = receipt
+        .validate()
+        .map_err(|_| "Genesis receipt validation failed")?;
+    println!(
+        "{}",
+        serde_json::json!({"prepared": true, "activated": false,
+        "digest": hex::encode(view.digest), "assetCount": view.mapping.len(), "submittedTransactions": 0})
+    );
     Ok(())
 }
 

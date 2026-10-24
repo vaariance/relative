@@ -52,6 +52,7 @@ pub struct Executor<S> {
     epoch_stage_snapshot: Option<(relative_epoch::SnapshotAccount, usize)>,
     epoch_retry_ms: u64,
     inclusion: Option<crate::inclusion_execution::Shared>,
+    current_epoch_preparation: Vec<Instruction>,
 }
 pub(crate) fn validate_methodology_policy(
     methodology: &cox::Methodology,
@@ -187,6 +188,7 @@ impl<S: DraftSigner> Executor<S> {
             epoch_stage_snapshot: None,
             epoch_retry_ms: 0,
             inclusion: None,
+            current_epoch_preparation: vec![],
         })
     }
     pub fn with_chain_changes(
@@ -345,10 +347,35 @@ impl<S: DraftSigner> Executor<S> {
             )
             .map_err(|_| worker::Error::Storage)
     }
+    fn adopt_committed_universe(&mut self, state: &ChainState) -> Result<(), worker::Error> {
+        let Some((current, root)) = self.dynamic.as_ref() else {
+            return Ok(());
+        };
+        if current.digest == state.basic.methodology.digest {
+            return Ok(());
+        }
+        if state.basic.pool.stage.is_some() || self.epoch_stage.is_some() {
+            return Err(worker::Error::StaleDraft);
+        }
+        let expected = crate::universe_runtime::view(&state.basic.methodology.canonical)
+            .map_err(|_| worker::Error::Snapshot)?;
+        if expected.source_methodology != current.source_methodology {
+            return Err(worker::Error::Snapshot);
+        }
+        let archive = self
+            .snapshot_archive
+            .as_ref()
+            .ok_or(worker::Error::Storage)?;
+        let view = archive.adopt_committed(&state.basic.methodology.canonical, root)?;
+        self.anchor = view.anchor.clone();
+        self.mapping = view.mapping.clone();
+        self.dynamic = Some((view, root.clone()));
+        Ok(())
+    }
     fn validate_anchor(&self, state: &ChainState) -> Result<(), worker::Error> {
         if let Some((expected, root)) = &self.dynamic {
             if state.basic.methodology.digest != expected.digest {
-                return Err(worker::Error::UniverseTransition);
+                return Err(worker::Error::StaleDraft);
             }
             let observed = crate::universe_runtime::view(&state.basic.methodology.canonical)
                 .map_err(|_| worker::Error::Snapshot)?;
@@ -364,7 +391,7 @@ impl<S: DraftSigner> Executor<S> {
             }
         } else {
             if state.basic.pool.schema_version == 5 {
-                return Err(worker::Error::UniverseTransition);
+                return Err(worker::Error::StaleDraft);
             }
             validate_methodology_policy(
                 &state.basic.methodology,
@@ -1032,6 +1059,14 @@ fn critical_digest(state: &ChainState) -> [u8; 32] {
     let basic = &state.basic;
     hash.update(basic.pool.sequence.to_le_bytes());
     hash.update(basic.pool.state_digest);
+    hash.update([basic.pool.lifecycle_version, basic.pool.lifecycle as u8]);
+    hash.update(basic.pool.generation);
+    hash.update(basic.pool.asset_registry.to_bytes());
+    hash.update([
+        state.epoch_config.lifecycle_version,
+        state.epoch_config.lifecycle as u8,
+    ]);
+    hash.update(state.epoch_config.asset_registry.to_bytes());
     hash.update([u8::from(basic.registry.paused)]);
     hash.update(basic.registry.runtime.to_bytes());
     hash.update(basic.methodology.digest);
@@ -1072,6 +1107,14 @@ fn critical_digest(state: &ChainState) -> [u8; 32] {
     let mut epochs = state.epochs.iter().collect::<Vec<_>>();
     epochs.sort_by_key(|epoch| epoch.epoch.opens_at);
     for epoch in epochs {
+        hash.update(epoch.epoch.opens_at.to_le_bytes());
+        hash.update([
+            u8::from(epoch.epoch.empty_finalized),
+            epoch.epoch.binding_version,
+        ]);
+        hash.update(epoch.epoch.registry_version.to_bytes());
+        hash.update(epoch.epoch.universe_digest);
+        hash.update((epoch.epoch.universe.len() as u32).to_le_bytes());
         if let Some(current) = epoch.epoch.state.as_ref() {
             hash.update(epoch.epoch.opens_at.to_le_bytes());
             hash.update([current.phase() as u8]);
@@ -1109,7 +1152,11 @@ fn pending_valid(operator: solana_address::Address, pending: &PendingTransaction
 }
 impl<S: DraftSigner> worker::Chain for Executor<S> {
     fn price_timestamp_ceiling_ms(&self, wall_ms: u64) -> Result<u64, worker::Error> {
-        let timestamp = self.last_state.as_ref().ok_or(worker::Error::Chain)?.confirmed_timestamp_ms;
+        let timestamp = self
+            .last_state
+            .as_ref()
+            .ok_or(worker::Error::Chain)?
+            .confirmed_timestamp_ms;
         if timestamp == 0 || timestamp > wall_ms || wall_ms - timestamp > self.max_price_age_ms {
             return Err(worker::Error::Clock);
         }
@@ -1151,11 +1198,39 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
         } else {
             None
         };
-        inclusion.into_iter().chain(epoch).min()
+        let boundary = self.last_state.as_ref().and_then(|state| {
+            state
+                .epochs
+                .iter()
+                .filter_map(|epoch| epoch.epoch.state.as_ref())
+                .filter(|state| state.phase() == cox_epoch::Phase::Open)
+                .map(|state| state.closes_at().saturating_mul(1000))
+                .filter(|close| *close > self.now_ms)
+                .min()
+        });
+        let next_round = self
+            .last_state
+            .as_ref()
+            .filter(|state| {
+                state.epoch_config.lifecycle_version == 1
+                    && state.epoch_config.lifecycle == relative_epoch::ConfigLifecycle::Active
+            })
+            .map(|_| {
+                (self.now_ms / 1000 / cox_epoch::EPOCH_SECONDS + 1)
+                    .saturating_mul(cox_epoch::EPOCH_SECONDS)
+                    .saturating_mul(1000)
+            });
+        inclusion
+            .into_iter()
+            .chain(epoch)
+            .chain(boundary)
+            .chain(next_round)
+            .min()
     }
     async fn authoritative_work(&mut self, now_ms: u64) -> Result<Vec<Work>, worker::Error> {
         self.now_ms = now_ms;
         let state = self.read_state().await?;
+        self.adopt_committed_universe(&state)?;
         self.validate_anchor(&state)?;
         if let Some(changes) = &self.chain_changes {
             let activity = self
@@ -1200,6 +1275,23 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
             }
         }
         let mut work = chain_error(state.work(now_ms))?;
+        self.current_epoch_preparation = if let Some(path) = &self.preview_ledger_path {
+            crate::epoch_lifecycle::plan(
+                &self.reader,
+                &state,
+                path.parent().ok_or(worker::Error::Storage)?,
+                now_ms,
+            )
+            .await?
+        } else {
+            vec![]
+        };
+        if !self.current_epoch_preparation.is_empty() {
+            work.push(Work::Maintenance {
+                id: crate::epoch_lifecycle::PREPARE_ID.into(),
+                pool: Pool::Epoch,
+            });
+        }
         if self.epoch_stage.is_none() && now_ms < self.epoch_retry_ms {
             work.retain(is_basic);
         }
@@ -1262,6 +1354,8 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
         let authoritative = chain_error(state.work(self.now_ms))?;
         if work.iter().any(|item| {
             !authoritative.contains(item)
+                && !(id(item) == crate::epoch_lifecycle::PREPARE_ID
+                    && !self.current_epoch_preparation.is_empty())
                 && !(self.inclusion.is_some()
                     && crate::inclusion_execution::Controller::matches(item))
                 && !self
@@ -1274,10 +1368,19 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
         self.preserve_publication(&state).await?;
         let guard = critical_digest(&state);
         let has_epoch_work = work.iter().any(|work| !is_basic(work));
-        let staged_epoch =
-            has_epoch_work && (self.epoch_stage.is_some() || self.mapping.len() > 30);
+        let lifecycle = work
+            .iter()
+            .any(|item| id(item) == crate::epoch_lifecycle::PREPARE_ID);
+        let staged_epoch = !lifecycle
+            && has_epoch_work
+            && (self.epoch_stage.is_some() || (self.mapping.len() > 30 && observation.is_some()));
         let rollout=work.iter().any(|work|matches!(work,Work::Maintenance{id,..} if id==crate::inclusion_execution::ROLLOUT_ID));
-        let mut instructions = if rollout {
+        let mut instructions = if lifecycle {
+            if self.current_epoch_preparation.is_empty() {
+                return Err(worker::Error::StaleDraft);
+            }
+            self.current_epoch_preparation.clone()
+        } else if rollout {
             let control = self.inclusion.as_ref().ok_or(worker::Error::Chain)?;
             let mut outcome = crate::inclusion_execution::plan(
                 control,
@@ -1301,9 +1404,7 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
             }
             match outcome {
                 crate::inclusion_execution::Action::Instructions(instructions) => instructions,
-                crate::inclusion_execution::Action::Restart => {
-                    return Err(worker::Error::UniverseTransition)
-                }
+                crate::inclusion_execution::Action::Adopt => return Err(worker::Error::StaleDraft),
                 crate::inclusion_execution::Action::Waiting => {
                     return Err(worker::Error::StaleDraft)
                 }
@@ -1418,7 +1519,12 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
                     .pointer("/value/err")
                     .is_some_and(|value| value.is_null())
             {
-                eprintln!("Publisher simulation rejected: {}", result.pointer("/value/err").unwrap_or(&serde_json::Value::Null));
+                eprintln!(
+                    "Publisher simulation rejected: {}",
+                    result
+                        .pointer("/value/err")
+                        .unwrap_or(&serde_json::Value::Null)
+                );
                 return Err(worker::Error::Simulation);
             }
             break transaction;
@@ -1631,14 +1737,32 @@ mod tests {
     fn price_ceiling_requires_recent_confirmed_clock_without_wall_time_extrapolation() {
         use crate::worker::Chain;
         let mut executor = executor();
-        assert_eq!(executor.price_timestamp_ceiling_ms(14_411_000), Err(worker::Error::Chain));
+        assert_eq!(
+            executor.price_timestamp_ceiling_ms(14_411_000),
+            Err(worker::Error::Chain)
+        );
         executor.last_state = Some(state());
-        assert_eq!(executor.price_timestamp_ceiling_ms(14_411_000), Ok(14_410_000));
-        assert_eq!(executor.price_timestamp_ceiling_ms(14_415_000), Ok(14_410_000));
-        assert_eq!(executor.price_timestamp_ceiling_ms(14_415_001), Err(worker::Error::Clock));
-        assert_eq!(executor.price_timestamp_ceiling_ms(14_409_999), Err(worker::Error::Clock));
+        assert_eq!(
+            executor.price_timestamp_ceiling_ms(14_411_000),
+            Ok(14_410_000)
+        );
+        assert_eq!(
+            executor.price_timestamp_ceiling_ms(14_415_000),
+            Ok(14_410_000)
+        );
+        assert_eq!(
+            executor.price_timestamp_ceiling_ms(14_415_001),
+            Err(worker::Error::Clock)
+        );
+        assert_eq!(
+            executor.price_timestamp_ceiling_ms(14_409_999),
+            Err(worker::Error::Clock)
+        );
         executor.last_state.as_mut().unwrap().confirmed_timestamp_ms = 0;
-        assert_eq!(executor.price_timestamp_ceiling_ms(14_411_000), Err(worker::Error::Clock));
+        assert_eq!(
+            executor.price_timestamp_ceiling_ms(14_411_000),
+            Err(worker::Error::Clock)
+        );
     }
     fn executor() -> Executor<NeverSigner> {
         let operator = solana_address::Address::new_from_array([7; 32]);

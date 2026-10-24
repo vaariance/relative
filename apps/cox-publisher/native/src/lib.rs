@@ -36,3 +36,5 @@ pub mod inclusion_pipeline;
 pub mod epoch_stage;
 pub mod inclusion_rollout;
 pub mod inclusion_execution;
+
+pub mod epoch_lifecycle;

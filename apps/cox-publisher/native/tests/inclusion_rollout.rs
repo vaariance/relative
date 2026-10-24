@@ -99,6 +99,7 @@ impl Fixture {
                     .map(|value| (value, self.allocation)),
                 epoch_stage_present: self.epoch_stage,
                 receipt_persisted: self.persisted,
+                next_registry_version: None,
             },
             cursor,
         )

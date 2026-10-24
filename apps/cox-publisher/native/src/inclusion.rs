@@ -283,6 +283,7 @@ pub fn build_successor(request: Request) -> Result<Prepared, Error> {
         },
     )
     .map_err(|_| Error::Universe)?;
+    next.schema_version = previous.schema_version;
     next.instruments = instruments;
     schedule
         .validate_successor(&previous, &next)
