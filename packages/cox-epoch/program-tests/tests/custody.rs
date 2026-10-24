@@ -1,4 +1,4 @@
-use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
+use anchor_lang::{AccountDeserialize, AccountSerialize, InstructionData, ToAccountMetas};
 use anchor_spl::token::spl_token::{self, state::{Account as SplAccount, AccountState, Mint}};
 use cox_epoch::{Asset, LotState, Phase, Price, EPOCH_SECONDS, CLOSING_GRACE_SECONDS};
 use litesvm::LiteSVM;
@@ -108,10 +108,13 @@ impl Harness {
         self.assert_vault();
     }
     fn snapshot(&mut self,sequence:u64,timestamp:u64,winner:u128)->Pubkey {
+        let count=self.read::<EpochAccount>(self.epoch).state.unwrap().universe().len() as u16;
+        self.snapshot_with_count(sequence,timestamp,winner,count)
+    }
+    fn snapshot_with_count(&mut self,sequence:u64,timestamp:u64,winner:u128,count:u16)->Pubkey {
         let operator=self.operator.insecure_clone();let snapshot=pda(&[b"snapshot",self.config.as_ref(),&sequence.to_le_bytes()]);
         let config=self.config;
         let accounts=||a::ManageSnapshot {operator:operator.pubkey(),config,snapshot,system_program:system_program::ID};
-        let count=self.read::<EpochAccount>(self.epoch).state.unwrap().universe().len() as u16;
         self.send(ix(a::InitializeSnapshot {operator:operator.pubkey(),config:self.config,snapshot,system_program:system_program::ID},i::InitializeSnapshot {sequence,oracle_timestamp:timestamp,benchmark:1_000,expected_prices:count}),&operator,true);
         let required=200+count as usize*50;
         while self.svm.get_account(&snapshot).unwrap().data.len()<required {
@@ -316,4 +319,165 @@ fn compiled_snapshot_close_is_operator_bound_and_failure_rolls_back_publication_
     let before=h.svm.get_account(&operator.pubkey()).unwrap().lamports;
     h.send(ix(a::CloseSnapshot {operator:operator.pubkey(),config,snapshot},i::CloseSnapshot {}),&operator,true);
     assert!(h.closed(snapshot));assert_eq!(h.svm.get_account(&operator.pubkey()).unwrap().lamports,before+rent-5_000);
+}
+
+#[test]
+fn compiled_global_snapshot_filters_added_assets_for_existing_frozen_epoch() {
+    let mut h=Harness::new();h.queue(0,0,false,true);h.time(OPEN+1);
+    let entry=h.snapshot_with_count(1,OPEN+1,1_000,31);h.execute(0,entry,true);
+    let round:EpochAccount=h.read(h.epoch);assert_eq!(round.state.unwrap().universe().len(),30);
+    let lot:LotAccount=h.read(h.lot(0));assert_eq!(lot.state.unwrap().execution().unwrap().references.len(),30);
+    h.time(OPEN+EPOCH_SECONDS);let closing=h.snapshot_with_count(2,OPEN+EPOCH_SECONDS,1_100,31);
+    h.close(closing,true);
+    let round:EpochAccount=h.read(h.epoch);assert_eq!(round.state.unwrap().phase(),Phase::Scoring);
+}
+
+#[test]
+fn compiled_empty_round_finalizes_without_operator_or_snapshot_and_archival_is_terminal() {
+    let mut h=Harness::new();let alice=h.alice.insecure_clone();let admin=h.admin.insecure_clone();
+    h.send(ix(h.settlement(),i::FinalizeEmpty {}),&alice,false);
+    h.send(ix(a::ManageConfig {admin:admin.pubkey(),config:h.config},i::SetConfigLifecycle {
+        lifecycle:relative_epoch::ConfigLifecycle::Archived}),&admin,true);
+    h.send(ix(a::ManageConfig {admin:admin.pubkey(),config:h.config},i::SetConfigLifecycle {
+        lifecycle:relative_epoch::ConfigLifecycle::Active}),&admin,false);
+    h.queue(0,0,false,false);
+    h.time(OPEN+EPOCH_SECONDS);h.send(ix(h.settlement(),i::FinalizeEmpty {}),&alice,true);
+    let round:EpochAccount=h.read(h.epoch);assert!(round.empty_finalized);assert_eq!(round.state.unwrap().phase(),Phase::Settled);
+}
+
+#[test]
+fn compiled_archival_preserves_pending_refund_and_owner_withdrawal() {
+    let mut h=Harness::new();h.queue(0,0,false,true);let admin=h.admin.insecure_clone();let bob=h.bob.insecure_clone();
+    h.send(ix(a::ManageConfig {admin:admin.pubkey(),config:h.config},i::SetConfigLifecycle {
+        lifecycle:relative_epoch::ConfigLifecycle::Archived}),&admin,true);
+    h.time(OPEN+EPOCH_SECONDS);h.send(ix(h.manage(0),i::Refund {}),&bob,true);
+    h.send(ix(h.settlement(),i::FinalizeEmpty {}),&bob,true);h.withdraw(0,false,true);
+    assert_eq!(h.balance(h.alice_token),2*STAKE);
+}
+
+fn install_anchor_account<T: AccountSerialize>(h: &mut Harness, address: Pubkey, value: &T, owner: Pubkey, space: usize) {
+    let mut data=Vec::new();value.try_serialize(&mut data).unwrap();assert!(data.len()<=space);data.resize(space,0);
+    h.svm.set_account(address,Account {lamports:100_000_000,data,owner,executable:false,rent_epoch:0}).unwrap();
+}
+
+fn permissionless_registry_round(asset_count:usize) {
+    let mut h=Harness::new();
+    let old_config:relative_epoch::PoolConfig=h.read(h.config);
+    let generation=[81;32];let (registry,registry_bump)=Pubkey::find_program_address(&[b"asset-registry",&generation],&cox::ID);
+    let mut universe=cox::UniverseVersion::draft(0,Pubkey::new_unique(),h.operator.pubkey(),[82;32],1,[0;32],asset_count as u16,
+        cox::UniverseCapture {price_universe_digest:[83;32],timestamp:OPEN,benchmark:100*cox_math::SCALE,
+            prices_e8:vec![1_000;asset_count],signed_payload_digest:[84;32],trusted_storage_digest:[85;32],
+            predecessor_sequence:0,predecessor_state_digest:[0;32]}).unwrap();
+    universe.schema_version=2;
+    universe.instruments=(0..asset_count).map(|id|cox::Instrument {stable_id:format!("asset-{id}"),
+        symbol:if id<30 {cox::IDS[id].into()}else{format!("EXTRA{id}")},class_id:(id+1) as u16,epoch_id:id as u16,
+        pyth_pro_feed_id:id as u32+1,pyth_core_feed_id:asset(id as u16).feed_id,token_mint:None,
+        original_price_e8:1_000,original_benchmark:100*cox_math::SCALE,original_timestamp:OPEN}).collect();
+    universe.seal_genesis().unwrap();let digest=universe.digest;
+    let (methodology,methodology_bump)=Pubkey::find_program_address(&[b"methodology",&digest],&cox::ID);
+    let (version,version_bump)=Pubkey::find_program_address(&[b"asset-version",registry.as_ref(),&digest],&cox::ID);
+    let canonical=universe.canonical_bytes().unwrap();
+    let methodology_account=cox::Methodology {schema_version:3,bump:methodology_bump,digest,canonical:canonical.clone(),sealed:true,
+        activation_batch:0,expected_length:canonical.len() as u32,roster:(0..asset_count as u8).collect(),origin:OPEN,bybit:false};
+    install_anchor_account(&mut h,methodology,&methodology_account,cox::ID,canonical.len()+512);
+    let mut registry_account=cox::AssetRegistry {schema_version:1,bump:registry_bump,generation,authority_registry:Pubkey::new_unique(),
+        source_pool:universe.pool,active_version:version,active_digest:digest,active_from:OPEN,pending_activation:0};
+    install_anchor_account(&mut h,registry,&registry_account,cox::ID,256);
+    let mut version_account=cox::AssetRegistryVersion {schema_version:1,bump:version_bump,registry,generation,methodology,digest,
+        predecessor:[0;32],effective_from:OPEN,effective_until:0,sealed:true};
+    install_anchor_account(&mut h,version,&version_account,cox::ID,256);
+    h.config=pda(&[b"config",h.admin.pubkey().as_ref(),&1u64.to_le_bytes()]);
+    h.epoch=pda(&[b"epoch",h.config.as_ref(),&OPEN.to_le_bytes()]);
+    h.vault=pda(&[b"vault",h.epoch.as_ref()]);h.test_vault=pda(&[b"test-vault",h.epoch.as_ref()]);
+    let admin=h.admin.insecure_clone();let alice=h.alice.insecure_clone();let bob=h.bob.insecure_clone();
+    h.time(OPEN+100);
+    h.send(ix(a::InitializeConfig {admin:admin.pubkey(),mint:old_config.mint,config:h.config,system_program:system_program::ID},
+        i::InitializeRegistryConfig {config_id:1,operator:h.operator.pubkey(),methodology:old_config.methodology,
+            origin_benchmark:100*cox_epoch::math::SCALE,max_entry_price_age:5,max_lots:100,asset_registry:registry}),&admin,true);
+    let init=|h:&Harness|ix(a::InitializeCurrentEpoch {payer:alice.pubkey(),config:h.config,asset_registry:registry,
+        registry_version:version,methodology,mint:old_config.mint,test_mint:old_config.mint,epoch:h.epoch,vault:h.vault,
+        test_vault:h.test_vault,token_program:spl_token::ID,system_program:system_program::ID},i::InitializeCurrentEpoch {opens_at:OPEN});
+    registry_account.pending_activation=OPEN;install_anchor_account(&mut h,registry,&registry_account,cox::ID,256);
+    h.send(init(&h),&alice,false);
+    registry_account.pending_activation=0;install_anchor_account(&mut h,registry,&registry_account,cox::ID,256);
+    version_account.effective_until=OPEN;install_anchor_account(&mut h,version,&version_account,cox::ID,256);
+    h.send(init(&h),&alice,false);
+    version_account.effective_until=0;install_anchor_account(&mut h,version,&version_account,cox::ID,256);
+    h.send(init(&h),&alice,true);
+    let draft=|h:&Harness,payer:Pubkey|a::ManageCurrentEpochDraft {payer,config:h.config,asset_registry:registry,
+        registry_version:version,methodology,epoch:h.epoch,system_program:system_program::ID};
+    while h.svm.get_account(&h.epoch).unwrap().data.len()<relative_epoch::EPOCH_SPACE {
+        let current=h.svm.get_account(&h.epoch).unwrap().data.len();let additional=(relative_epoch::EPOCH_SPACE-current).min(relative_epoch::MAX_GROWTH);
+        h.send(ix(draft(&h,alice.pubkey()),i::GrowCurrentEpoch {additional_bytes:additional as u32}),&alice,true);
+    }
+    h.send(ix(draft(&h,bob.pubkey()),i::CopyRegistryAssets {start:1,count:8}),&bob,false);
+    for start in (0..asset_count).step_by(8) {
+        let payer=if start==0 {&alice}else{&bob};
+        h.send(ix(draft(&h,payer.pubkey()),i::CopyRegistryAssets {start:start as u16,count:(asset_count-start).min(8) as u16}),payer,true);
+    }
+    h.send(ix(draft(&h,bob.pubkey()),i::SealCurrentEpoch {}),&bob,true);
+    let round:EpochAccount=h.read(h.epoch);assert_eq!(round.registry_version,version);assert_eq!(round.universe_digest,digest);
+    assert_eq!(round.registry_origin_benchmarks,vec![100*cox_epoch::math::SCALE;asset_count]);
+    assert_eq!(round.state.unwrap().universe().len(),asset_count);
+    h.queue(0,0,false,false);
+    h.send(ix(a::ManageConfig {admin:admin.pubkey(),config:h.config},i::SetConfigLifecycle {lifecycle:relative_epoch::ConfigLifecycle::Active}),&admin,true);
+    h.queue(0,0,false,true);
+    let predecessor=h.epoch;
+    let next_open=OPEN+EPOCH_SECONDS;
+    h.time(next_open+1);
+    h.epoch=pda(&[b"epoch",h.config.as_ref(),&next_open.to_le_bytes()]);
+    h.vault=pda(&[b"vault",h.epoch.as_ref()]);h.test_vault=pda(&[b"test-vault",h.epoch.as_ref()]);
+    h.send(ix(a::InitializeCurrentEpoch {payer:bob.pubkey(),config:h.config,asset_registry:registry,
+        registry_version:version,methodology,mint:old_config.mint,test_mint:old_config.mint,epoch:h.epoch,vault:h.vault,
+        test_vault:h.test_vault,token_program:spl_token::ID,system_program:system_program::ID},
+        i::InitializeCurrentEpoch {opens_at:next_open}),&bob,true);
+    let previous:EpochAccount=h.read(predecessor);let previous=previous.state.unwrap();
+    assert_eq!(previous.phase(),Phase::Open);assert_eq!(previous.ledger().pending_gross,STAKE);
+    while h.svm.get_account(&h.epoch).unwrap().data.len()<relative_epoch::EPOCH_SPACE {
+        let current=h.svm.get_account(&h.epoch).unwrap().data.len();
+        h.send(ix(draft(&h,bob.pubkey()),i::GrowCurrentEpoch {additional_bytes:(relative_epoch::EPOCH_SPACE-current).min(relative_epoch::MAX_GROWTH) as u32}),&bob,true);
+    }
+    for start in (0..asset_count).step_by(8) {
+        h.send(ix(draft(&h,bob.pubkey()),i::CopyRegistryAssets {start:start as u16,count:(asset_count-start).min(8) as u16}),&bob,true);
+    }
+    h.send(ix(draft(&h,bob.pubkey()),i::SealCurrentEpoch {}),&bob,true);
+    h.queue(0,0,false,true);
+    let successor:EpochAccount=h.read(h.epoch);
+    assert_eq!(successor.state.unwrap().ledger().pending_gross,STAKE);
+    let previous:EpochAccount=h.read(predecessor);
+    assert_eq!(previous.state.unwrap().phase(),Phase::Open);
+    h.time(next_open+EPOCH_SECONDS);
+    h.send(ix(h.settlement(),i::FinalizeEmpty {}),&alice,false);
+    h.send(ix(h.manage(0),i::Refund {}),&alice,true);
+    h.send(ix(h.settlement(),i::FinalizeEmpty {}),&alice,true);
+    h.withdraw(0,false,true);
+    let final_open=next_open+EPOCH_SECONDS;
+    h.time(final_open+1);
+    h.epoch=pda(&[b"epoch",h.config.as_ref(),&final_open.to_le_bytes()]);
+    h.vault=pda(&[b"vault",h.epoch.as_ref()]);h.test_vault=pda(&[b"test-vault",h.epoch.as_ref()]);
+    h.send(ix(a::InitializeCurrentEpoch {payer:bob.pubkey(),config:h.config,asset_registry:registry,
+        registry_version:version,methodology,mint:old_config.mint,test_mint:old_config.mint,epoch:h.epoch,vault:h.vault,
+        test_vault:h.test_vault,token_program:spl_token::ID,system_program:system_program::ID},
+        i::InitializeCurrentEpoch {opens_at:final_open}),&bob,true);
+    h.time(final_open+EPOCH_SECONDS);h.send(ix(h.settlement(),i::FinalizeEmpty {}),&alice,true);
+    let empty:EpochAccount=h.read(h.epoch);assert!(empty.empty_finalized);assert!(empty.state.is_none());
+}
+
+#[test]
+fn compiled_permissionless_current_round_copies_canonical_registry_and_resumes_with_another_payer() {
+    permissionless_registry_round(31);
+}
+
+#[test]
+fn compiled_permissionless_registry_round_supports_255_assets_with_bounded_transactions() {
+    permissionless_registry_round(255);
+}
+
+#[test]
+fn compiled_legacy_zero_padding_remains_active_and_unknown_lifecycle_versions_fail_closed() {
+    let mut h=Harness::new();let config:relative_epoch::PoolConfig=h.read(h.config);
+    let mut encoded=Vec::new();config.try_serialize(&mut encoded).unwrap();let offset=encoded.len()-34;
+    let mut account=h.svm.get_account(&h.config).unwrap();account.data[offset..].fill(0);
+    h.svm.set_account(h.config,account.clone()).unwrap();h.queue(0,0,false,true);
+    account.data[offset]=2;h.svm.set_account(h.config,account).unwrap();h.queue(1,1,false,false);
 }

@@ -596,6 +596,110 @@
       "args": []
     },
     {
+      "name": "copy_registry_assets",
+      "discriminator": [
+        78,
+        4,
+        80,
+        59,
+        48,
+        130,
+        70,
+        252
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.admin",
+                "account": "PoolConfig"
+              },
+              {
+                "kind": "account",
+                "path": "config.config_id",
+                "account": "PoolConfig"
+              }
+            ]
+          },
+          "relations": [
+            "epoch"
+          ]
+        },
+        {
+          "name": "asset_registry"
+        },
+        {
+          "name": "registry_version",
+          "relations": [
+            "epoch"
+          ]
+        },
+        {
+          "name": "methodology"
+        },
+        {
+          "name": "epoch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  112,
+                  111,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config"
+              },
+              {
+                "kind": "account",
+                "path": "epoch.opens_at",
+                "account": "EpochAccount"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "start",
+          "type": "u16"
+        },
+        {
+          "name": "count",
+          "type": "u16"
+        }
+      ]
+    },
+    {
       "name": "execute",
       "discriminator": [
         130,
@@ -785,6 +889,133 @@
       "args": []
     },
     {
+      "name": "finalize_empty",
+      "discriminator": [
+        7,
+        122,
+        107,
+        153,
+        47,
+        108,
+        48,
+        216
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.admin",
+                "account": "PoolConfig"
+              },
+              {
+                "kind": "account",
+                "path": "config.config_id",
+                "account": "PoolConfig"
+              }
+            ]
+          },
+          "relations": [
+            "epoch"
+          ]
+        },
+        {
+          "name": "epoch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  112,
+                  111,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config"
+              },
+              {
+                "kind": "account",
+                "path": "epoch.opens_at",
+                "account": "EpochAccount"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "epoch"
+              }
+            ]
+          },
+          "relations": [
+            "epoch"
+          ]
+        },
+        {
+          "name": "test_vault",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  101,
+                  115,
+                  116,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "epoch"
+              }
+            ]
+          },
+          "relations": [
+            "epoch"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "finalize_scores",
       "discriminator": [
         92,
@@ -910,6 +1141,106 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "grow_current_epoch",
+      "discriminator": [
+        161,
+        127,
+        211,
+        199,
+        173,
+        49,
+        71,
+        169
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.admin",
+                "account": "PoolConfig"
+              },
+              {
+                "kind": "account",
+                "path": "config.config_id",
+                "account": "PoolConfig"
+              }
+            ]
+          },
+          "relations": [
+            "epoch"
+          ]
+        },
+        {
+          "name": "asset_registry"
+        },
+        {
+          "name": "registry_version",
+          "relations": [
+            "epoch"
+          ]
+        },
+        {
+          "name": "methodology"
+        },
+        {
+          "name": "epoch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  112,
+                  111,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config"
+              },
+              {
+                "kind": "account",
+                "path": "epoch.opens_at",
+                "account": "EpochAccount"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "additional_bytes",
+          "type": "u32"
+        }
+      ]
     },
     {
       "name": "grow_epoch",
@@ -1176,6 +1507,158 @@
       ]
     },
     {
+      "name": "initialize_current_epoch",
+      "discriminator": [
+        155,
+        38,
+        103,
+        61,
+        234,
+        94,
+        246,
+        53
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.admin",
+                "account": "PoolConfig"
+              },
+              {
+                "kind": "account",
+                "path": "config.config_id",
+                "account": "PoolConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "asset_registry"
+        },
+        {
+          "name": "registry_version"
+        },
+        {
+          "name": "methodology"
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "test_mint"
+        },
+        {
+          "name": "epoch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  112,
+                  111,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config"
+              },
+              {
+                "kind": "arg",
+                "path": "opens_at"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "epoch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "test_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  101,
+                  115,
+                  116,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "epoch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "opens_at",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "initialize_devnet_config",
       "discriminator": [
         165,
@@ -1403,6 +1886,187 @@
         {
           "name": "opens_at",
           "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "initialize_registry_config",
+      "discriminator": [
+        184,
+        229,
+        7,
+        64,
+        182,
+        13,
+        240,
+        46
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "admin"
+              },
+              {
+                "kind": "arg",
+                "path": "config_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "config_id",
+          "type": "u64"
+        },
+        {
+          "name": "operator",
+          "type": "pubkey"
+        },
+        {
+          "name": "methodology",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "origin_benchmark",
+          "type": "u128"
+        },
+        {
+          "name": "max_entry_price_age",
+          "type": "u64"
+        },
+        {
+          "name": "max_lots",
+          "type": "u32"
+        },
+        {
+          "name": "asset_registry",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "initialize_registry_devnet_config",
+      "discriminator": [
+        124,
+        3,
+        22,
+        131,
+        236,
+        115,
+        94,
+        18
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "test_mint"
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "admin"
+              },
+              {
+                "kind": "arg",
+                "path": "config_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "config_id",
+          "type": "u64"
+        },
+        {
+          "name": "operator",
+          "type": "pubkey"
+        },
+        {
+          "name": "methodology",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "origin_benchmark",
+          "type": "u128"
+        },
+        {
+          "name": "max_entry_price_age",
+          "type": "u64"
+        },
+        {
+          "name": "max_lots",
+          "type": "u32"
+        },
+        {
+          "name": "asset_registry",
+          "type": "pubkey"
         }
       ]
     },
@@ -2113,6 +2777,101 @@
       "args": []
     },
     {
+      "name": "seal_current_epoch",
+      "discriminator": [
+        14,
+        56,
+        39,
+        152,
+        214,
+        135,
+        156,
+        146
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.admin",
+                "account": "PoolConfig"
+              },
+              {
+                "kind": "account",
+                "path": "config.config_id",
+                "account": "PoolConfig"
+              }
+            ]
+          },
+          "relations": [
+            "epoch"
+          ]
+        },
+        {
+          "name": "asset_registry"
+        },
+        {
+          "name": "registry_version",
+          "relations": [
+            "epoch"
+          ]
+        },
+        {
+          "name": "methodology"
+        },
+        {
+          "name": "epoch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  112,
+                  111,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config"
+              },
+              {
+                "kind": "account",
+                "path": "epoch.opens_at",
+                "account": "EpochAccount"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "seal_epoch",
       "discriminator": [
         219,
@@ -2280,6 +3039,64 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "set_config_lifecycle",
+      "discriminator": [
+        173,
+        60,
+        103,
+        113,
+        85,
+        157,
+        191,
+        190
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.admin",
+                "account": "PoolConfig"
+              },
+              {
+                "kind": "account",
+                "path": "config.config_id",
+                "account": "PoolConfig"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "lifecycle",
+          "type": {
+            "defined": {
+              "name": "ConfigLifecycle"
+            }
+          }
+        }
+      ]
     },
     {
       "name": "void_epoch",
@@ -2900,6 +3717,19 @@
   ],
   "accounts": [
     {
+      "name": "AssetRegistry",
+      "discriminator": [
+        60,
+        94,
+        213,
+        134,
+        205,
+        170,
+        175,
+        68
+      ]
+    },
+    {
       "name": "EpochAccount",
       "discriminator": [
         206,
@@ -2996,6 +3826,18 @@
     {
       "code": 6010,
       "name": "DualCollateralDisabled"
+    },
+    {
+      "code": 6011,
+      "name": "InvalidRegistry"
+    },
+    {
+      "code": 6012,
+      "name": "Inactive"
+    },
+    {
+      "code": 6013,
+      "name": "Archived"
     }
   ],
   "types": [
@@ -3020,6 +3862,60 @@
           {
             "name": "origin_price",
             "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AssetRegistry",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "schema_version",
+            "type": "u16"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "generation",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "authority_registry",
+            "type": "pubkey"
+          },
+          {
+            "name": "source_pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "active_version",
+            "type": "pubkey"
+          },
+          {
+            "name": "active_digest",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "active_from",
+            "type": "u64"
+          },
+          {
+            "name": "pending_activation",
+            "type": "u64"
           }
         ]
       }
@@ -3105,6 +4001,23 @@
           {
             "name": "max_lots",
             "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigLifecycle",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Preparing"
+          },
+          {
+            "name": "Active"
+          },
+          {
+            "name": "Archived"
           }
         ]
       }
@@ -3368,6 +4281,33 @@
                 }
               }
             }
+          },
+          {
+            "name": "binding_version",
+            "type": "u8"
+          },
+          {
+            "name": "registry_version",
+            "type": "pubkey"
+          },
+          {
+            "name": "registry_origin_benchmarks",
+            "type": {
+              "vec": "u128"
+            }
+          },
+          {
+            "name": "universe_digest",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "empty_finalized",
+            "type": "bool"
           }
         ]
       }
@@ -3595,6 +4535,22 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "lifecycle_version",
+            "type": "u8"
+          },
+          {
+            "name": "lifecycle",
+            "type": {
+              "defined": {
+                "name": "ConfigLifecycle"
+              }
+            }
+          },
+          {
+            "name": "asset_registry",
+            "type": "pubkey"
           }
         ]
       }

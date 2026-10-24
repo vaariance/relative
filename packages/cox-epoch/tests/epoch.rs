@@ -337,3 +337,47 @@ fn insolvency_fails_closed_and_overflowing_deposits_do_not_mutate_state() {
     assert_eq!(epoch.allocate(&mut lot, u64::MAX), Ok(u64::MAX - math::FEE_CAP));
     epoch.ledger().check(u64::MAX).unwrap();
 }
+
+#[test]
+fn current_round_can_be_prepared_late_without_waiting_for_its_predecessor() {
+    assert!(Epoch::create_current(config(), EPOCH_SECONDS, EPOCH_SECONDS + 100, universe()).is_ok());
+    assert_eq!(Epoch::create_current(config(), EPOCH_SECONDS, EPOCH_SECONDS - 1, universe()), Err(Error::InvalidEpoch));
+    assert_eq!(Epoch::create_current(config(), 0, EPOCH_SECONDS, universe()), Err(Error::InvalidEpoch));
+    let mut prior = epoch();
+    queue(&mut prior, 0, 0, 1_000, 1);
+    assert_eq!(prior.phase(), Phase::Open);
+    assert!(Epoch::create_current(config(), EPOCH_SECONDS, EPOCH_SECONDS, universe()).is_ok());
+}
+
+#[test]
+fn empty_round_finalizes_at_close_and_pending_refunds_must_be_completed_first() {
+    let mut empty = epoch();
+    assert_eq!(empty.finalize_empty(EPOCH_SECONDS - 1, 0), Err(Error::WrongPhase));
+    empty.finalize_empty(EPOCH_SECONDS, 0).unwrap();
+    assert_eq!(empty.phase(), Phase::Settled);
+    assert_eq!(empty.finalize_empty(EPOCH_SECONDS, 0), Err(Error::WrongPhase));
+    let mut pending = epoch();
+    let mut lot = queue(&mut pending, 0, 0, 10_000, 1);
+    assert_eq!(pending.finalize_empty(EPOCH_SECONDS, 10_000), Err(Error::WrongPhase));
+    pending.refund(&mut lot, EPOCH_SECONDS, 10_000).unwrap();
+    pending.finalize_empty(EPOCH_SECONDS, 10_000).unwrap();
+    assert_eq!(pending.withdraw(lot.owner(), &mut lot, 10_000), Ok(10_000));
+}
+
+#[test]
+fn new_asset_references_use_its_permanent_benchmark_origin() {
+    let mut round = epoch();
+    let mut lot = queue(&mut round, 0, 0, 10_000, 1);
+    let mut origins = vec![100 * SCALE; universe().len()];
+    origins[0] = 90 * SCALE;
+    let mut data = snapshot(1, 2, &[]);
+    data.benchmark = 90 * SCALE;
+    round.execute_with_origins(key(3), &mut lot, &data, 2, 10_000, &origins).unwrap();
+    assert_eq!(lot.execution().unwrap().references[0], SCALE);
+    assert!(lot.execution().unwrap().references[1] > SCALE);
+    let mut closing = snapshot(2, EPOCH_SECONDS, &[]);
+    closing.benchmark = 90 * SCALE;
+    assert_eq!(round.begin_close_with_origins(key(3), closing.clone(), EPOCH_SECONDS, 10_000, &[0]), Err(Error::InvalidReference));
+    round.begin_close_with_origins(key(3), closing, EPOCH_SECONDS, 10_000, &origins).unwrap();
+    assert_eq!(round.score_entry(&mut lot, 10_000), Ok(0));
+}

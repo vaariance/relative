@@ -526,11 +526,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
 
 [[package]]
+name = "cox"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+ "cox-math",
+ "serde_json",
+]
+
+[[package]]
 name = "cox-epoch"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "borsh 0.10.4",
+]
+
+[[package]]
+name = "cox-math"
+version = "0.1.0"
+dependencies = [
+ "sha2 0.10.9",
 ]
 
 [[package]]
@@ -1217,6 +1234,7 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
+ "cox",
  "cox-epoch",
 ]
 

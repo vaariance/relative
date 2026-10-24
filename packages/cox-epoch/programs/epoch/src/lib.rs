@@ -45,6 +45,9 @@ pub mod relative_epoch {
         config.max_entry_price_age = max_entry_price_age;
         config.max_lots = max_lots;
         config.bump = ctx.bumps.config;
+        config.lifecycle_version = 1;
+        config.lifecycle = ConfigLifecycle::Active;
+        config.asset_registry = Pubkey::default();
         Ok(())
     }
 
@@ -69,10 +72,155 @@ pub mod relative_epoch {
         config.max_entry_price_age = max_entry_price_age;
         config.max_lots = max_lots;
         config.bump = ctx.bumps.config;
+        config.lifecycle_version = 1;
+        config.lifecycle = ConfigLifecycle::Active;
+        config.asset_registry = Pubkey::default();
+        Ok(())
+    }
+
+    pub fn initialize_registry_config(ctx: Context<InitializeConfig>, config_id: u64, operator: Pubkey,
+        methodology: [u8; 32], origin_benchmark: u128, max_entry_price_age: u64, max_lots: u32, asset_registry: Pubkey) -> Result<()> {
+        require!(operator != Pubkey::default() && operator != ctx.accounts.admin.key(), EpochError::InvalidConfiguration);
+        require!(methodology != [0; 32] && origin_benchmark > 0 && origin_benchmark <= math::MAX_REFERENCE
+            && max_entry_price_age > 0 && max_lots > 0 && max_lots <= engine::MAX_LOTS,
+            EpochError::InvalidConfiguration);
+        require!(ctx.accounts.mint.decimals == math::COLLATERAL_DECIMALS, EpochError::InvalidCollateral);
+        require!(asset_registry != Pubkey::default(), EpochError::InvalidConfiguration);
+        let config = &mut ctx.accounts.config;
+        config.admin = ctx.accounts.admin.key();
+        config.config_id = config_id;
+        config.operator = operator;
+        config.mint = ctx.accounts.mint.key();
+        config.test_mint = None;
+        config.methodology = methodology;
+        config.origin_benchmark = origin_benchmark;
+        config.max_entry_price_age = max_entry_price_age;
+        config.max_lots = max_lots;
+        config.bump = ctx.bumps.config;
+        config.lifecycle_version = 1;
+        config.lifecycle = ConfigLifecycle::Preparing;
+        config.asset_registry = asset_registry;
+        Ok(())
+    }
+    pub fn initialize_registry_devnet_config(ctx: Context<InitializeDevnetConfig>, config_id: u64, operator: Pubkey,
+        methodology: [u8; 32], origin_benchmark: u128, max_entry_price_age: u64, max_lots: u32, asset_registry: Pubkey) -> Result<()> {
+        require!(cfg!(feature = "devnet-collateral"), EpochError::DualCollateralDisabled);
+        require!(operator != Pubkey::default() && operator != ctx.accounts.admin.key(), EpochError::InvalidConfiguration);
+        require!(methodology != [0; 32] && origin_benchmark > 0 && origin_benchmark <= math::MAX_REFERENCE
+            && max_entry_price_age > 0 && max_lots > 0 && max_lots <= engine::MAX_LOTS,
+            EpochError::InvalidConfiguration);
+        require!(ctx.accounts.mint.decimals == math::COLLATERAL_DECIMALS
+            && ctx.accounts.test_mint.decimals == math::COLLATERAL_DECIMALS
+            && ctx.accounts.mint.key() != ctx.accounts.test_mint.key(), EpochError::InvalidCollateral);
+        require!(asset_registry != Pubkey::default(), EpochError::InvalidConfiguration);
+        let config = &mut ctx.accounts.config;
+        config.admin = ctx.accounts.admin.key();
+        config.config_id = config_id;
+        config.operator = operator;
+        config.mint = ctx.accounts.mint.key();
+        config.test_mint = Some(ctx.accounts.test_mint.key());
+        config.methodology = methodology;
+        config.origin_benchmark = origin_benchmark;
+        config.max_entry_price_age = max_entry_price_age;
+        config.max_lots = max_lots;
+        config.bump = ctx.bumps.config;
+        config.lifecycle_version = 1;
+        config.lifecycle = ConfigLifecycle::Preparing;
+        config.asset_registry = asset_registry;
+        Ok(())
+    }
+
+    pub fn set_config_lifecycle(ctx: Context<ManageConfig>, lifecycle: ConfigLifecycle) -> Result<()> {
+        let config = &mut ctx.accounts.config;
+        let previous = config_lifecycle(config)?;
+        require!(previous != ConfigLifecycle::Archived, EpochError::Archived);
+        require!(lifecycle != ConfigLifecycle::Preparing || previous == ConfigLifecycle::Preparing,
+            EpochError::InvalidConfiguration);
+        config.lifecycle_version = 1;
+        config.lifecycle = lifecycle;
+        Ok(())
+    }
+
+    pub fn initialize_current_epoch(ctx: Context<InitializeCurrentEpoch>, opens_at: u64) -> Result<()> {
+        require_preparable(&ctx.accounts.config)?;
+        require_current_time(opens_at)?;
+        require!(ctx.accounts.asset_registry.key() == ctx.accounts.config.asset_registry,
+            EpochError::InvalidRegistry);
+        let generation = ctx.accounts.asset_registry.generation;
+        validate_registry_interval(&ctx.accounts.asset_registry, ctx.accounts.registry_version.key(), opens_at)?;
+        let version = cox::validate_registry_version(&ctx.accounts.registry_version.to_account_info(),
+            &ctx.accounts.methodology.to_account_info(), ctx.accounts.config.asset_registry, generation, opens_at)?;
+        let registry_version = read_registry_version(&ctx.accounts.registry_version.to_account_info())?;
+        require!(registry_version.effective_until != 0 || ctx.accounts.asset_registry.active_version == ctx.accounts.registry_version.key(), EpochError::InvalidRegistry);
+        require!(version.instruments.len() >= engine::BASKET_SIZE, EpochError::InvalidRegistry);
+        let epoch = &mut ctx.accounts.epoch;
+        epoch.config = ctx.accounts.config.key();
+        epoch.opens_at = opens_at;
+        epoch.vault = ctx.accounts.vault.key();
+        epoch.test_vault = ctx.accounts.test_vault.key();
+        epoch.bump = ctx.bumps.epoch;
+        epoch.universe = Vec::new();
+        epoch.state = None;
+        epoch.binding_version = 1;
+        epoch.registry_origin_benchmarks = Vec::new();
+        epoch.registry_version = ctx.accounts.registry_version.key();
+        epoch.universe_digest = registry_version.digest;
+        Ok(())
+    }
+
+    pub fn grow_current_epoch(ctx: Context<ManageCurrentEpochDraft>, additional_bytes: u32) -> Result<()> {
+        validate_current_draft(&ctx.accounts)?;
+        grow(&ctx.accounts.epoch.to_account_info(), &ctx.accounts.payer.to_account_info(),
+            &ctx.accounts.system_program.to_account_info(), additional_bytes, EPOCH_SPACE)
+    }
+
+    pub fn copy_registry_assets(ctx: Context<ManageCurrentEpochDraft>, start: u16, count: u16) -> Result<()> {
+        let version = validate_current_draft(&ctx.accounts)?;
+        let start = start as usize;
+        let count = count as usize;
+        require!(count > 0 && count <= PAGE_SIZE && start == ctx.accounts.epoch.universe.len()
+            && start.checked_add(count).map_or(false, |end| end <= version.instruments.len()), EpochError::InvalidPage);
+        for instrument in &version.instruments[start..start + count] {
+            require!(instrument.original_benchmark > 0 && instrument.original_benchmark as u128 <= math::MAX_REFERENCE, EpochError::InvalidRegistry);
+            ctx.accounts.epoch.universe.push(Asset { id: instrument.epoch_id,
+                feed_id: instrument.pyth_core_feed_id, origin_price: instrument.original_price_e8 as u128 });
+            ctx.accounts.epoch.registry_origin_benchmarks.push(instrument.original_benchmark as u128);
+        }
+        check_space(&**ctx.accounts.epoch, &ctx.accounts.epoch.to_account_info())
+    }
+
+    pub fn seal_current_epoch(ctx: Context<ManageCurrentEpochDraft>) -> Result<()> {
+        let version = validate_current_draft(&ctx.accounts)?;
+        require!(ctx.accounts.epoch.universe.len() == version.instruments.len()
+            && ctx.accounts.epoch.registry_origin_benchmarks.len() == version.instruments.len(), EpochError::InvalidPage);
+        require!(ctx.accounts.epoch.to_account_info().data_len() >= EPOCH_SPACE, EpochError::InsufficientSpace);
+        let config = &ctx.accounts.config;
+        let state_config = state_config(config, config.key());
+        ctx.accounts.epoch.state = Some(map_engine(Epoch::create_current(state_config,
+            ctx.accounts.epoch.opens_at, now()?, ctx.accounts.epoch.universe.clone()))?);
+        ctx.accounts.epoch.universe.clear();
+        check_space(&**ctx.accounts.epoch, &ctx.accounts.epoch.to_account_info())
+    }
+
+    pub fn finalize_empty(ctx: Context<ManageSettlement>) -> Result<()> {
+        require!(!ctx.accounts.epoch.empty_finalized, EpochError::Immutable);
+        let timestamp = now()?;
+        require!(timestamp >= ctx.accounts.epoch.opens_at.checked_add(engine::EPOCH_SECONDS)
+            .ok_or(EpochError::InvalidTime)?, EpochError::InvalidTime);
+        if ctx.accounts.epoch.state.is_some() {
+            reconcile(&mut ctx.accounts.epoch, &ctx.accounts.vault, &ctx.accounts.test_vault, &ctx.accounts.config)?;
+            map_engine(ctx.accounts.epoch.state.as_mut().ok_or(EpochError::UnsealedEpoch)?
+                .finalize_empty(timestamp, vault_total(&ctx.accounts.vault, &ctx.accounts.test_vault)?))?;
+        } else {
+            validate_vault(&ctx.accounts.vault, ctx.accounts.epoch.key(), ctx.accounts.config.mint)?;
+            validate_vault(&ctx.accounts.test_vault, ctx.accounts.epoch.key(), ctx.accounts.config.test_mint.unwrap_or(ctx.accounts.config.mint))?;
+        }
+        ctx.accounts.epoch.empty_finalized = true;
         Ok(())
     }
 
     pub fn initialize_epoch(ctx: Context<InitializeEpoch>, opens_at: u64) -> Result<()> {
+        require_legacy_active(&ctx.accounts.config)?;
         require!(opens_at % engine::EPOCH_SECONDS == 0 && now()? <= opens_at, EpochError::InvalidTime);
         opens_at.checked_add(engine::EPOCH_SECONDS).and_then(|close| close.checked_add(engine::CLOSING_GRACE_SECONDS))
             .ok_or(EpochError::InvalidTime)?;
@@ -88,12 +236,14 @@ pub mod relative_epoch {
     }
 
     pub fn grow_epoch(ctx: Context<ManageEpochDraft>, additional_bytes: u32) -> Result<()> {
+        require_legacy_active(&ctx.accounts.config)?;
         require!(ctx.accounts.epoch.state.is_none() && now()? <= ctx.accounts.epoch.opens_at, EpochError::Immutable);
         grow(&ctx.accounts.epoch.to_account_info(), &ctx.accounts.admin.to_account_info(),
             &ctx.accounts.system_program.to_account_info(), additional_bytes, EPOCH_SPACE)
     }
 
     pub fn append_universe(ctx: Context<ManageEpochDraft>, assets: Vec<Asset>) -> Result<()> {
+        require_legacy_active(&ctx.accounts.config)?;
         require!(ctx.accounts.epoch.state.is_none() && now()? <= ctx.accounts.epoch.opens_at, EpochError::Immutable);
         require!(!assets.is_empty() && assets.len() <= PAGE_SIZE
             && ctx.accounts.epoch.universe.len() + assets.len() <= engine::MAX_UNIVERSE, EpochError::InvalidPage);
@@ -109,6 +259,7 @@ pub mod relative_epoch {
     }
 
     pub fn seal_epoch(ctx: Context<ManageEpochDraft>) -> Result<()> {
+        require_legacy_active(&ctx.accounts.config)?;
         require!(ctx.accounts.epoch.state.is_none(), EpochError::Immutable);
         require!(ctx.accounts.epoch.to_account_info().data_len() >= EPOCH_SPACE, EpochError::InsufficientSpace);
         let config = &ctx.accounts.config;
@@ -125,6 +276,7 @@ pub mod relative_epoch {
 
     pub fn initialize_snapshot(ctx: Context<InitializeSnapshot>, sequence: u64, oracle_timestamp: u64,
         benchmark: u128, expected_prices: u16) -> Result<()> {
+        require_active(&ctx.accounts.config)?;
         require!(oracle_timestamp <= now()? && benchmark > 0 && benchmark <= math::MAX_REFERENCE
             && expected_prices > 0 && expected_prices as usize <= engine::MAX_UNIVERSE, EpochError::InvalidSnapshot);
         let snapshot = &mut ctx.accounts.snapshot;
@@ -143,6 +295,7 @@ pub mod relative_epoch {
 
     pub fn publish_snapshot(ctx: Context<InitializeSnapshot>, sequence: u64, oracle_timestamp: u64,
         benchmark: u128, prices: Vec<Price>) -> Result<()> {
+        require_active(&ctx.accounts.config)?;
         require!(oracle_timestamp <= now()? && benchmark > 0 && benchmark <= math::MAX_REFERENCE
             && !prices.is_empty() && prices.len() <= ATOMIC_MAX_PRICES, EpochError::InvalidSnapshot);
         for (index, price) in prices.iter().enumerate() {
@@ -170,12 +323,14 @@ pub mod relative_epoch {
     pub fn close_snapshot(_ctx: Context<CloseSnapshot>) -> Result<()> { Ok(()) }
 
     pub fn grow_snapshot(ctx: Context<ManageSnapshot>, additional_bytes: u32) -> Result<()> {
+        require_active(&ctx.accounts.config)?;
         require!(!ctx.accounts.snapshot.sealed, EpochError::Immutable);
         grow(&ctx.accounts.snapshot.to_account_info(), &ctx.accounts.operator.to_account_info(),
             &ctx.accounts.system_program.to_account_info(), additional_bytes, SNAPSHOT_SPACE)
     }
 
     pub fn append_prices(ctx: Context<ManageSnapshot>, prices: Vec<Price>) -> Result<()> {
+        require_active(&ctx.accounts.config)?;
         let snapshot = &mut ctx.accounts.snapshot;
         require!(!snapshot.sealed, EpochError::Immutable);
         require!(!prices.is_empty() && prices.len() <= PAGE_SIZE
@@ -193,6 +348,7 @@ pub mod relative_epoch {
     }
 
     pub fn seal_snapshot(ctx: Context<ManageSnapshot>) -> Result<()> {
+        require_active(&ctx.accounts.config)?;
         let snapshot = &mut ctx.accounts.snapshot;
         require!(!snapshot.sealed, EpochError::Immutable);
         require!(snapshot.prices.len() == snapshot.expected_prices as usize && snapshot.oracle_timestamp <= now()?, EpochError::InvalidSnapshot);
@@ -205,6 +361,7 @@ pub mod relative_epoch {
     }
 
     pub fn queue(ctx: Context<Queue>, nonce: u64, gross_stake: u64, basket: [u16; engine::BASKET_SIZE], backed_asset: u16) -> Result<()> {
+        require_active(&ctx.accounts.config)?;
         validate_vault(&ctx.accounts.vault, ctx.accounts.epoch.key(), ctx.accounts.config.mint)?;
         validate_vault(&ctx.accounts.test_vault, ctx.accounts.epoch.key(), ctx.accounts.config.test_mint.unwrap_or(ctx.accounts.config.mint))?;
         let state = ctx.accounts.epoch.state.as_mut().ok_or(EpochError::UnsealedEpoch)?;
@@ -225,22 +382,27 @@ pub mod relative_epoch {
     }
 
     pub fn execute(ctx: Context<Execute>) -> Result<()> {
+        require_active(&ctx.accounts.config)?;
         validate_vault(&ctx.accounts.vault, ctx.accounts.epoch.key(), ctx.accounts.config.mint)?;
         validate_vault(&ctx.accounts.test_vault, ctx.accounts.epoch.key(), ctx.accounts.config.test_mint.unwrap_or(ctx.accounts.config.mint))?;
+        let origin_benchmarks = bound_origins(&ctx.accounts.epoch)?;
         let state = ctx.accounts.epoch.state.as_mut().ok_or(EpochError::UnsealedEpoch)?;
         map_engine(state.reconcile_surplus(vault_total(&ctx.accounts.vault, &ctx.accounts.test_vault)?))?;
         let snapshot = select_snapshot(state, &ctx.accounts.snapshot)?;
         let lot = ctx.accounts.lot.state.as_mut().ok_or(EpochError::InvalidLot)?;
-        map_engine(state.execute(ctx.accounts.operator.key().to_bytes(), lot, &snapshot, now()?, vault_total(&ctx.accounts.vault, &ctx.accounts.test_vault)?))
+        map_engine(state.execute_with_origins(ctx.accounts.operator.key().to_bytes(), lot, &snapshot, now()?,
+            vault_total(&ctx.accounts.vault, &ctx.accounts.test_vault)?, &origin_benchmarks))
     }
 
     pub fn begin_close(ctx: Context<BeginClose>) -> Result<()> {
         validate_vault(&ctx.accounts.vault, ctx.accounts.epoch.key(), ctx.accounts.config.mint)?;
         validate_vault(&ctx.accounts.test_vault, ctx.accounts.epoch.key(), ctx.accounts.config.test_mint.unwrap_or(ctx.accounts.config.mint))?;
+        let origin_benchmarks = bound_origins(&ctx.accounts.epoch)?;
         let state = ctx.accounts.epoch.state.as_mut().ok_or(EpochError::UnsealedEpoch)?;
         map_engine(state.reconcile_surplus(vault_total(&ctx.accounts.vault, &ctx.accounts.test_vault)?))?;
         let snapshot = select_snapshot(state, &ctx.accounts.snapshot)?;
-        map_engine(state.begin_close(ctx.accounts.operator.key().to_bytes(), snapshot, now()?, vault_total(&ctx.accounts.vault, &ctx.accounts.test_vault)?))
+        map_engine(state.begin_close_with_origins(ctx.accounts.operator.key().to_bytes(), snapshot, now()?,
+            vault_total(&ctx.accounts.vault, &ctx.accounts.test_vault)?, &origin_benchmarks))
     }
 
     pub fn score(ctx: Context<ManageLot>) -> Result<()> {
@@ -314,6 +476,9 @@ struct SnapshotCommitment {
     prices: Vec<Price>,
 }
 
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfigLifecycle { Preparing, Active, Archived }
+
 #[account]
 pub struct PoolConfig {
     pub admin: Pubkey,
@@ -326,6 +491,9 @@ pub struct PoolConfig {
     pub max_entry_price_age: u64,
     pub max_lots: u32,
     pub bump: u8,
+    pub lifecycle_version: u8,
+    pub lifecycle: ConfigLifecycle,
+    pub asset_registry: Pubkey,
 }
 
 #[account]
@@ -337,6 +505,11 @@ pub struct EpochAccount {
     pub bump: u8,
     pub universe: Vec<Asset>,
     pub state: Option<Epoch>,
+    pub binding_version: u8,
+    pub registry_version: Pubkey,
+    pub registry_origin_benchmarks: Vec<u128>,
+    pub universe_digest: [u8; 32],
+    pub empty_finalized: bool,
 }
 
 #[account]
@@ -381,6 +554,54 @@ pub struct InitializeDevnetConfig<'info> {
     pub test_mint: Account<'info, Mint>,
     #[account(init, payer = admin, space = 256, seeds = [b"config", admin.key().as_ref(), &config_id.to_le_bytes()], bump)]
     pub config: Account<'info, PoolConfig>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ManageConfig<'info> {
+    #[account(address = config.admin)]
+    pub admin: Signer<'info>,
+    #[account(mut, seeds = [b"config", config.admin.as_ref(), &config.config_id.to_le_bytes()], bump = config.bump)]
+    pub config: Account<'info, PoolConfig>,
+}
+
+#[derive(Accounts)]
+#[instruction(opens_at: u64)]
+pub struct InitializeCurrentEpoch<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(seeds = [b"config", config.admin.as_ref(), &config.config_id.to_le_bytes()], bump = config.bump)]
+    pub config: Account<'info, PoolConfig>,
+    pub asset_registry: Account<'info, cox::AssetRegistry>,
+    pub registry_version: UncheckedAccount<'info>,
+    pub methodology: UncheckedAccount<'info>,
+    #[account(address = config.mint)]
+    pub mint: Account<'info, Mint>,
+    #[account(constraint = test_mint.key() == config.test_mint.unwrap_or(config.mint))]
+    pub test_mint: Account<'info, Mint>,
+    #[account(init, payer = payer, space = INITIAL_SPACE, seeds = [b"epoch", config.key().as_ref(), &opens_at.to_le_bytes()], bump)]
+    pub epoch: Box<Account<'info, EpochAccount>>,
+    #[account(init, payer = payer, seeds = [b"vault", epoch.key().as_ref()], bump, token::mint = mint, token::authority = epoch)]
+    pub vault: Account<'info, TokenAccount>,
+    #[account(init, payer = payer, seeds = [b"test-vault", epoch.key().as_ref()], bump, token::mint = test_mint, token::authority = epoch)]
+    pub test_vault: Account<'info, TokenAccount>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ManageCurrentEpochDraft<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(seeds = [b"config", config.admin.as_ref(), &config.config_id.to_le_bytes()], bump = config.bump)]
+    pub config: Account<'info, PoolConfig>,
+    #[account(address = config.asset_registry)]
+    pub asset_registry: Account<'info, cox::AssetRegistry>,
+    pub registry_version: UncheckedAccount<'info>,
+    pub methodology: UncheckedAccount<'info>,
+    #[account(mut, has_one = config, has_one = registry_version,
+        seeds = [b"epoch", config.key().as_ref(), &epoch.opens_at.to_le_bytes()], bump = epoch.bump)]
+    pub epoch: Box<Account<'info, EpochAccount>>,
     pub system_program: Program<'info, System>,
 }
 
@@ -567,6 +788,83 @@ pub struct WithdrawFees<'info> {
     pub token_program: Program<'info, Token>,
 }
 
+fn bound_origins(epoch: &EpochAccount) -> Result<Vec<u128>> {
+    match epoch.binding_version {
+        0 => Ok(Vec::new()),
+        1 => {
+            let state = epoch.state.as_ref().ok_or(EpochError::UnsealedEpoch)?;
+            require!(epoch.registry_version != Pubkey::default() && epoch.universe_digest != [0; 32]
+                && epoch.registry_origin_benchmarks.len() == state.universe().len()
+                && epoch.registry_origin_benchmarks.iter().all(|value| *value > 0 && *value <= math::MAX_REFERENCE), EpochError::InvalidRegistry);
+            Ok(epoch.registry_origin_benchmarks.clone())
+        }
+        _ => err!(EpochError::InvalidRegistry),
+    }
+}
+
+fn config_lifecycle(config: &PoolConfig) -> Result<ConfigLifecycle> {
+    match config.lifecycle_version {
+        0 => Ok(ConfigLifecycle::Active),
+        1 => Ok(config.lifecycle),
+        _ => err!(EpochError::InvalidConfiguration),
+    }
+}
+
+fn require_preparable(config: &PoolConfig) -> Result<()> {
+    require!(config_lifecycle(config)? != ConfigLifecycle::Archived, EpochError::Archived);
+    Ok(())
+}
+
+fn require_active(config: &PoolConfig) -> Result<()> {
+    require!(config_lifecycle(config)? == ConfigLifecycle::Active, EpochError::Inactive);
+    Ok(())
+}
+
+fn require_legacy_active(config: &PoolConfig) -> Result<()> {
+    require_active(config)?;
+    require!(config.asset_registry == Pubkey::default(), EpochError::InvalidRegistry);
+    Ok(())
+}
+
+fn require_current_time(opens_at: u64) -> Result<()> {
+    let timestamp = now()?;
+    require!(opens_at % engine::EPOCH_SECONDS == 0 && timestamp >= opens_at
+        && timestamp < opens_at.checked_add(engine::EPOCH_SECONDS).ok_or(EpochError::InvalidTime)?, EpochError::InvalidTime);
+    Ok(())
+}
+
+fn validate_registry_interval(registry: &Account<cox::AssetRegistry>, version: Pubkey, opening: u64) -> Result<()> {
+    require!(registry.pending_activation == 0 || opening < registry.pending_activation, EpochError::InvalidRegistry);
+    let (key, bump) = Pubkey::find_program_address(&[b"asset-registry", &registry.generation], &cox::ID);
+    require!(key == registry.key() && registry.bump == bump && registry.schema_version == 1, EpochError::InvalidRegistry);
+    require!(version != Pubkey::default(), EpochError::InvalidRegistry);
+    Ok(())
+}
+
+fn read_registry_version(info: &AccountInfo) -> Result<cox::AssetRegistryVersion> {
+    require_keys_eq!(*info.owner, cox::ID, EpochError::InvalidRegistry);
+    cox::AssetRegistryVersion::try_deserialize(&mut info.try_borrow_data()?.as_ref())
+}
+
+fn validate_current_draft(accounts: &ManageCurrentEpochDraft) -> Result<cox::UniverseVersion> {
+    require_preparable(&accounts.config)?;
+    require_current_time(accounts.epoch.opens_at)?;
+    require!(accounts.epoch.binding_version == 1 && accounts.epoch.state.is_none() && accounts.config.asset_registry != Pubkey::default(), EpochError::Immutable);
+    validate_registry_interval(&accounts.asset_registry, accounts.registry_version.key(), accounts.epoch.opens_at)?;
+    let version = read_registry_version(&accounts.registry_version.to_account_info())?;
+    require!(version.digest == accounts.epoch.universe_digest
+        && (version.effective_until != 0 || accounts.asset_registry.active_version == accounts.registry_version.key()), EpochError::InvalidRegistry);
+    cox::validate_registry_version(&accounts.registry_version.to_account_info(), &accounts.methodology.to_account_info(),
+        accounts.config.asset_registry, accounts.asset_registry.generation, accounts.epoch.opens_at)
+}
+
+fn state_config(config: &PoolConfig, key: Pubkey) -> engine::Config {
+    engine::Config { pool: key.to_bytes(), admin: config.admin.to_bytes(), operator: config.operator.to_bytes(),
+        collateral_mint: config.mint.to_bytes(), collateral_decimals: math::COLLATERAL_DECIMALS,
+        methodology: config.methodology, origin_benchmark: config.origin_benchmark,
+        max_entry_price_age: config.max_entry_price_age, max_lots: config.max_lots }
+}
+
 fn now() -> Result<u64> { u64::try_from(Clock::get()?.unix_timestamp).map_err(|_| error!(EpochError::InvalidTime)) }
 
 fn map_engine<T>(value: engine::Result<T>) -> Result<T> {
@@ -624,8 +922,19 @@ fn select_snapshot(epoch: &Epoch, snapshot: &SnapshotAccount) -> Result<Operator
         prices: snapshot.prices.iter().filter(|price| epoch.universe().iter().any(|asset| asset.id == price.asset_id)).cloned().collect() })
 }
 
+struct SerializedLength(usize);
+impl std::io::Write for SerializedLength {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0 = self.0.checked_add(bytes.len()).ok_or(std::io::ErrorKind::InvalidData)?;
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+}
+
 fn check_space<T: AnchorSerialize>(value: &T, account: &AccountInfo) -> Result<()> {
-    require!(8 + value.try_to_vec()?.len() <= account.data_len(), EpochError::InsufficientSpace);
+    let mut size = SerializedLength(8);
+    value.serialize(&mut size)?;
+    require!(size.0 <= account.data_len(), EpochError::InsufficientSpace);
     Ok(())
 }
 
@@ -657,4 +966,7 @@ pub enum EpochError {
     UnsealedEpoch,
     TransitionRejected,
     DualCollateralDisabled,
+    InvalidRegistry,
+    Inactive,
+    Archived,
 }

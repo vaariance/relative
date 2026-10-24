@@ -196,9 +196,19 @@ pub struct Epoch {
 impl Epoch {
     pub fn create(config: Config, admin: Key, opens_at: u64, now: u64, universe: Vec<Asset>) -> Result<Self> {
         if admin != config.admin { return Err(Error::Unauthorized); }
+        Self::create_checked(config, opens_at, now, universe, false)
+    }
+
+    pub fn create_current(config: Config, opens_at: u64, now: u64, universe: Vec<Asset>) -> Result<Self> {
+        Self::create_checked(config, opens_at, now, universe, true)
+    }
+
+    fn create_checked(config: Config, opens_at: u64, now: u64, universe: Vec<Asset>, current: bool) -> Result<Self> {
         if [config.pool, config.admin, config.operator, config.collateral_mint, config.methodology].contains(&[0; 32])
             || config.admin == config.operator { return Err(Error::InvalidAuthority); }
-        if opens_at % EPOCH_SECONDS != 0 || now > opens_at || config.collateral_decimals != COLLATERAL_DECIMALS
+        if opens_at % EPOCH_SECONDS != 0 || (!current && now > opens_at)
+            || (current && (now < opens_at || now >= opens_at.checked_add(EPOCH_SECONDS).ok_or(Error::Overflow)?))
+            || config.collateral_decimals != COLLATERAL_DECIMALS
             || config.max_lots == 0 || config.max_lots > MAX_LOTS || config.max_entry_price_age == 0 {
             return Err(Error::InvalidEpoch);
         }
@@ -262,6 +272,12 @@ impl Epoch {
     }
 
     pub fn execute(&mut self, operator: Key, lot: &mut EntryLot, snapshot: &OperatorSnapshot, now: u64, vault_balance: u64) -> Result<()> {
+        self.execute_with_origins(operator, lot, snapshot, now, vault_balance, &[])
+    }
+
+    pub fn execute_with_origins(&mut self, operator: Key, lot: &mut EntryLot, snapshot: &OperatorSnapshot,
+        now: u64, vault_balance: u64, origin_benchmarks: &[u128]) -> Result<()> {
+        self.validate_origins(origin_benchmarks)?;
         self.authorize(operator)?;
         self.check_lot(lot)?;
         self.ledger.check(vault_balance)?;
@@ -280,7 +296,7 @@ impl Epoch {
             }
         }
         let mut references = [0; BASKET_SIZE];
-        for (index, asset) in lot.basket.iter().enumerate() { references[index] = self.reference(snapshot, *asset)?; }
+        for (index, asset) in lot.basket.iter().enumerate() { references[index] = self.reference(snapshot, *asset, origin_benchmarks)?; }
         let net = lot.gross_stake - lot.fee;
         let next_net = self.ledger.active_net.checked_add(net).ok_or(Error::Overflow)?;
         let next_held = self.ledger.held_fees.checked_add(lot.fee).ok_or(Error::Overflow)?;
@@ -296,6 +312,12 @@ impl Epoch {
     }
 
     pub fn begin_close(&mut self, operator: Key, snapshot: OperatorSnapshot, now: u64, vault_balance: u64) -> Result<()> {
+        self.begin_close_with_origins(operator, snapshot, now, vault_balance, &[])
+    }
+
+    pub fn begin_close_with_origins(&mut self, operator: Key, snapshot: OperatorSnapshot,
+        now: u64, vault_balance: u64, origin_benchmarks: &[u128]) -> Result<()> {
+        self.validate_origins(origin_benchmarks)?;
         self.authorize(operator)?;
         self.ledger.check(vault_balance)?;
         if self.phase != Phase::Open { return Err(Error::WrongPhase); }
@@ -310,9 +332,10 @@ impl Epoch {
         let mut prices_by_id = vec![0; MAX_UNIVERSE];
         for price in &snapshot.prices { prices_by_id[price.asset_id as usize] = price.value; }
         let mut closing_references = Vec::with_capacity(self.universe.len());
-        for asset in &self.universe {
+        for (index, asset) in self.universe.iter().enumerate() {
+            let origin_benchmark = origin_benchmarks.get(index).copied().unwrap_or(self.config.origin_benchmark);
             let value = math::relative_reference(prices_by_id[asset.id as usize], asset.origin_price,
-                snapshot.benchmark, self.config.origin_benchmark)?;
+                snapshot.benchmark, origin_benchmark)?;
             closing_references.push(ClosingReference { asset_id: asset.id, value });
         }
         self.closing_references = closing_references;
@@ -375,6 +398,17 @@ impl Epoch {
         if last { self.phase = Phase::Settled; }
         lot.state = LotState::Claimable { amount };
         Ok(amount)
+    }
+
+    pub fn finalize_empty(&mut self, now: u64, vault_balance: u64) -> Result<()> {
+        self.ledger.check(vault_balance)?;
+        if self.phase != Phase::Open || now < self.closes_at || self.executed_lots != 0
+            || self.ledger.pending_gross != 0 || self.ledger.active_net != 0 || self.ledger.held_fees != 0 {
+            return Err(Error::WrongPhase);
+        }
+        self.phase = Phase::Settled;
+        self.all_zero = true;
+        Ok(())
     }
 
     pub fn void(&mut self, now: u64, vault_balance: u64) -> Result<()> {
@@ -463,9 +497,18 @@ impl Epoch {
         Ok(())
     }
 
-    fn reference(&self, snapshot: &OperatorSnapshot, asset: AssetId) -> Result<u128> {
+    fn validate_origins(&self, origin_benchmarks: &[u128]) -> Result<()> {
+        if !origin_benchmarks.is_empty() && (origin_benchmarks.len() != self.universe.len()
+            || origin_benchmarks.iter().any(|value| *value == 0 || *value > MAX_REFERENCE)) {
+            return Err(Error::InvalidReference);
+        }
+        Ok(())
+    }
+
+    fn reference(&self, snapshot: &OperatorSnapshot, asset: AssetId, origin_benchmarks: &[u128]) -> Result<u128> {
         let price = snapshot.prices.iter().find(|price| price.asset_id == asset).ok_or(Error::InvalidSnapshot)?;
-        let origin = self.universe.iter().find(|member| member.id == asset).ok_or(Error::InvalidUniverse)?;
-        math::relative_reference(price.value, origin.origin_price, snapshot.benchmark, self.config.origin_benchmark)
+        let (index, origin) = self.universe.iter().enumerate().find(|(_, member)| member.id == asset).ok_or(Error::InvalidUniverse)?;
+        let origin_benchmark = origin_benchmarks.get(index).copied().unwrap_or(self.config.origin_benchmark);
+        math::relative_reference(price.value, origin.origin_price, snapshot.benchmark, origin_benchmark)
     }
 }
