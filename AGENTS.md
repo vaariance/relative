@@ -1735,3 +1735,28 @@ another agent needs to know.
   - **Not checked:** the entry box and the per-entry moves have not been seen in a browser. No round was open, and no wallet with entries was connected.
   - **Not deployed:** this change is not on Vercel yet.
   - **Joel/Peter:** the 23 Oct 00:00 Epoch (no entries) still reports phase `open` long after its close, so the page shows it as "Closing" indefinitely.
+
+### 2026-10-24 · Godwin (Claude Code) · Epoch page: expired rounds, final results, rlUSD entries
+
+- **Area:** `apps/web` (`epochs-view.tsx`, `src/lib/epoch.ts`, `src/lib/requests.ts`, `src/app/actions.ts`, Epochs page, README).
+- **What:** At Godwin's request, the Epoch page was checked against `packages/cox-epoch` and corrected.
+  - **States:** an Epoch still `open` more than 24 hours after its close shows "Not closed": the program can no longer close it, only void it. It no longer says it is waiting for a closing reference. A draft past its opening shows "Not opened". The moves card shows a live-estimate badge only while the Epoch is open.
+  - **Final results:** the program keeps a score only while an entry is scored, and the API drops the payout once it is withdrawn. Finished entries showed "Score —" and "Not settled". `finalScore` and `finalPayout` now recompute both from on-chain values with the contract's integer arithmetic. On the 23 Oct 08:00 entries they match the on-chain total weight and the recorded payouts 41,849 and 158,110 (`test/fixtures/epoch-2026-10-23-0800.json`).
+  - **rlUSD:** entries can be paid in USDC or rlUSD (`collateralMint`). Withdraw reads both Epoch vaults, because the program pays from the vault matching the destination mint. It takes the payout from a vault that holds all of it, or withdraws part of it when neither vault does.
+  - **Wording:**
+    - Slide 4 now states the all-zero refund.
+    - The review says an entry cannot be cancelled.
+    - The fee shows its cap and when it is refunded.
+    - The moves card says it starts from the opening estimate, since an Epoch has no on-chain opening reference.
+    - The closed-entry panel says whether another Epoch exists, and shows below 1280px too.
+    - An entry pending after the close reads "Not executed · refund due".
+  - **Layout:** the Leader / Laggard / Ahead / Behind row keeps 140px cells and scrolls sideways when the card is too narrow, instead of squeezing them. The "30 coins · 4 hours" chip on the explainer card is removed.
+  - **Verified:** 74 web tests and the type check pass. Both live Epochs were checked in the dev server, and the stats row at 390, 844 and 1440px.
+  - **Deployed:** `3710a40` to production at <https://getrelative.trade> (deployment `cox-mx010dez3-gef-228639f6`). Checked there: the expired 00:00 Epoch reads Not closed and the chip is gone.
+- **Rules for agents:** Keep `finalScore`/`finalPayout` identical to `packages/cox-epoch/src/math.rs`; they replicate committed values and are not estimates. Do not describe an Epoch past its 24-hour closing window as closing.
+- **Open:**
+  - **Not checked with a wallet:** no wallet was connected, so the entries table, the rlUSD entry and the vault-aware withdraw have not been seen with real entries.
+  - **Joel's refund fields:** the web app does not yet use the new `refund`, `closingDeadline` and `voidable` fields or the `epoch-refund` builder (`af8feea`). It computes the closing deadline itself and relies on the publisher's refund cranks.
+  - **Peter:** the 23 Oct 00:00 Epoch (no entries) passed its window at 04:00 UTC on 24 Oct and is still `open` on chain; the publisher has not voided it.
+  - **Joel:** `universe` is empty because the deployed API (image `6e4a214`) reads the top-level `universe`, which `seal_epoch` clears after moving the list into `state`. Joel's fix `9829dba` is on `working` but not deployed. Until it is, the deployed `epoch-entry` builder rejects every basket asset of a sealed Epoch ("not in this Epoch's universe"), so no entry can be built through the API; Godwin emailed Joel on 24 Oct to deploy it. Keeping each lot's final score and paid amount in the API would also let the page stop recomputing them.
+- **Refs:** commits `1488066`..`3710a40`, `apps/web/README.md` (Epochs page).
