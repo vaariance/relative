@@ -83,6 +83,7 @@ All fixed-point quantities are decimal integer strings. Prices use USD × 10⁸;
 | `GET /v1/epochs/:opensAt/lots?owner=` | A wallet's lots in that Epoch: stake, fee, basket, backed asset, execution, score and claimable amount |
 | `POST /v1/transactions/epoch-entry` | Build with `{ owner, opensAt, grossStake, basket, backedAsset, collateralMint? }`; `basket` lists all 30 universe tickers once |
 | `POST /v1/transactions/epoch-withdraw` | Build with `{ owner, opensAt, nonce, amount?, collateralMint? }`; omit `amount` to withdraw the whole claim |
+| `POST /v1/transactions/epoch-refund` | Build with `{ owner, opensAt, nonce, collateralMint? }` for a lot whose `refund` is set: one transaction refunds the lot and withdraws the whole stake |
 
 Omitting the publication cursor starts from sequence 0. An empty page preserves the cursor. SSE events contain the publication and its sequence; the server sends a heartbeat every 15 seconds. Transaction request bodies are limited to 8 KiB.
 
@@ -175,6 +176,8 @@ The publisher evaluates the methodology every second but writes to the chain onl
 Every preview is an estimate. The API computes no reference or redistribution: benchmark, references and `basicProjection` come from the publisher. A wallet estimate is given only when `basicProjection` starts from the pool's latest publication; otherwise `unavailable` is `no-projection` or `basis-mismatch` and every value is `null`. A later publication does not confirm a preview; read the publication itself for committed values.
 
 With `COX_EPOCH_CONFIG`, the API reads the Epoch configuration, its Epoch accounts and lots. An Epoch is a `draft` until the admin seals it, then `open`, `scoring`, `allocating`, `settled` or `voided`. `entriesOpen` is true only for an open Epoch between `opensAt` and `closesAt` with lot capacity left. Its ledger lists pending gross stakes, active net stakes, held fees, claimable amounts, committed fees and residual, compared with both vault balances. Entry fees are 2 bps capped at 200,000 base units and are charged by the program. An entry uses the Epoch's next lot nonce, so simultaneous entries can conflict and must be rebuilt.
+
+A sealed Epoch must close within 24 hours of `closesAt`; that moment is `closingDeadline`. After it, an Epoch still `open` without closing data is `voidable`, and anyone may void it. A lot's `refund` says when its gross stake, fee included, can come back: `not-executed` once the Epoch has ended for a lot that never executed, and `voided` for an executed lot in a voided Epoch. Otherwise it is `null`. A refund needs no owner signature on chain; the builder makes the owner the fee payer so the money reaches their wallet in the same transaction.
 
 ## Devnet faucet
 
