@@ -107,9 +107,7 @@ export function SendButton({ intent, label, connectLabel, problem = null, classN
       show({
         tone: "bad",
         title: "Not enough SOL",
-        text: first
-          ? `Your first trade needs ${sol(needed)} devnet SOL: ${sol(positionRent)} to open your position on chain, plus ${sol(requestRent + FEE_LAMPORTS)} for this trade. Your wallet has ${sol(balance)} SOL. Nothing was sent.`
-          : `This trade needs ${sol(needed)} devnet SOL and your wallet has ${sol(balance)} SOL. Nothing was sent.`,
+        text: `You need ${sol(needed)} SOL and have ${sol(balance)}.`,
         link: { href: "/faucet", label: "Get SOL" },
       });
       return true;
