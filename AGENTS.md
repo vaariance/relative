@@ -1702,3 +1702,11 @@ another agent needs to know.
 - **Area:** `apps/web` (`epochs-view.tsx`).
 - **What:** At Godwin's request, the Epoch page follows a trading-dashboard layout with light use of the Relative orange gradient. Header plus a dismissible status banner. Top row: Epoch clock card (large countdown with dimmed seconds, stage chip, local close time, New entry / Previous / Next), Pot card (net or settlement pot, entries, queued, five-step progress bar) and one gradient card that opens How payouts work. Main column: Relative moves (leading or backed asset as the headline figure, Leader / Laggard / ahead / behind $CRYPTO stats, ranked list capped at 440px with its own scroll) and My entries as a table (asset, Epoch, status, stake, basis, score, payout, withdraw, basket). Side column: Create entry (Back / VS / Against boxes, stake, fee, gradient Review) and the Settlement timeline. Supersedes the layouts in Godwin's 2026-10-23 Epoch page entries; data, routes and entry logic are unchanged. Checked at 1440px and phone width with a temporary fake open round (removed before commit); no real entry sent. Still on only in local development.
 - **Refs:** commit before this entry.
+
+### 2026-10-23 · Godwin (Claude Code) · Epochs live in production
+
+- **Area:** `apps/web`; Vercel project `cox-web`.
+- **What:** At Godwin's request, `EPOCHS_ENABLED=true` is set on Vercel production and `84582fb` is deployed (`cox-op25x9vy0-gef-228639f6`), so <https://getrelative.trade/epochs> shows the full Epoch page instead of "Coming soon". Supersedes the rule in Godwin's 2026-10-23 "Epochs page behind EPOCHS_ENABLED" entry that production keeps the flag off. The payout rules now open as a six-slide carousel. The dashboard uses three columns only from 1280px; narrower screens get two columns and the mobile entry sheet.
+- **Rules for agents:** To hide Epochs again, remove `EPOCHS_ENABLED` from Vercel production and redeploy.
+- **Open:** No real entry, execution or withdrawal has been sent through the app yet. Joel: `universe` and per-entry reference series, as in the earlier Epoch entries.
+- **Refs:** commits `3872099`..`84582fb`.
