@@ -1849,3 +1849,10 @@ another agent needs to know.
 - **Rules for agents:** Do not call the overall pipeline complete from one successful inclusion/roundtrip. Require automatic successor creation, empty-round terminalization, active-Epoch inclusion crossing, hot universe adoption and deployed consumer entry verification. Do not reset the benchmark to hide its decline: independent high-precision recomputation of publication 23 matches 90.519760989063; all original inputs were below origin. Preserve custody and origin history until an explicit migration is approved.
 - **Open:** Sealed-Epoch API roster remains empty; market-page HTTP 500 observed although direct confirmed Basic registry read at 09:09:40 UTC is unpaused (sequence 26). Website server-error cause is not yet established. Earlier schema-4 archive incompatibility and backup-config permissions incident were rollout defects, not intrinsic requirements of adding an asset.
 - **Refs:** native `chain.rs`, `executor.rs`, `inclusion_execution.rs`, `runtime.rs`; `packages/cox-epoch/src/lib.rs`; private `.cox/audit-current-chain.json`, `.cox/audit-current-epochs.json`; executable repro `/private/tmp/relative-epoch-audit/repro.rs`.
+
+### 2026-10-24 · Peter (Codex) · Correction to active-Epoch inclusion audit
+
+- **Area:** Corrects the earlier 2026-10-24 “Lifecycle audit supersedes broad completion claim” snapshot-filtering assertion.
+- **What:** Its engine-only reproduction bypassed the existing on-chain `select_snapshot` wrapper. The wrapper already filters global prices into each frozen Epoch universe; a compiled contract test now verifies entry and closing with 31 global prices and a frozen 30-asset round. No replacement snapshot namespace is required for this case. The separate missing rollover, empty cleanup and restart-coupling findings remain valid.
+- **Rules for agents:** Trace the actual contract wrapper before inferring live behavior from engine-only tests. Preserve the existing frozen-universe filter and immutable executed baskets.
+- **Refs:** `packages/cox-epoch/programs/epoch/src/lib.rs`; `packages/cox-epoch/program-tests/tests/custody.rs`.
