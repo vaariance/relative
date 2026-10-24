@@ -941,12 +941,7 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
         <h1 className="text-xl font-semibold tracking-tight">Epoch</h1>
         <p className="text-sm text-muted">Back one coin in a basket of 30. Your entry counts from its execution to the fixed Epoch close.</p>
       </div>
-      <div className="flex items-center gap-2">
-        <ModeSwitch />
-        <span className="inline-flex h-9 items-center gap-2 rounded-pill bg-surface px-3 text-[11px] uppercase tracking-wider text-muted">
-          <span className="size-1.5 rounded-full bg-accent" /> Devnet
-        </span>
-      </div>
+      <ModeSwitch />
     </header>
   );
 
