@@ -314,7 +314,6 @@ const PAYOUT_SLIDES: Slide[] = [
   { kicker: "Step 3", title: "Weight it", body: "Your score is multiplied by your net stake." },
   { kicker: "Step 4", title: "Share the pot", body: "Each entry is paid its weight's share of the total weight of all entries. An entry with a score of zero gets nothing back." },
   { kicker: "Example", title: "Two entries, one pot", body: "Two 100 USDC entries, each with a net stake of 99.98 after the fee. Scores of 10% and 30% split the 199.96 pot 25% / 75%. The first coin beat $CRYPTO, yet that entry gets back 49.99 of its 100.", visual: "split" },
-  { kicker: "Good to know", title: "Scores are not odds", body: "Other entries' stakes, entry times and scores decide the money, and several entries can be paid. If every score is zero, everyone is refunded in full, fee included." },
 ];
 
 function PayoutModal({ onClose }: { onClose: () => void }) {
