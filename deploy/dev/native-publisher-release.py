@@ -1,12 +1,14 @@
 import argparse
 import datetime
 import hashlib
+import grp
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 
@@ -42,6 +44,41 @@ SCHEMA = "relative.native-release/v1"
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+def replace_service_configuration(source, destination, uid, gid):
+    require(source.is_file() and not source.is_symlink(), "Configuration source must be a regular file")
+    require(not destination.is_symlink() and destination.parent.is_dir()
+            and not destination.parent.is_symlink(), "Unsafe configuration destination")
+    payload = source.read_bytes()
+    config = json.loads(payload)
+    expected = {"native.json": "relative.publisher/v1", "native-backup.json": "relative.backup/v1"}
+    require(destination.name in expected and config.get("schema") == expected[destination.name],
+            "Configuration name or schema mismatch")
+    fd, temporary = tempfile.mkstemp(prefix="." + destination.name + ".", dir=destination.parent)
+    try:
+        with os.fdopen(fd, "wb") as output:
+            os.fchmod(output.fileno(), 0o640)
+            os.fchown(output.fileno(), uid, gid)
+            output.write(payload)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, destination)
+        directory = os.open(destination.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def install_config(args):
+    require(os.geteuid() == 0 and args.destination.parent == Path("/etc/cox-publisher"),
+            "Configuration installation requires root and the publisher configuration directory")
+    replace_service_configuration(args.source, args.destination, 0, grp.getgrnam("cox-publisher").gr_gid)
+    print(json.dumps({"installed": True, "owner": "root:cox-publisher", "mode": "0640"}))
 
 
 def git(*args):
@@ -252,11 +289,14 @@ def main():
     checking.add_argument("--bundle", required=True, type=Path)
     checking.add_argument("--config", required=True, type=Path)
     checking.add_argument("--intent", required=True, type=Path)
+    installing = commands.add_parser("install-config")
+    installing.add_argument("--source", required=True, type=Path)
+    installing.add_argument("--destination", required=True, type=Path)
     args = parser.parse_args()
-    for field in ["bundle", "output", "config", "intent", "basic_binary", "epoch_binary"]:
+    for field in ["bundle", "output", "config", "intent", "basic_binary", "epoch_binary", "source", "destination"]:
         if hasattr(args, field):
             setattr(args, field, getattr(args, field).absolute())
-    {"stage": stage, "build": build, "verify": verify}[args.command](args)
+    {"stage": stage, "build": build, "verify": verify, "install-config": install_config}[args.command](args)
 
 
 if __name__ == "__main__":

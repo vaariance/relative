@@ -16,6 +16,28 @@ SPEC.loader.exec_module(release)
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_config_replacement_preserves_service_access_and_failure_keeps_original(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "prepared.json"
+            source.write_text(json.dumps({"schema": "relative.backup/v1", "max_file_bytes": 16777216}))
+            destination = root / "native-backup.json"
+            destination.write_text("old configuration")
+            with patch.object(release.os, "fchown", side_effect=PermissionError("denied")):
+                with self.assertRaises(PermissionError):
+                    release.replace_service_configuration(source, destination, 0, 123)
+            self.assertEqual(destination.read_text(), "old configuration")
+            with patch.object(release.os, "fchown") as owner:
+                release.replace_service_configuration(source, destination, 0, 123)
+            self.assertEqual(owner.call_args.args[1:], (0, 123))
+            self.assertEqual(destination.stat().st_mode & 0o777, 0o640)
+            self.assertEqual(destination.read_bytes(), source.read_bytes())
+            self.assertFalse(list(root.glob(".native-backup.json.*")))
+            link = root / "linked.json"
+            link.symlink_to(source)
+            with self.assertRaisesRegex(ValueError, "regular file"):
+                release.replace_service_configuration(link, destination, 0, 123)
+
     def test_direct_rpc_fallback_does_not_accept_another_chain(self):
         with patch.dict(release.os.environ, {"ALCHEMY_API_KEY": "private-test-key"}):
             valid = io.BytesIO(json.dumps({"result": release.GENESIS}).encode())
