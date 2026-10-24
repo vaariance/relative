@@ -1,6 +1,6 @@
 import type { Epoch, EpochLot } from "@eox/app-api";
 import { describe, expect, it } from "vitest";
-import { countdown, feeOf, lotView, moves, stageOf, timelineStep } from "./epoch";
+import { countdown, executionReferences, feeOf, lotView, moves, stageOf, timelineStep } from "./epoch";
 
 const epoch = (phase: Epoch["phase"], extra: Partial<Epoch> = {}): Epoch => ({ address: "x", opensAt: 1000, closesAt: 2000, phase, sealed: true, entriesOpen: false, universe: [], nextNonce: null, lots: null, totalWeight: null, settlementPot: null, allZero: null, closingReferences: [], ledger: null, ...extra });
 const lot = (extra: Partial<EpochLot>): EpochLot => ({ address: "l", epochOpensAt: 1000, nonce: "0", owner: "o", grossStake: "100000000", fee: "20000", admittedAt: 1100, basket: [], backedAsset: "ETH", execution: { timestamp: 1101, references: [] }, state: "executed", score: null, weight: null, claimable: null, ...extra });
@@ -27,6 +27,23 @@ describe("relative moves", () => {
     expect(rows.map((row) => row.id)).toEqual(["B", "A", "C"]);
     expect(rows[0]!.change).toBeCloseTo(0.02);
     expect(rows[2]!.change).toBeNull();
+  });
+});
+
+describe("moves since an entry executed", () => {
+  it("rebases each basket member to its own execution reference", () => {
+    const entry = lot({ basket: ["A", "B"], execution: { timestamp: 1101, references: ["1000000000000", "2000000000000"] } });
+    const start = executionReferences(entry, 100);
+    expect(start).toEqual({ A: 100, B: 200 });
+    const rows = moves(entry.basket, start, { A: 103, B: 198 });
+    expect(rows[0]!.id).toBe("A");
+    expect(rows[0]!.change).toBeCloseTo(0.03);
+    expect(rows[1]!.change).toBeCloseTo(-0.01);
+  });
+
+  it("has no starting point before execution or when the references do not match the basket", () => {
+    expect(executionReferences(lot({ basket: ["A"], execution: null }), 100)).toBeNull();
+    expect(executionReferences(lot({ basket: ["A", "B"], execution: { timestamp: 1101, references: ["1"] } }), 100)).toBeNull();
   });
 });
 

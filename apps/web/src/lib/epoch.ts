@@ -45,6 +45,12 @@ export function moves(ids: readonly string[], start: Record<string, number> | nu
     .sort((a, b) => (b.change ?? -Infinity) - (a.change ?? -Infinity) || a.id.localeCompare(b.id));
 }
 
+export function executionReferences(lot: EpochLot, base: number): Record<string, number> | null {
+  const references = lot.execution?.references;
+  if (!references || references.length !== lot.basket.length) return null;
+  return Object.fromEntries(lot.basket.map((id, index) => [id, (Number(BigInt(references[index]!)) / 10 ** SCORE_DIGITS) * base]));
+}
+
 export function scoreOf(lot: EpochLot): number | null {
   return lot.score === null ? null : Number(BigInt(lot.score)) / 10 ** SCORE_DIGITS;
 }

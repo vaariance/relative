@@ -10,7 +10,7 @@ import { createPortal } from "react-dom";
 import { walletEpochLots } from "@/app/actions";
 import { parseScaled } from "@/lib/amounts";
 import { COLLATERAL } from "@/lib/config";
-import { type LotGroup, type Move, type Stage, STAGE_LABEL, TIMELINE, countdown, feeOf, lotView, moves, scoreOf, stageOf, timelineStep, units, utcTime, windowText } from "@/lib/epoch";
+import { type LotGroup, type Move, type Stage, STAGE_LABEL, TIMELINE, countdown, executionReferences, feeOf, lotView, moves, scoreOf, stageOf, timelineStep, units, utcTime, windowText } from "@/lib/epoch";
 import { historyEstimates } from "@/lib/estimate";
 import { formatAmount } from "@/lib/format";
 import type { Intent } from "@/lib/requests";
@@ -289,7 +289,7 @@ function PromoCard({ onExplain }: { onExplain: () => void }) {
       <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[radial-gradient(60%_60%_at_100%_100%,rgba(0,0,0,0.35),transparent)]" />
       <div className="flex flex-col gap-2">
         <h2 className="text-lg font-semibold leading-tight text-white">One pot. Four hours.</h2>
-        <p className="text-xs leading-relaxed text-white/80">Every entry backs one coin against the other 29. At the close, the pot is shared by score: your coin's share of the basket's gains, weighted by your net stake.</p>
+        <p className="text-xs leading-relaxed text-white/80">Every entry backs one coin in a basket of 30 and counts from its own execution. At the close, the pot is shared by score: your coin's share of the basket's gains, weighted by your net stake.</p>
       </div>
       <div className="flex flex-wrap gap-2">
         <button type="button" onClick={onExplain} aria-haspopup="dialog" className="h-9 cursor-pointer rounded-pill bg-white px-4 text-sm font-medium text-black transition-opacity duration-150 hover:opacity-90">
@@ -310,8 +310,8 @@ interface Slide {
 }
 
 const PAYOUT_SLIDES: Slide[] = [
-  { kicker: "Step 1", title: "Back a coin", body: "Pick one coin. The other 29 become your comparison basket.", formula: "Move = closing ref / entry ref − 1" },
-  { kicker: "Step 2", title: "Get a score", body: "Your coin's rise as a share of all the basket's rises. Coins that fell count as zero.", formula: "Score = your coin's rise / all rises" },
+  { kicker: "Step 1", title: "Back a coin", body: "Pick one coin in a basket of 30. Each coin's move runs from your entry's execution to the close, measured against $CRYPTO.", formula: "Move = closing ref / entry ref − 1" },
+  { kicker: "Step 2", title: "Get a score", body: "Your coin's rise as a share of all the basket's rises, your own coin included. Coins that did worse than $CRYPTO count as zero.", formula: "Score = your coin's rise / all rises" },
   { kicker: "Step 3", title: "Weight it", body: "Your score is multiplied by your net stake.", formula: "Weight = net stake × score" },
   { kicker: "Step 4", title: "Share the pot", body: "Every entry takes a slice of the pot in proportion to its weight.", formula: "Payout = pot × weight / total weight" },
   { kicker: "Example", title: "Two entries, one pot", body: "Each has a net stake of 99.98. Scores of 10% and 30% split the 199.96 pot 25% / 75%. The first coin beat $CRYPTO and the entry still lost money.", visual: "split" },
@@ -460,7 +460,7 @@ function MovesCard({ epoch, coins, now, backed, canPick, onPick }: { epoch: Epoc
             <div className="flex flex-col gap-3">
               <span className={`${eyebrow} flex items-center gap-2`}>
                 <CoinIcon id={focus.id} size={18} />
-                {focus.id} · {focus.id === backed ? "your pick" : "leading"} since {utcTime(epoch.opensAt)} UTC
+                {focus.id} · {focus.id === backed ? "selected" : "leading"} · since {utcTime(epoch.opensAt)} UTC
               </span>
               <p className={`num text-[2.5rem] font-semibold leading-none tracking-tight ${tone(focus.change)}`}>{pct(focus.change)}</p>
             </div>
@@ -476,6 +476,12 @@ function MovesCard({ epoch, coins, now, backed, canPick, onPick }: { epoch: Epoc
               ))}
             </dl>
           </div>
+        )}
+        {ready && stage === "open" && (
+          <p className={`${well} flex items-start gap-2 text-xs text-muted`}>
+            <Clock size={14} aria-hidden="true" className="mt-0.5 shrink-0" />
+            These moves started at {utcTime(epoch.opensAt)} UTC. A new entry counts only from its own execution, so moves before then do not count toward it.
+          </p>
         )}
       </div>
 
@@ -498,7 +504,7 @@ function MovesCard({ epoch, coins, now, backed, canPick, onPick }: { epoch: Epoc
           </ul>
         </>
       )}
-      <p className="border-t border-white/[0.06] px-5 py-3 text-[11px] text-muted">0% means matching $CRYPTO over the interval, not an unchanged USD price. This ranks assets, not entries or payouts.</p>
+      <p className="border-t border-white/[0.06] px-5 py-3 text-[11px] text-muted">0% means matching $CRYPTO over the interval, not an unchanged USD price. This ranks assets since the Epoch opened, not entries or payouts.</p>
     </section>
   );
 }
@@ -631,7 +637,7 @@ function EntryPanel(props: { epoch: Epoch; coins: string[]; now: number; decimal
           <CoinIcon id={backed} size={32} />
           <span className="text-base font-semibold">{backed}</span>
           <span className="rounded-pill bg-accent px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white">Backed</span>
-          <span className="num ml-auto text-xs text-muted">vs 29 assets</span>
+          <span className="num ml-auto text-xs text-muted">in a 30-coin basket</span>
         </div>
         <dl className="flex flex-col gap-2 text-xs">
           <div className="flex justify-between gap-4"><dt className="text-muted">Gross stake</dt><dd className="num text-right">{show(gross)}</dd></div>
@@ -687,16 +693,16 @@ function EntryPanel(props: { epoch: Epoch; coins: string[]; now: number; decimal
             <span className="num text-2xl font-semibold">{backed ?? "Pick a coin"}</span>
           </div>
         </div>
-        <span className="relative z-10 -my-4 mx-auto grid size-9 place-items-center rounded-full border-4 border-surface bg-surface-2 text-[10px] font-semibold text-muted">VS</span>
         <div className={`${well} flex flex-col gap-2`}>
           <div className="flex items-center justify-between">
-            <span className="text-[11px] text-muted">Against</span>
+            <span className="text-[11px] text-muted">Basket</span>
             <span className="num text-[11px] text-muted">{coins.length} / {BASKET_SIZE}</span>
           </div>
           <div className="flex items-center justify-between gap-3">
-            <span className="text-sm">{exact ? "The other 29 coins" : "Asset list not available"}</span>
+            <span className="text-sm">{exact ? `30 coins · 1 backed + 29 comparison` : "Asset list not available"}</span>
             {exact && <button type="button" onClick={() => setShowBasket(!showBasket)} className="cursor-pointer text-xs text-accent underline-offset-4 hover:underline">{showBasket ? "Hide" : "View basket"}</button>}
           </div>
+          {exact && <p className="text-[11px] text-muted">All 30 eligible coins are included this Epoch. Your score compares your coin's rise with the rises of all 30, including your own.</p>}
           {showBasket && (
             <ul className="flex flex-wrap gap-1.5 pt-1">
               {coins.map((id) => (
@@ -751,9 +757,30 @@ const STATUS_TONE: Record<LotGroup, string> = {
 
 const TABLE = "grid min-w-[820px] grid-cols-[minmax(130px,1.1fr)_minmax(150px,1.2fr)_minmax(130px,1fr)_minmax(110px,0.9fr)_minmax(150px,1.3fr)_70px_minmax(120px,1fr)_150px] items-center gap-3 px-5";
 
+function useEntryMoves(lot: EpochLot, epoch: Epoch | null): { rows: Move[]; backed: Move | null; basis: string | null } {
+  const { estimate, freshness } = useLive();
+  return useMemo(() => {
+    const start = executionReferences(lot, PREVIEW_BASE);
+    if (!start || !epoch) return { rows: [], backed: null, basis: null };
+    let end: Record<string, number> | null = null;
+    let basis: string | null = null;
+    if (epoch.closingReferences.length > 0) {
+      end = Object.fromEntries(epoch.closingReferences.map((item) => [item.assetId, (Number(BigInt(item.reference)) / 10 ** REFERENCE_DIGITS) * PREVIEW_BASE]));
+      basis = "at close";
+    } else if (epoch.phase === "open" && estimate && estimate.at < epoch.closesAt && estimate.at >= (lot.execution?.timestamp ?? Infinity)) {
+      end = estimate.references;
+      basis = freshness === "live" ? "live estimate" : "estimate paused";
+    }
+    if (!end) return { rows: [], backed: null, basis: null };
+    const rows = moves(lot.basket, start, end);
+    return { rows, backed: rows.find((row) => row.id === lot.backedAsset) ?? null, basis };
+  }, [lot, epoch, estimate, freshness]);
+}
+
 function EntryRow({ lot, epoch, decimals, onSent }: { lot: EpochLot; epoch: Epoch | null; decimals: number; onSent: () => void }) {
   const [open, setOpen] = useState(false);
   const view = lotView(lot, epoch);
+  const since = useEntryMoves(lot, epoch);
   const gross = units(lot.grossStake, decimals);
   const net = gross - units(lot.fee, decimals);
   const score = scoreOf(lot);
@@ -777,7 +804,15 @@ function EntryRow({ lot, epoch, decimals, onSent }: { lot: EpochLot; epoch: Epoc
           <span>{formatAmount(gross, 2)}</span>
           <span className="text-[10px] text-muted">net {formatAmount(net, 2)}</span>
         </span>
-        <span className="num text-muted">{lot.execution ? `Executed ${utcTime(lot.execution.timestamp, true)}` : `Entered ${utcTime(lot.admittedAt, true)} · awaiting`}</span>
+        <span className="num flex flex-col">
+          <span className="text-muted">{lot.execution ? `Executed ${utcTime(lot.execution.timestamp, true)}` : `Entered ${utcTime(lot.admittedAt, true)} · awaiting`}</span>
+          {since.backed && since.backed.change !== null && (
+            <span className="text-[10px]">
+              <span className={tone(since.backed.change)}>{lot.backedAsset} {pct(since.backed.change, 2)}</span>
+              <span className="text-muted"> since execution · {since.basis}</span>
+            </span>
+          )}
+        </span>
         <span className="num">{score === null ? "—" : `${formatAmount(score * 100, 2)}%`}</span>
         <span className="num flex flex-col">
           <span>{claimable === null ? "Not settled" : `${formatAmount(claimable, 4)} ${view.refund ? "refund" : ""}`}</span>
@@ -799,11 +834,23 @@ function EntryRow({ lot, epoch, decimals, onSent }: { lot: EpochLot; epoch: Epoc
         </span>
       </div>
       {open && (
-        <ul className="flex flex-wrap gap-1.5 px-5 pb-3">
-          {lot.basket.map((id) => (
-            <li key={id} className={`num rounded-pill px-2 py-0.5 text-[11px] ${id === lot.backedAsset ? "bg-accent/20 text-accent" : "bg-surface-2 text-muted"}`}>{id}</li>
-          ))}
-        </ul>
+        <div className="flex flex-col gap-2 px-5 pb-3">
+          <p className="text-[11px] text-muted">
+            {since.rows.length > 0 && lot.execution
+              ? `Basket moves against $CRYPTO since your execution at ${utcTime(lot.execution.timestamp, true)} UTC · ${since.basis}`
+              : lot.execution
+                ? "Basket. Moves since your execution appear when an estimate or the closing reference is available."
+                : "Basket. Moves start once this entry executes."}
+          </p>
+          <ul className="flex flex-wrap gap-1.5">
+            {(since.rows.length > 0 ? since.rows : lot.basket.map((id) => ({ id, change: null }))).map((row) => (
+              <li key={row.id} className={`num inline-flex gap-1.5 rounded-pill px-2 py-0.5 text-[11px] ${row.id === lot.backedAsset ? "bg-accent/20 text-accent" : "bg-surface-2 text-muted"}`}>
+                {row.id}
+                {row.change !== null && <span className={row.id === lot.backedAsset ? "" : tone(row.change)}>{pct(row.change, 2)}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </li>
   );
@@ -894,7 +941,7 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
     <header className="flex flex-wrap items-end justify-between gap-4">
       <div className="flex flex-col gap-1">
         <h1 className="text-xl font-semibold tracking-tight">Epoch</h1>
-        <p className="text-sm text-muted">Back one coin against $CRYPTO for four hours.</p>
+        <p className="text-sm text-muted">Back one coin in a basket of 30. Your entry counts from its execution to the fixed Epoch close.</p>
       </div>
       <div className="flex items-center gap-2">
         <ModeSwitch />
