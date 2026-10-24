@@ -1433,12 +1433,12 @@
   },
   "lastRuntimeAuditSlot": 513977460,
   "nativeRuntime": {
-    "sourceCommit": "acd9f157b9be93c10af8e82b640ecd8b06c06bfd",
-    "linuxSha256": "06851d9a983c0beb1975d89d5f2b4d021d65dd66a75985e79071ae905d0fee79",
+    "sourceCommit": "d798b31da7c59ef0280f6b6280278eb8a67da4a7",
+    "linuxSha256": "bb57ad1d81a417d9a4159a9fc47a1d3887e3a6bb9d4b666b756b5354cd4e6b63",
     "service": "cox-publisher.service",
     "region": "europe-west1",
     "running": true,
-    "signerRoute": "adaptive-enabled canary; existing default signer traffic unchanged",
+    "signerRoute": "dynamic-lit isolated canary; existing default and faucet signer routes unchanged",
     "apiArchivePrefix": "gs://colosseum-cox-publication-archives-dev/pool-2/history/",
     "backupTimerEnabled": true,
     "cloudArchiveVerification": {
@@ -2411,5 +2411,329 @@
         "transactionBytes": 424
       }
     ]
+  },
+  "dynamicLitRollout": {
+    "schema": "relative.dynamic-lit-rollout/v1",
+    "verifiedAtUtc": "2026-10-24T09:02:51.423108+00:00",
+    "network": "solana-devnet",
+    "complete": true,
+    "basicProgramSha256": "4c63f6955546438346309883fa06ed163a83c6bda432cf36b728e168e12a6ba1",
+    "basicSchemaVersion": 5,
+    "epochProgramSha256Unchanged": "b6dd486b206f4038daab1bc3a6696cffc3f40ad389e8b9b15eec797a5a20f6d7",
+    "capturedUpgradeRehearsal": {
+      "capturedStateSha256": "2eea4da64de47fe9def37bec365b391117e227b2d7bea4fce447e478c05fb070",
+      "clockTimestamp": 1792829567,
+      "contextSlot": 514544071,
+      "genesisCanonicalSha256": "f98b663a68353d503f1a8a05017d144ccf37cec927c41a0dd6117637325186e6",
+      "genesisHash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+      "liveMigration": false,
+      "liveSignatureProof": false,
+      "pool": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+      "preservedPositions": 3,
+      "preservedRequests": 8,
+      "preservedSequence": 22,
+      "programSha256": "4c63f6955546438346309883fa06ed163a83c6bda432cf36b728e168e12a6ba1",
+      "result": "passed",
+      "schema": "relative.dynamic-captured-rehearsal/v1",
+      "signatureVerification": false,
+      "transactions": [
+        {
+          "computeUnits": 10737,
+          "instruction": "register_dynamic_methodology",
+          "transactionBytes": 369
+        },
+        {
+          "computeUnits": 6910,
+          "instruction": "upload_methodology",
+          "transactionBytes": 901
+        },
+        {
+          "computeUnits": 7061,
+          "instruction": "upload_methodology",
+          "transactionBytes": 901
+        },
+        {
+          "computeUnits": 7060,
+          "instruction": "upload_methodology",
+          "transactionBytes": 901
+        },
+        {
+          "computeUnits": 7060,
+          "instruction": "upload_methodology",
+          "transactionBytes": 901
+        },
+        {
+          "computeUnits": 7062,
+          "instruction": "upload_methodology",
+          "transactionBytes": 901
+        },
+        {
+          "computeUnits": 7068,
+          "instruction": "upload_methodology",
+          "transactionBytes": 510
+        },
+        {
+          "computeUnits": 338264,
+          "instruction": "seal_dynamic_methodology",
+          "transactionBytes": 358
+        },
+        {
+          "computeUnits": 4553,
+          "instruction": "pause",
+          "transactionBytes": 259
+        },
+        {
+          "computeUnits": 56500,
+          "instruction": "migrate_dynamic_pool",
+          "transactionBytes": 424
+        }
+      ]
+    },
+    "liveMigrationAudit": {
+      "schema": "relative.dynamic-live-migration-audit/v1",
+      "auditedAtUtc": "2026-10-24T08:21:48.667Z",
+      "binarySha256": "4c63f6955546438346309883fa06ed163a83c6bda432cf36b728e168e12a6ba1",
+      "pool": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+      "universeDigest": "f98b663a68353d503f1a8a05017d144ccf37cec927c41a0dd6117637325186e6",
+      "schemaVersion": 5,
+      "sequence": "22",
+      "paused": true,
+      "financialFieldsPreserved": true,
+      "capturedAccountsPreserved": 20,
+      "custodyPreserved": true,
+      "signedTransactionJournal": ".cox/dynamic-lit-20261024-0815-journal.json"
+    },
+    "upgradeSignature": "2CFM2NrE4tBtUGnxrtkLACsD6Vy8hc9XVY6qMvEmGnRv6UBzFsnuSjZdPdYhSDZMKUzgFjoaVrKgDovCF1JRbMyX",
+    "genesisUniverseDigest": "f98b663a68353d503f1a8a05017d144ccf37cec927c41a0dd6117637325186e6",
+    "genesisMethodology": "5Ak5WagSxiKExFuUn1Vj9hzRzbF9M53B8JbhyC8LbSEr",
+    "genesisSealSignature": "5Dwh58CH5cRAhY5iSrKPB1iR83m3mML3NXKCRK8hrLMgpXiQVxZds7tx3nb96YtgBKmQbGTCanubJafkdRhPKEcL",
+    "scheduledActivationUtc": "2026-10-24T08:30:00Z",
+    "scheduledActivationUnixSeconds": 1792830600,
+    "supersedesMissedBoundaryUtc": "2026-10-24T00:00:00Z",
+    "scheduleAccount": "gEDi53hL6U1TstWMryv7zpmzR7qd13hf1ZevFzYyEG2",
+    "scheduleSignature": "5CTqwfkBhC5x4sGxbhiTstDGrv4D2B871dU4iHSHyKXefWnDrnXUdgBxXPqQKoT8E3cvLU4CvhsJL9jqjpKFTNAX",
+    "boundaryCaptureUnixMicroseconds": "1792830600000000",
+    "boundaryPublicationSequence": "23",
+    "boundaryCommittedAtUtc": "2026-10-24T08:30:14Z",
+    "activationRecovery": "Schema-4 publication archival initially failed closed. Committed recovery release resumed the original 08:30 signed capture and completed activation; no later market price substituted.",
+    "asset": {
+      "stableId": "lit",
+      "symbol": "LIT",
+      "pythProFeedId": 2921,
+      "pythCoreFeedId": "c0c83f00c39165892d55dcd17ade2191e289697e2ac132d9ab721e20834e2a9e",
+      "tokenMint": null,
+      "classId": 31,
+      "epochAssetId": 30
+    },
+    "activeUniverseDigest": "a845dbecd1c483b58c187ce47cf1dcc0f9f08761ade7db47f7082b69707ce41e",
+    "activeUniverseVersion": "2",
+    "activeUnderlyingAssets": 31,
+    "cryptoClassId": 30,
+    "continuityVerification": {
+      "schema": "relative.live-inclusion-continuity/v1",
+      "checkedAtUtc": "2026-10-24T08:49:34.454Z",
+      "universeDigest": "a845dbecd1c483b58c187ce47cf1dcc0f9f08761ade7db47f7082b69707ce41e",
+      "version": "2",
+      "assets": 31,
+      "boundaryTimestamp": "1792830600",
+      "boundaryBenchmark": "90519760989063",
+      "boundaryPublicationSequence": "23",
+      "benchmarkContinuous": true,
+      "existingInstrumentsAndOriginsUnchanged": true,
+      "existingClassUnitsUnchanged": true,
+      "newClassId": 31,
+      "newClassInitialUnits": "0",
+      "poolSequence": "23"
+    },
+    "frozenEpochVerification": {
+      "schema": "relative.frozen-epoch-after-inclusion/v1",
+      "checkedAtUtc": "2026-10-24T08:53:05.591Z",
+      "epoch": "AnBEd8ne65Jmq5MP2dgqmx2KQHCGEz25kqBsmuzd8kjG",
+      "opensAt": "1792742400",
+      "closesAt": "1792756800",
+      "selectionUniverseCount": 30,
+      "selectionUniverseIdsUnchanged": true,
+      "baskets": [
+        {
+          "nonce": "0",
+          "backedAsset": 0,
+          "basket": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29
+          ]
+        },
+        {
+          "nonce": "1",
+          "backedAsset": 1,
+          "basket": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29
+          ]
+        }
+      ],
+      "verified": true
+    },
+    "liveSdkRoundTrip": {
+      "schema": "relative.lit-live-roundtrip/v1",
+      "completed": true,
+      "verifiedAtUtc": "2026-10-24T08:52:28.943Z",
+      "owner": "2aDWjWvQ3nzLq75wn1U6tHwp4Bok7LuWxHSj6KH5wg1h",
+      "pool": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+      "classId": 31,
+      "deposit": {
+        "nonce": "8",
+        "sequence": "24",
+        "gross": "100000",
+        "fee": "20",
+        "mintedUnits": "99980000000000000",
+        "proceeds": "0"
+      },
+      "redemption": {
+        "nonce": "9",
+        "sequence": "25",
+        "gross": "100012",
+        "fee": "20",
+        "mintedUnits": "0",
+        "proceeds": "99992"
+      },
+      "tokenBefore": "999528",
+      "tokenAfter": "999520",
+      "returnedCollateral": "99992",
+      "ownFees": "40",
+      "nonLitPoolUnitsPreserved": true,
+      "nonLitOwnerUnitsPreserved": true,
+      "ownerLitUnitsZero": true,
+      "preexistingOwnerPayablePreserved": true,
+      "globalActiveAndPayableAllowed": true,
+      "signatures": {
+        "deposit": "2A9fdgNCN5wrYNZnriNxAVRcXVHZN957twCD2DcbKACH4GFxfH1XA1ZzPhBK3zDi4yWuAMxZVjRBKz6bJSs9WT2X",
+        "redeem": "2fYpZiXMVxhDm54PNsg5AELd3xsroUpvBiq38xuBKGhLG8f3eEHYMkrfFqQffLEfrbtjJF2VSok77RduQS9Cj8PQ",
+        "withdraw": "2Uqqumbexpk1VpPPAidL7DCryxiZ5yiwQyurfAJrSkFvdgYc3xxWe3xCQ21mFompJ11APfuPVKXjLmXJPXsGXHQm"
+      }
+    },
+    "signer": {
+      "revision": "eox-signer-dynamic-lit-890b690",
+      "tag": "dynamic-lit",
+      "defaultTrafficPercent": 0,
+      "imageSha256": "d24a397aff2a77fbf9b90bc950ed71f14e854150c609cac3e1c78de4dbdb6ea6",
+      "instructionPolicyChecks": 29,
+      "combinedShapeChecks": 4,
+      "operatorKeyUnchanged": true,
+      "adminAndUpgradeKeysOutsideSigner": true
+    },
+    "cloudArchives": [
+      {
+        "sequence": "23",
+        "assetCount": 30,
+        "schemaVersion": 4,
+        "stateDigestVerified": true,
+        "object": "pool-2/history/23/580633794b41019fa6520a7cc2dc253566d41d91c58baa0f344dd15b93075ce7.json",
+        "sha256": "580633794b41019fa6520a7cc2dc253566d41d91c58baa0f344dd15b93075ce7"
+      },
+      {
+        "sequence": "24",
+        "assetCount": 31,
+        "schemaVersion": 4,
+        "stateDigestVerified": true,
+        "object": "pool-2/history/24/8bdcc6f376a8d5a9064674475b65d44d5e3faf96ee35a00220f7ae6187a01785.json",
+        "sha256": "8bdcc6f376a8d5a9064674475b65d44d5e3faf96ee35a00220f7ae6187a01785"
+      }
+    ],
+    "cloudArchiveVerified": true,
+    "backupMaxFileBytes": 16777216,
+    "backupConfigOwnerMode": "root:cox-publisher 0640",
+    "apiVerification": {
+      "sequence": 25,
+      "assetCount": 31,
+      "tradingGate": "open",
+      "reconciliation": {
+        "sequence": 25,
+        "vault": "15000439",
+        "ledger": "15000439",
+        "fees": "3478",
+        "covered": true
+      },
+      "previewTimestamp": 1792831857,
+      "previewAssetCount": 31,
+      "previewIsEstimate": true
+    },
+    "remainingExternalBlocker": {
+      "owner": "Joel",
+      "issue": "Deployed sealed-Epoch API returns an empty selection universe; deploy existing universe-reader fix 9829dba. Basic API roster/cache and previews are healthy.",
+      "notifiedMessageId": "1a16d21549294126"
+    },
+    "verificationLimits": [
+      "185 native tests and 57 compiled contract tests passed; capacity through 255 underlying assets is tested, while the live roster has 31.",
+      "Boundary publication committed fourteen seconds after its reference timestamp; no subsecond on-chain inclusion guarantee.",
+      "Cloud history checks verify exact object/account hashes and schema 4; confirmed archive provenance remains confirmed."
+    ],
+    "cloudArchiveSdkVerification": true,
+    "postRoundTripIdleVerification": {
+      "startObservedUtc": "2026-10-24T09:01:44.244263+00:00",
+      "endObservedUtc": "2026-10-24T09:03:17.240462+00:00",
+      "elapsedSeconds": 92.996,
+      "physicalHttpRequestsBefore": 353,
+      "physicalHttpRequestsAfter": 353,
+      "additionalSolanaHttpCalls": 0,
+      "publisherActive": true,
+      "previewActive": true,
+      "scope": "Local process counters during this quiet interval; not an account-wide usage or sustained-load measurement."
+    }
   }
 }
