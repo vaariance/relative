@@ -1720,3 +1720,18 @@ another agent needs to know.
   - **Name:** the test mint `5rpG…wV3X` is shown as rlUSD everywhere (`TEST_COLLATERAL`).
 - **Verified:** type check and 63 tests pass. In the dev server, the faucet status call works against the live API, and the Buy, Sell and Swap choices switch correctly. No claim or rlUSD trade has been signed with a real wallet. Not deployed.
 - **Refs:** commits `29a37c4`, `3595d7d`.
+
+### 2026-10-24 · Godwin (Claude Code) · Epoch page describes scoring from each entry's execution
+
+- **Area:** `apps/web` (`epochs-view.tsx`, `src/lib/epoch.ts`).
+- **What:** Peter said the Epoch page described the game wrongly. Checked against `packages/cox-epoch` and his 23 Oct brief; fixed:
+  - **Subtitle:** "Back one coin against $CRYPTO for four hours" is now "Back one coin in a basket of 30. Your entry counts from its execution to the fixed Epoch close." Payouts depend on the basket and other entries, not only on beating $CRYPTO, and an entry runs only from its execution to the fixed UTC close.
+  - **Moves card:** the selected coin is no longer labelled "your pick" with its since-Epoch-start move. While a round is open, a note says moves before a new entry's execution do not count toward it.
+  - **Entry box, explainer and promo card:** the "Back — VS — Against the other 29" layout is now a basket box ("30 coins · 1 backed + 29 comparison"). The text says the score includes the backed coin's own rise.
+  - **My entries:** each entry shows its backed coin's move against $CRYPTO since execution. Expanding it shows all 30 basket moves, from the lot's execution references to the closing references (or the live estimate while open, labelled). `executionReferences` rebases only; no score or payout is computed in the browser.
+  - **Verified:** on the real 23 Oct 08:00 entries, the computed BTC/ETH score ratio (0.26469) matches the contract's payout split (41,849 / 158,110 = 0.26468). Type check and 65 web tests pass.
+- **Rules for agents:** Do not label a since-Epoch-start move as the user's entry result; an entry counts only from its own execution. Do not describe Epoch as a bet against $CRYPTO or as four hours from entry.
+- **Open:**
+  - **Not checked:** the entry box and the per-entry moves have not been seen in a browser. No round was open, and no wallet with entries was connected.
+  - **Not deployed:** this change is not on Vercel yet.
+  - **Joel/Peter:** the 23 Oct 00:00 Epoch (no entries) still reports phase `open` long after its close, so the page shows it as "Closing" indefinitely.
