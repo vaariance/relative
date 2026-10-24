@@ -33,6 +33,13 @@ const CODES: Record<string, string> = {
   UNKNOWN_EPOCH: "That Epoch could not be found. Please reload the page.",
   NOT_CONFIGURED: "Epochs are not available right now.",
   INTERNAL_ERROR: "Something went wrong on our side. Nothing was sent. Please try again.",
+  FAUCET_DISABLED: "Test token claims are closed right now.",
+  CHALLENGE_INVALID: "The signed message expired or was already used. Please press the button again.",
+  FAUCET_COOLDOWN: "This wallet already claimed in the last 24 hours.",
+  FAUCET_LIMITED: "The faucet's daily limit has been reached. Please try again later.",
+  FAUCET_BUSY: "Your last claim is still confirming. Please wait a moment.",
+  FAUCET_EMPTY: "The faucet is empty right now. Please tell the team.",
+  FAUCET_UNAVAILABLE: "The faucet could not send right now. Nothing moved. Please try again shortly.",
 };
 
 const FALLBACK = "That did not go through, and nothing was sent. Please try again.";

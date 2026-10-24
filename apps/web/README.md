@@ -94,9 +94,12 @@ Every trade stays valid for about three minutes (`VALID_SECONDS` in
 `deployment.publicationIntervalSeconds`: 3 batches on a minute pool, 180 on a
 one-second pool such as pool 2.
 
-The only collateral the app offers is USDC (Circle's devnet USDC, the pool's
-primary mint). Buys, refunds and withdrawals never send `collateralMint`, so
-the API uses the primary mint; a pool's `secondaryCollateralMint` is ignored.
+When the pool has `deployment.secondaryCollateralMint`, buying with collateral
+(coin pages and Swap) and withdrawing offer both mints: USDC (Circle's devnet
+USDC) and rlUSD (Relative's test dollar from the faucet). The choice is sent as
+`collateralMint`. Selling always receives the primary mint into the payable
+balance; payables are one balance across both mints, and a withdrawal needs
+liquidity in the chosen mint's vault. Refunds use the primary mint.
 
 ### Live estimates
 
@@ -109,17 +112,14 @@ fresh class has a unit value of 1. Requests are still sent in exact quanta.
 
 ## Faucet page
 
-The Faucet page follows the layout of Circle's faucet: pick a token (USDC, SOL
-or tUSDC), see the network (Solana Devnet) and the connected wallet's address,
-then press one button. USDC and SOL open Circle's and Solana's faucets with the
-address copied. The Circle button stays locked until the wallet holds at least
-0.01 devnet SOL (`MIN_GAS_SOL`); below that the page opens on SOL. The balance
-is read again whenever the tab gets focus.
+The Faucet page follows the layout of Circle's faucet: pick a token (rlUSD,
+USDC or SOL), see the network (Solana Devnet) and the connected wallet's
+address, then press one button.
 
-tUSDC claims are not open yet. They will come from the faucet service Peter
-and Joel are building (a signed ownership message, then a grant from a
-dedicated faucet wallet through Joel's app API). The web app holds no faucet
-key and mints nothing.
+- **rlUSD** is claimed through the app API's devnet faucet (`apps/app-api/README.md`, Devnet faucet), straight from the browser so the API's per-visitor limits see each visitor: `POST /v1/faucet/challenge`, the wallet signs the returned message with `signMessage` (no transaction), then `POST /v1/faucet/claim` with the base64 signature. A claim gives 100 rlUSD, plus 0.01 devnet SOL when the wallet is low, so it needs no SOL first. `GET /v1/faucet/status` is read on load, on tab focus and once after each claim (never on a timer) and drives the button: closed, next claim countdown, confirming, or claim. Faucet errors have their own wording in `src/lib/errors.ts`.
+- **USDC and SOL** open Circle's and Solana's faucets with the address copied. The Circle button stays locked until the wallet holds at least 0.01 devnet SOL (`MIN_GAS_SOL`).
+
+The web app holds no faucet key and mints nothing.
 
 ## Epochs page
 

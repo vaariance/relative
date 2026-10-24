@@ -1,12 +1,17 @@
 "use client";
 
+import type { FaucetChallenge, FaucetClaim, FaucetStatus as ClaimStatus } from "@eox/app-api";
 import { Check, Copy, ExternalLink } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type FaucetStatus, faucetStatus } from "@/app/faucet-actions";
 import { CIRCLE_FAUCET_URL, MIN_GAS_SOL, SOL_FAUCET_URL, TEST_COLLATERAL } from "@/lib/config";
+import { humanError, walletError } from "@/lib/errors";
+import { formatAmount } from "@/lib/format";
+import { useAccount } from "./account";
 import { openLogin, useSigner } from "./signer";
+import { useSnackbar } from "./snackbar";
 
-type TokenId = "sol" | "tusdc" | "usdc";
+type TokenId = "sol" | "rlusd" | "usdc";
 
 interface Token {
   id: TokenId;
@@ -17,11 +22,12 @@ interface Token {
 }
 
 const TOKENS: Token[] = [
-  { id: "usdc", symbol: "USDC", caption: "Circle devnet collateral", icon: "/tokens/usdc.svg" },
+  { id: "rlusd", symbol: TEST_COLLATERAL.symbol, caption: "Free claim, once a day", icon: "/tokens/usdc.svg", test: true },
+  { id: "usdc", symbol: "USDC", caption: "Circle devnet USDC", icon: "/tokens/usdc.svg" },
   { id: "sol", symbol: "SOL", caption: "Network fees", icon: "/tokens/sol.svg" },
-  { id: "tusdc", symbol: TEST_COLLATERAL.symbol, caption: "Relative test token · soon", icon: "/tokens/usdc.svg", test: true },
 ];
 
+const PENDING = new Set(["reserved", "signed", "submitted"]);
 const label = "mb-2 block text-sm font-medium";
 const box = "flex h-12 w-full items-center gap-3 rounded-control border border-line bg-bg px-3 text-sm";
 const primary = "flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-pill bg-accent px-4 text-sm font-medium text-accent-ink transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
@@ -29,55 +35,104 @@ const primary = "flex h-12 w-full cursor-pointer items-center justify-center gap
 function TokenIcon({ token, size }: { token: Token; size: number }) {
   return (
     <span className="relative inline-grid shrink-0" style={{ width: size, height: size }}>
-      <img src={token.icon} alt="" className={`h-full w-full rounded-full ${token.test ? "grayscale" : ""}`} />
-      {token.test && (
-        <span className="absolute -bottom-1 -right-2 rounded-pill bg-accent px-1.5 py-0.5 text-[10px] font-semibold leading-none text-accent-ink">TEST</span>
-      )}
+      <img src={token.icon} alt="" className={`h-full w-full rounded-full ${token.test ? "hue-rotate-[150deg] saturate-150" : ""}`} />
+      {token.test && <span className="absolute -bottom-1 -right-2 rounded-pill bg-accent px-1.5 py-0.5 text-[10px] font-semibold leading-none text-accent-ink">TEST</span>}
     </span>
   );
 }
 
+function base64(bytes: Uint8Array): string {
+  let text = "";
+  for (const byte of bytes) text += String.fromCharCode(byte);
+  return btoa(text);
+}
+
+function wait(seconds: number): string {
+  const left = Math.max(0, Math.ceil(seconds));
+  const h = Math.floor(left / 3600);
+  const m = Math.floor((left % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m` : `${left}s`;
+}
+
+async function call<T>(url: string, init?: RequestInit): Promise<{ data: T | null; code: string; message: string }> {
+  try {
+    const response = await fetch(url, init);
+    const payload = (await response.json().catch(() => null)) as { data?: T; error?: { code?: string; message?: string } } | null;
+    if (response.ok && payload?.data) return { data: payload.data, code: "", message: "" };
+    return { data: null, code: payload?.error?.code ?? "UNAVAILABLE", message: payload?.error?.message ?? "" };
+  } catch {
+    return { data: null, code: "UNAVAILABLE", message: "" };
+  }
+}
+
+function useClaimStatus(owner: string | null) {
+  const { apiUrl, live } = useAccount();
+  const [status, setStatus] = useState<ClaimStatus | null>(null);
+  const refresh = useCallback(async () => {
+    if (!owner || !live) return setStatus(null);
+    const result = await call<ClaimStatus>(`${apiUrl}/v1/faucet/status?owner=${owner}`);
+    setStatus(result.data);
+  }, [apiUrl, live, owner]);
+  return { status, setStatus, refresh };
+}
+
 export function FaucetPanel() {
-  const { address } = useSigner();
+  const { address, signMessage } = useSigner();
+  const { apiUrl } = useAccount();
+  const { show, fail } = useSnackbar();
   const [mounted, setMounted] = useState(false);
-  const [picked, setPicked] = useState<TokenId>("usdc");
-  const [status, setStatus] = useState<FaucetStatus | null>(null);
+  const [picked, setPicked] = useState<TokenId>("rlusd");
+  const [gas, setGas] = useState<FaucetStatus | null>(null);
   const [checked, setChecked] = useState<string | null>(null);
-  const steered = useRef<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [claiming, setClaiming] = useState(false);
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+  const steered = useRef<string | null>(null);
   const owner = mounted ? address : null;
+  const claims = useClaimStatus(owner);
 
   useEffect(() => setMounted(true), []);
 
   const refresh = useCallback(async () => {
     if (!owner) {
-      setStatus(null);
+      setGas(null);
       setChecked(null);
       return;
     }
-    const result = await faucetStatus(owner);
-    setStatus(result.ok ? result.value : null);
+    const [result] = await Promise.all([faucetStatus(owner), claims.refresh()]);
+    setGas(result.ok ? result.value : null);
     setChecked(owner);
-  }, [owner]);
+  }, [owner, claims.refresh]);
 
   useEffect(() => {
-    setStatus(null);
+    setGas(null);
     void refresh();
     const again = () => void refresh();
     window.addEventListener("focus", again);
     return () => window.removeEventListener("focus", again);
   }, [refresh]);
 
+  const status = claims.status;
+  const nextAt = status?.nextClaimAt ?? null;
+  useEffect(() => {
+    if (nextAt === null || nextAt <= Date.now() / 1000) return;
+    const timer = window.setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [nextAt]);
+
   const checking = owner !== null && checked !== owner;
-  const hasGas = status !== null && status.sol >= MIN_GAS_SOL;
+  const hasGas = gas !== null && gas.sol >= MIN_GAS_SOL;
   const needsGas = owner !== null && !checking && !hasGas;
   const locked = picked === "usdc" && owner !== null && !hasGas;
+  const tokenAmount = status ? formatAmount(Number(status.token.amount) / 10 ** status.token.decimals, 0) : "100";
+  const confirming = status?.claim ? PENDING.has(status.claim.state) : false;
+  const cooling = nextAt !== null && nextAt > now;
 
   useEffect(() => {
-    if (!needsGas || !owner || steered.current === owner) return;
+    if (!needsGas || !owner || steered.current === owner || picked !== "usdc") return;
     steered.current = owner;
     setPicked("sol");
-  }, [needsGas, owner]);
+  }, [needsGas, owner, picked]);
 
   const copy = async () => {
     if (!owner) return false;
@@ -92,25 +147,79 @@ export function FaucetPanel() {
     }
   };
 
+  const claim = async () => {
+    if (!owner || !signMessage || claiming) return;
+    setClaiming(true);
+    try {
+      const challenge = await call<FaucetChallenge>(`${apiUrl}/v1/faucet/challenge`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ owner }) });
+      if (!challenge.data) return fail(humanError(challenge.code, challenge.message), "Claim not sent");
+      let signature: Uint8Array;
+      try {
+        signature = await signMessage(new TextEncoder().encode(challenge.data.message));
+      } catch (error) {
+        return fail(walletError(error), "Claim not sent");
+      }
+      const result = await call<FaucetClaim>(`${apiUrl}/v1/faucet/claim`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ owner, challengeId: challenge.data.challengeId, signature: base64(signature) }),
+      });
+      if (!result.data) return fail(humanError(result.code, result.message), "Claim not sent");
+      const link = result.data.signature ? { href: `https://explorer.solana.com/tx/${result.data.signature}?cluster=devnet`, label: "View on explorer", external: true } : undefined;
+      if (result.data.state === "confirmed") {
+        const sol = BigInt(result.data.solLamports) > 0n ? " and a little devnet SOL for fees" : "";
+        show({ tone: "good", title: `${tokenAmount} ${TEST_COLLATERAL.symbol} sent`, text: `Your wallet received ${tokenAmount} ${TEST_COLLATERAL.symbol}${sol}.`, link });
+      } else if (result.data.state === "failed") {
+        fail("The faucet could not send this time. Nothing moved, and you can try again.", "Claim failed");
+      } else {
+        show({ tone: "good", title: "Claim sent", text: "It is still confirming. Check back in a moment.", link });
+      }
+    } finally {
+      setClaiming(false);
+      void refresh();
+    }
+  };
+
   const outside = picked === "sol" ? SOL_FAUCET_URL : picked === "usdc" ? CIRCLE_FAUCET_URL : null;
-  const note = locked
-    ? checking
-      ? "Checking your SOL balance."
-      : status === null
-        ? "Your SOL balance could not be checked. Please try again shortly."
-        : `Get at least ${MIN_GAS_SOL} devnet SOL for network fees first. Pick SOL above.`
-    : picked === "sol" && needsGas && status !== null
-      ? `You have ${status.sol.toFixed(4)} SOL. Get at least ${MIN_GAS_SOL} SOL, then come back for collateral.`
-      : picked === "tusdc"
-        ? `Free ${TEST_COLLATERAL.symbol} claims open once the faucet service is ready. Until then, get devnet USDC from Circle.`
-      : picked === "usdc"
-        ? "Opens Circle's faucet with your address copied. Choose USDC and Solana Devnet, then paste it."
-        : "Opens Solana's faucet with your address copied. Paste it there. Every trade costs a tiny fee in SOL.";
+  const note =
+    picked === "rlusd"
+      ? !owner
+        ? `Log in to claim ${tokenAmount} free ${TEST_COLLATERAL.symbol}. Use it like USDC to buy, swap and enter Epochs.`
+        : status && !status.enabled
+          ? "Test token claims are closed right now. Get devnet USDC from Circle instead."
+          : cooling
+            ? `You claimed in the last 24 hours. Your next claim opens in ${wait((nextAt ?? now) - now)}.`
+            : confirming
+              ? "Your last claim is still confirming. Check back in a moment."
+              : `One free claim every 24 hours. You sign a message to prove the wallet is yours; nothing is charged. Wallets low on SOL also get 0.01 devnet SOL for fees.`
+      : locked
+        ? checking
+          ? "Checking your SOL balance."
+          : gas === null
+            ? "Your SOL balance could not be checked. Please try again shortly."
+            : `Get at least ${MIN_GAS_SOL} devnet SOL for network fees first. Pick SOL above.`
+        : picked === "usdc"
+          ? "Opens Circle's faucet with your address copied. Choose USDC and Solana Devnet, then paste it."
+          : "Opens Solana's faucet with your address copied. Paste it there. Every trade costs a tiny fee in SOL.";
+
+  const claimButton = !owner ? (
+    <button type="button" onClick={openLogin} className={primary}>Connect wallet</button>
+  ) : status && !status.enabled ? (
+    <button type="button" disabled className={primary}>Claims closed</button>
+  ) : cooling ? (
+    <button type="button" disabled className={primary}>Next claim in {wait((nextAt ?? now) - now)}</button>
+  ) : confirming ? (
+    <button type="button" onClick={() => void refresh()} className={primary}>Confirming · check again</button>
+  ) : (
+    <button type="button" onClick={() => void claim()} disabled={claiming || !signMessage} className={primary}>
+      {claiming ? "Sign in your wallet, then wait…" : `Get ${tokenAmount} ${TEST_COLLATERAL.symbol}`}
+    </button>
+  );
 
   return (
     <div className="flex flex-col gap-8">
       <p className="max-w-xl text-base text-muted">
-        Get devnet USDC, plus a little devnet SOL for network fees, to try Relative for free. Relative's own test token, {TEST_COLLATERAL.symbol}, will be claimable here soon.
+        Claim free {TEST_COLLATERAL.symbol}, Relative&apos;s test dollar, or get devnet USDC from Circle. Both work as collateral to try Relative. Neither has real value.
       </p>
 
       <div role="radiogroup" aria-label="Token" className="grid grid-cols-3 gap-3">
@@ -127,7 +236,7 @@ export function FaucetPanel() {
             >
               <TokenIcon token={token} size={48} />
               <span className="text-base font-semibold">{token.symbol}</span>
-              {needsGas && token.id === "sol" && <span className="rounded-pill bg-accent px-2 py-0.5 text-[10px] font-semibold text-accent-ink">START HERE</span>}
+              {needsGas && token.id === "sol" && picked === "usdc" && <span className="rounded-pill bg-accent px-2 py-0.5 text-[10px] font-semibold text-accent-ink">START HERE</span>}
               <span className="hidden text-xs text-muted sm:block">{token.caption}</span>
             </button>
           );
@@ -159,8 +268,8 @@ export function FaucetPanel() {
         </div>
 
         <div className="flex flex-col gap-2">
-          {picked === "tusdc" ? (
-            <button type="button" disabled className={primary}>{TEST_COLLATERAL.symbol} claims not open yet</button>
+          {picked === "rlusd" ? (
+            claimButton
           ) : !owner ? (
             <button type="button" onClick={openLogin} className={primary}>Connect wallet</button>
           ) : locked ? (

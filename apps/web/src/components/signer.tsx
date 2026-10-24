@@ -1,7 +1,7 @@
 "use client";
 
 import { usePrivy } from "@privy-io/react-auth";
-import { useSignTransaction, useWallets } from "@privy-io/react-auth/solana";
+import { useSignMessage, useSignTransaction, useWallets } from "@privy-io/react-auth/solana";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { VersionedTransaction } from "@solana/web3.js";
 import { type ReactNode, createContext, useContext, useMemo } from "react";
@@ -12,11 +12,12 @@ export interface Signer {
   account: string | null;
   connecting: boolean;
   sign: ((transaction: VersionedTransaction) => Promise<VersionedTransaction>) | null;
+  signMessage: ((message: Uint8Array) => Promise<Uint8Array>) | null;
   login: (() => void) | null;
   logout: () => Promise<void>;
 }
 
-const SignerContext = createContext<Signer>({ address: null, label: null, account: null, connecting: false, sign: null, login: null, logout: async () => undefined });
+const SignerContext = createContext<Signer>({ address: null, label: null, account: null, connecting: false, sign: null, signMessage: null, login: null, logout: async () => undefined });
 
 export function useSigner(): Signer {
   return useContext(SignerContext);
@@ -34,7 +35,7 @@ export function onLogin(listener: () => void): () => void {
 }
 
 export function AdapterSigner({ children }: { children: ReactNode }) {
-  const { publicKey, wallet, connecting, signTransaction, disconnect } = useWallet();
+  const { publicKey, wallet, connecting, signTransaction, signMessage, disconnect } = useWallet();
   const value = useMemo<Signer>(
     () => ({
       address: publicKey?.toBase58() ?? null,
@@ -42,10 +43,11 @@ export function AdapterSigner({ children }: { children: ReactNode }) {
       account: null,
       connecting,
       sign: signTransaction ? (transaction) => signTransaction(transaction) : null,
+      signMessage: signMessage ? (message) => signMessage(message) : null,
       login: null,
       logout: () => disconnect(),
     }),
-    [publicKey, wallet, connecting, signTransaction, disconnect],
+    [publicKey, wallet, connecting, signTransaction, signMessage, disconnect],
   );
   return <SignerContext.Provider value={value}>{children}</SignerContext.Provider>;
 }
@@ -56,6 +58,7 @@ export function PrivySigner({ children }: { children: ReactNode }) {
   const { ready, authenticated, user, login, logout } = usePrivy();
   const { ready: walletsReady, wallets } = useWallets();
   const { signTransaction } = useSignTransaction();
+  const { signMessage } = useSignMessage();
   const wallet = authenticated ? (wallets.find((item) => item.standardWallet.name === EMBEDDED) ?? wallets[0] ?? null) : null;
   const account = user?.google?.email ?? user?.email?.address ?? null;
 
@@ -71,10 +74,13 @@ export function PrivySigner({ children }: { children: ReactNode }) {
             return VersionedTransaction.deserialize(signedTransaction);
           }
         : null,
+      signMessage: wallet
+        ? async (message) => (await signMessage({ message, wallet, options: { uiOptions: { showWalletUIs: false } } })).signature
+        : null,
       login: ready && !authenticated ? () => login() : null,
       logout: () => logout(),
     }),
-    [ready, authenticated, walletsReady, wallet, account, signTransaction, login, logout],
+    [ready, authenticated, walletsReady, wallet, account, signTransaction, signMessage, login, logout],
   );
   return <SignerContext.Provider value={value}>{children}</SignerContext.Provider>;
 }
