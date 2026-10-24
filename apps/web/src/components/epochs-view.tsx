@@ -308,7 +308,6 @@ function PromoCard({ onExplain }: { onExplain: () => void }) {
         <button type="button" onClick={onExplain} aria-haspopup="dialog" className="h-9 cursor-pointer rounded-pill bg-white px-4 text-sm font-medium text-black transition-opacity duration-150 hover:opacity-90">
           How payouts work
         </button>
-        <span className="inline-flex h-9 items-center rounded-pill bg-white/15 px-4 text-sm text-white backdrop-blur">30 coins · 4 hours</span>
       </div>
     </section>
   );
