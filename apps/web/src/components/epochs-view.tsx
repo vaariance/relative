@@ -287,8 +287,8 @@ function PromoCard({ onExplain, explaining }: { onExplain: () => void; explainin
       <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[radial-gradient(120%_120%_at_0%_0%,#f2622e_0%,#b23a74_45%,#3b1d6e_100%)] opacity-90" />
       <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[radial-gradient(60%_60%_at_100%_100%,rgba(0,0,0,0.35),transparent)]" />
       <div className="flex flex-col gap-2">
-        <h2 className="text-lg font-semibold leading-tight text-white">Back your analysis.</h2>
-        <p className="text-xs leading-relaxed text-white/80">Pick the coin your research says will beat the rest of crypto. If it leads, your share of the pot grows, even on a red day.</p>
+        <h2 className="text-lg font-semibold leading-tight text-white">One pot. Four hours.</h2>
+        <p className="text-xs leading-relaxed text-white/80">Every entry backs one coin against the other 29. At the close, the pot is shared by score: your coin's share of the basket's gains, weighted by your net stake.</p>
       </div>
       <div className="flex flex-wrap gap-2">
         <button type="button" onClick={onExplain} aria-expanded={explaining} className="h-9 cursor-pointer rounded-pill bg-white px-4 text-sm font-medium text-black transition-opacity duration-150 hover:opacity-90">
