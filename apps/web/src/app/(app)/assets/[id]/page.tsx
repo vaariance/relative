@@ -11,14 +11,14 @@ import { StatCard } from "@/components/stat-card";
 import { TradeForm } from "@/components/trade-form";
 import { getAssets, getDeployment, getPublications, getStatus } from "@/lib/data";
 import { formatAmount } from "@/lib/format";
-import { CRYPTO_CLASS, classViews, currentOf, decimalsOf, findClass, latest, levelSeries, priceSeries, referenceSeries, standingOf } from "@/lib/view";
+import { CRYPTO_CLASS, classViews, currentOf, decimalsOf, findClass, latest, levelSeries, priceDigits, priceSeries, referenceSeries, standingOf } from "@/lib/view";
 
 const SPARK = 60;
 
-function NoChart() {
+function NoChart({ id }: { id?: string }) {
   return (
     <section className="flex h-80 items-center justify-center rounded-card border border-line bg-surface p-4 text-sm text-muted shadow-card">
-      The chart starts with the first price update.
+      {id ? `The chart starts with ${id}'s first price update.` : "The chart starts with the first price update."}
     </section>
   );
 }
@@ -38,7 +38,9 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   const price = priceSeries(publications, asset.assetId);
   const reference = referenceSeries(publications, asset.assetId);
   const level = levelSeries(publications);
-  const relative = current ? standingOf(reference) : 0;
+  const relative = current ? standingOf(reference) : null;
+  const priceNow = latest(price);
+  const charted = price.length > 0 || reference.length > 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -61,7 +63,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           icon={DollarSign}
           title="Price"
           aside="USD"
-          value={<LiveFigure kind="price" id={asset.assetId} committed={current ? latest(price) : null} />}
+          value={<LiveFigure kind="price" id={asset.assetId} committed={current ? priceNow : null} />}
           chart={<LiveSparkline kind="price" id={asset.assetId} card fallback={current ? price.slice(-SPARK) : []} />}
         />
         <StatCard
@@ -83,16 +85,16 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="flex min-w-0 flex-col gap-6">
-          {current ? (
+          {current && charted ? (
             <AssetChart
               series={[
                 { id: "reference", label: "Relative reference", points: reference, digits: 4, baseline: 100, live: { kind: "reference", id: asset.assetId } },
-                { id: "price", label: "Price", points: price, digits: latest(price) >= 1 ? 2 : latest(price) >= 0.01 ? 4 : 6, live: { kind: "price", id: asset.assetId } },
+                { id: "price", label: "Price", points: price, digits: priceDigits(priceNow), live: { kind: "price", id: asset.assetId } },
                 { id: "crypto", label: "$CRYPTO", points: level, digits: 4, baseline: 100, live: { kind: "level" } },
               ]}
             />
           ) : (
-            <NoChart />
+            <NoChart id={current ? asset.assetId : undefined} />
           )}
           <RequestList classId={asset.assetId} status={status} decimals={decimals} />
         </div>

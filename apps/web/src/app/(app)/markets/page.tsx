@@ -8,12 +8,12 @@ import { RowLink } from "@/components/row-link";
 import { CardTitle, Figure, StatCard } from "@/components/stat-card";
 import { getAssets, getDeployment, getPublications } from "@/lib/data";
 import { formatAmount } from "@/lib/format";
-import { decimalsOf, standingOf, classViews, currentOf, findClass, latest, levelSeries, priceSeries, referenceSeries } from "@/lib/view";
+import { classViews, currentOf, decimalsOf, latest, levelSeries, marketRow, standings } from "@/lib/view";
 
 const SPARK = 240;
 const EMPTY = "—";
 
-function EmptyRow({ id, name, href }: { id: string; name: string; href: string }) {
+function EmptyRow({ id, name, href, note }: { id: string; name: string; href: string; note?: string }) {
   return (
     <RowLink href={href} className="border-b border-line transition-colors last:border-b-0 duration-150 hover:bg-surface-2">
       <th scope="row" className="px-4 py-3 text-left font-normal">
@@ -21,6 +21,7 @@ function EmptyRow({ id, name, href }: { id: string; name: string; href: string }
           <CoinIcon id={id} />
           <span className="font-medium text-ink">{id}</span>
           {name !== id && <span className="text-xs text-muted">{name}</span>}
+          {note && <span className="rounded-pill bg-surface-2 px-2 py-0.5 text-[11px] text-muted">{note}</span>}
         </Link>
       </th>
       <td className="num px-4 py-3 text-right text-muted">{EMPTY}</td>
@@ -39,14 +40,8 @@ export default async function MarketsPage() {
   const classes = classViews(current, assets, decimalsOf(deployment));
   const active = classes.reduce((sum, item) => sum + item.backing, 0);
   const level = levelSeries(publications);
-  const ranked = current
-    ? assets
-        .map((asset) => {
-          const reference = referenceSeries(publications, asset.assetId);
-          return { id: asset.assetId, reference, standing: standingOf(reference) };
-        })
-        .sort((left, right) => right.standing - left.standing)
-    : [];
+  const levelNow = latest(level);
+  const ranked = current ? standings(publications, assets.map((asset) => asset.assetId)) : [];
 
   return (
     <div className="flex flex-col gap-6">
@@ -56,11 +51,11 @@ export default async function MarketsPage() {
         <StatCard
           icon={Activity}
           title="Index"
-          value={<LiveFigure kind="level" committed={current ? latest(level) : null} />}
-          badge={<LiveChange kind="level" pill committed={current ? latest(level) / 100 - 1 : null} />}
+          value={<LiveFigure kind="level" committed={current ? levelNow : null} />}
+          badge={<LiveChange kind="level" pill committed={current && levelNow !== null ? levelNow / 100 - 1 : null} />}
           chart={<LiveSparkline kind="level" card fallback={current ? level.slice(-SPARK) : []} />}
         />
-        <LeaderCards contenders={ranked.map((item) => ({ id: item.id, standing: item.standing, points: item.reference }))} />
+        <LeaderCards contenders={ranked} />
         <StatCard icon={Coins} title="Pool TVL" value={<Figure text={formatAmount(active)} unit="USDC" />} caption={`settled, across ${classes.length} classes`} />
       </div>
 
@@ -83,9 +78,9 @@ export default async function MarketsPage() {
           </thead>
           <tbody>
             {assets.map((asset) => {
-              const reference = referenceSeries(publications, asset.assetId);
-              const claim = findClass(classes, asset.assetId);
+              const row = marketRow(publications, classes, asset.assetId);
               if (!current) return <EmptyRow key={asset.assetId} id={asset.assetId} name={asset.name} href={`/assets/${asset.assetId}`} />;
+              if (row.price === null && row.reference === null) return <EmptyRow key={asset.assetId} id={asset.assetId} name={asset.name} href={`/assets/${asset.assetId}`} note="No data yet" />;
               return (
                 <RowLink key={asset.assetId} href={`/assets/${asset.assetId}`} className="border-b border-line transition-colors last:border-b-0 duration-150 hover:bg-surface-2">
                   <th scope="row" className="px-4 py-3 text-left font-normal">
@@ -95,11 +90,11 @@ export default async function MarketsPage() {
                       {asset.name !== asset.assetId && <span className="text-xs text-muted">{asset.name}</span>}
                     </Link>
                   </th>
-                  <td className="num px-4 py-3 text-right"><LiveFigure kind="price" id={asset.assetId} committed={latest(priceSeries([current], asset.assetId))} plain /></td>
-                  <td className="num px-4 py-3 text-right text-base"><LiveFigure kind="reference" id={asset.assetId} committed={latest(reference)} plain /></td>
-                  <td className="px-4 py-3 text-right"><LiveChange kind="reference" id={asset.assetId} committed={standingOf(reference)} /></td>
-                  <td className="px-4 py-3"><LiveSparkline kind="reference" id={asset.assetId} fallback={reference.slice(-SPARK)} /></td>
-                  <td className="num px-4 py-3 text-right">{formatAmount(claim.backing)}</td>
+                  <td className="num px-4 py-3 text-right"><LiveFigure kind="price" id={asset.assetId} committed={row.price} plain /></td>
+                  <td className="num px-4 py-3 text-right text-base"><LiveFigure kind="reference" id={asset.assetId} committed={row.reference} plain /></td>
+                  <td className="px-4 py-3 text-right"><LiveChange kind="reference" id={asset.assetId} committed={row.standing} /></td>
+                  <td className="px-4 py-3"><LiveSparkline kind="reference" id={asset.assetId} fallback={row.points.slice(-SPARK)} /></td>
+                  <td className="num px-4 py-3 text-right">{formatAmount(row.backing)}</td>
                 </RowLink>
               );
             })}

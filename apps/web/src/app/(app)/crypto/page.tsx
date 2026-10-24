@@ -20,6 +20,7 @@ export default async function CryptoPage() {
   const claim = findClass(classes, CRYPTO_CLASS);
 
   const level = levelSeries(publications);
+  const levelNow = latest(level);
   const members = crypto.members.map((member) => ({ id: member.assetId }));
 
   return (
@@ -33,8 +34,8 @@ export default async function CryptoPage() {
           icon={Activity}
           title="$CRYPTO level"
           aside="starts at 100"
-          value={<LiveFigure kind="level" committed={current ? latest(level) : null} />}
-          badge={<LiveChange kind="level" pill committed={current ? latest(level) / 100 - 1 : null} />}
+          value={<LiveFigure kind="level" committed={current ? levelNow : null} />}
+          badge={<LiveChange kind="level" pill committed={current && levelNow !== null ? levelNow / 100 - 1 : null} />}
           caption="since launch"
           chart={<LiveSparkline kind="level" card fallback={current ? level.slice(-SPARK) : []} />}
         />

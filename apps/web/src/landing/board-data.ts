@@ -1,5 +1,5 @@
 import { getAssets, getPublications } from "@/lib/data";
-import { referenceSeries, standingOf } from "@/lib/view";
+import { standings } from "@/lib/view";
 
 const DAY = 86400;
 const TOP = 3;
@@ -33,15 +33,15 @@ export async function loadBoard(): Promise<Board | null> {
   try {
     const [assets, publications] = await Promise.all([getAssets(), getPublications()]);
     if (publications.length < 2 || assets.length < TOP + BOTTOM) return null;
-    const ranked = assets
-      .map((asset) => ({ id: asset.assetId, name: asset.name, lead: standingOf(referenceSeries(publications, asset.assetId)) }))
-      .sort((a, b) => b.lead - a.lead)
-      .map((row, index) => ({ ...row, rank: index + 1 }));
+    const names = new Map(assets.map((asset) => [asset.assetId, asset.name]));
+    const standing = standings(publications, assets.map((asset) => asset.assetId));
+    if (standing.length < TOP + BOTTOM) return null;
+    const ranked = standing.map((row, index) => ({ id: row.id, name: names.get(row.id) ?? row.id, lead: row.standing, rank: index + 1 }));
     const top = ranked.slice(0, TOP);
     const rows = [...top, ...ranked.slice(-BOTTOM)];
     const scale = Math.max(...rows.map((row) => Math.abs(row.lead)), 0.0001);
-    const star = ranked[0];
-    const series = referenceSeries(publications, star.id);
+    const star = ranked[0]!;
+    const series = standing[0]!.points;
     const end = series[series.length - 1].cutoff;
     const day = series.filter((point) => point.cutoff >= end - DAY);
     const spark = sample(day.map((point) => point.value / day[0].value - 1), SPARK);

@@ -60,21 +60,21 @@ export function currentOf(publications: readonly Publication[]): Publication | n
   return publications[publications.length - 1] ?? null;
 }
 
-export function priceOf(publication: Publication, assetId: string): PublishedPrice {
-  const price = publication.prices.find((item) => item.assetId === assetId);
-  if (!price) throw new Error(`no price for ${assetId}`);
-  return price;
+export function priceOf(publication: Publication, assetId: string): PublishedPrice | null {
+  return publication.prices.find((item) => item.assetId === assetId) ?? null;
 }
 
 export function priceSeries(publications: readonly Publication[], assetId: string): Point[] {
-  return publications.map((publication) => ({ cutoff: publication.identity.cutoff, value: toNumber(priceOf(publication, assetId).priceE8, PRICE_DIGITS) }));
+  return publications.flatMap((publication) => {
+    const price = priceOf(publication, assetId);
+    return price ? [{ cutoff: publication.identity.cutoff, value: toNumber(price.priceE8, PRICE_DIGITS) }] : [];
+  });
 }
 
 export function referenceSeries(publications: readonly Publication[], assetId: string): Point[] {
-  return publications.map((publication) => {
+  return publications.flatMap((publication) => {
     const entry = publication.references.find((item) => item.assetId === assetId);
-    if (!entry) throw new Error(`no reference for ${assetId}`);
-    return { cutoff: publication.identity.cutoff, value: toNumber(entry.reference, SCALE_DIGITS) };
+    return entry ? [{ cutoff: publication.identity.cutoff, value: toNumber(entry.reference, SCALE_DIGITS) }] : [];
   });
 }
 
@@ -82,18 +82,56 @@ export function levelSeries(publications: readonly Publication[]): Point[] {
   return publications.map((publication) => ({ cutoff: publication.identity.cutoff, value: toNumber(publication.benchmark, SCALE_DIGITS) }));
 }
 
-export function latest(points: readonly Point[]): number {
-  return points[points.length - 1].value;
+export function latest(points: readonly Point[]): number | null {
+  return points[points.length - 1]?.value ?? null;
 }
 
-export function standingOf(reference: readonly Point[]): number {
-  return reference.length === 0 ? 0 : latest(reference) / 100 - 1;
+export function standingOf(reference: readonly Point[]): number | null {
+  const value = latest(reference);
+  return value === null ? null : value / 100 - 1;
 }
 
-export function changeSince(points: readonly Point[], seconds: number): number {
+export interface Standing {
+  id: string;
+  standing: number;
+  points: Point[];
+}
+
+export function standings(publications: readonly Publication[], ids: readonly string[]): Standing[] {
+  return ids
+    .flatMap((id) => {
+      const points = referenceSeries(publications, id);
+      const standing = standingOf(points);
+      return standing === null ? [] : [{ id, standing, points }];
+    })
+    .sort((left, right) => right.standing - left.standing);
+}
+
+export interface MarketRow {
+  id: string;
+  price: number | null;
+  reference: number | null;
+  standing: number | null;
+  points: Point[];
+  backing: number;
+}
+
+export function marketRow(publications: readonly Publication[], classes: readonly ClassView[], id: string): MarketRow {
+  const current = currentOf(publications);
+  const points = referenceSeries(publications, id);
+  const price = current ? priceOf(current, id) : null;
+  return { id, price: price ? toNumber(price.priceE8, PRICE_DIGITS) : null, reference: latest(points), standing: standingOf(points), points, backing: findClass(classes, id).backing };
+}
+
+export function priceDigits(value: number | null): number {
+  return value === null || value >= 1 ? 2 : value >= 0.01 ? 4 : 6;
+}
+
+export function changeSince(points: readonly Point[], seconds: number): number | null {
   const end = points[points.length - 1];
-  const start = points.find((point) => point.cutoff >= end.cutoff - seconds) ?? points[0];
-  return end.value / start.value - 1;
+  if (!end) return null;
+  const start = points.find((point) => point.cutoff >= end.cutoff - seconds) ?? points[0]!;
+  return start.value === 0 ? null : end.value / start.value - 1;
 }
 
 function classView(valuation: ClassValuation, decimals: number): ClassView {
@@ -108,9 +146,7 @@ export function classViews(publication: Publication | null, assets: readonly Cox
 }
 
 export function findClass(views: readonly ClassView[], id: string): ClassView {
-  const view = views.find((item) => item.id === id);
-  if (!view) throw new Error(`unknown class ${id}`);
-  return view;
+  return views.find((item) => item.id === id) ?? { id, backing: 0, units: 0, unitValue: null };
 }
 
 const venues: Record<PriceVenue, string> = { kraken: "Kraken", coinbase: "Coinbase", bybit: "Bybit", pyth: "Pyth" };
