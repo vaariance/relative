@@ -1776,3 +1776,24 @@ another agent needs to know.
 - **Rules for agents:** Keep the isolated dynamic-lit signer route and non-exportable operator key boundary. The live roster has 31 assets; 255 is tested capacity, not a 255-asset live verification. Boundary publication committed at 08:30:14, not subsecond. Alchemy billing records remain uncommitted under Peter's instruction.
 - **Open:** Joel must deploy existing sealed-Epoch universe-reader fix `9829dba`; public Epoch API still returns an empty selection universe. Peter approved the exact brief follow-up and it was emailed to Joel alone. Basic API roster/cache/previews are healthy. No API/UI changes made here.
 - **Refs:** `packages/cox/deploy/adaptive-pool-2-devnet.json` dynamicLitRollout; `apps/cox-publisher/README.md`; `apps/signer/README.md`; 185 native tests, 57 compiled contract tests, 29 individual signer instructions and four combined shapes passed.
+
+### 2026-10-24 · Godwin (Claude Code) · Web app survives a coin joining the market
+
+- **Area:** `apps/web` (`src/lib/view.ts`, Markets, coin, $CRYPTO and landing pages, `src/lib/epoch.ts`, `epochs-view.tsx`, `src/lib/logos.ts`).
+- **What:** LIT joined at publication 26 (09:00 UTC). `/markets`, `/assets/LIT` and `/portfolio/LIT` then showed the down page with "no reference for LIT". The landing board also fell back to its placeholder. The view helpers threw on any publication without the coin.
+  - **Helpers:** a coin's price and reference history now starts at its first publication. A missing price, class or empty history gives no value instead of throwing. `standings` ranks only coins with a reference, and `marketRow` builds a Markets row.
+  - **Markets:** a listed coin with no publication yet shows "No data yet".
+  - **Epoch:** baskets come only from the Epoch's own universe or closing references, never the market list, and an entry needs exactly 30 coins.
+  - **Wording:** the landing page and the $CRYPTO position note no longer say 30 coins.
+  - **Logo:** LIT is Lighter; its price matched CoinGecko's `lighter` ($3.06), not `litentry` ($0.11).
+  - **Tests:** a history where a coin appears later, and a coin listed before any publication. Against the old helpers six of them fail with "no reference for LIT".
+  - **Verified:** 82 web tests and the type check pass. Every page was checked against the live API with 31 coins.
+  - **Deployed:** `5a42d66` to production at <https://getrelative.trade> (deployment `cox-i3za4w1gy-gef-228639f6`). Checked there: Markets lists 31 coins with LIT, `/assets/LIT` and `/portfolio/LIT` load, and the landing board shows 31 coins ranked.
+- **Rules for agents:**
+  - Treat every asset as able to join, or be missing, at any publication.
+  - Never throw while rendering because one coin lacks data. Use the `view.ts` helpers, which return `null` or skip.
+  - Never hard-code the number of coins in the market. The Epoch basket stays at 30 because the contract fixes it.
+- **Open:**
+  - **Joel:** `/v1/preview/history` now starts at 08:47 UTC; preview history from before the asset list changed was dropped, so every chart's estimate history is short for now. The API also returns `assets` for the current list only, so a point from before a change cannot be matched to coins.
+  - **Joel:** `/v1/assets` gives LIT no full name.
+- **Refs:** commits `0d3d0e1`..`5a42d66`.
