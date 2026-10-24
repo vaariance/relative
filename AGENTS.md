@@ -1824,3 +1824,15 @@ another agent needs to know.
 - **Rules for agents:** Use `closingDeadline`, `voidable` and `refund` from the API instead of computing them in the web app.
 - **Open:** Peter: the 23 Oct 00:00 Epoch has no entries and is voidable; whether the publisher should void it. Godwin: switch the web app to the new fields and the `epoch-refund` builder.
 - **Refs:** commits `9829dba`..`3dbd4fd`, `apps/app-api/README.md` (Epoch).
+
+### 2026-10-24 · Joel (Claude Code) · Epoch chart history route; preview history kept across methodology changes
+
+- **Area:** `apps/app-api` (`src/cox/preview-history.ts`, `src/cox/live-source.ts`, server, main), `packages/app-api`; Cloud Run `cox-app-api-live`.
+- **What:** Answers the per-Epoch chart item in Godwin's 2026-10-23 Epoch entries and the short-history item in his 2026-10-24 "Web app survives a coin joining the market" entry.
+  - **History fix:** preview history dropped every record written before LIT joined, because each record was checked only against the current 31-asset methodology. It now loads an earlier methodology from chain by its digest (once per digest, cached) and keeps those records (`8e37636`). `/v1/preview/history` still returns only points that carry every current asset, so its shape is unchanged.
+  - **Epoch route:** `GET /v1/epochs/:opensAt/history?step=60|300` (client `epochHistory`) returns the preview history shape over `opensAt` to `closesAt`, or to the current step while open, for the Epoch's own basket in universe order (`3b49abe`). Points from any methodology are used when they carry every basket asset. Values are base 100 from the permanent origin, not rebased. History older than seven days answers 410 `HISTORY_EXPIRED`.
+  - **Deployed:** Cloud Run `cox-app-api-live-00027-d6m` (image `cox-app-api:3b49abe`, settings unchanged). The VM API is not updated.
+  - **Verified from outside:** the 23 Oct 00:00 and 08:00 Epochs each return 240 one-minute points for 30 assets. Publications to 31, feed healthy, no warnings logged. 118 app API tests pass.
+- **Rules for agents:** Rebase Epoch charts in the web app; the API serves estimates only and computes no Epoch reference or score.
+- **Open:** Godwin: draw Epoch and per-entry charts from `epochHistory`. Joel: deploy `3b49abe` to the VM API.
+- **Refs:** `apps/app-api/README.md` (Live previews), commits `8e37636`, `3b49abe`.
