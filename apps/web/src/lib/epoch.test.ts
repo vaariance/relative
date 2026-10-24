@@ -1,6 +1,7 @@
 import type { Epoch, EpochLot } from "@eox/app-api";
 import { describe, expect, it } from "vitest";
-import { countdown, executionReferences, feeOf, lotView, moves, stageOf, timelineStep } from "./epoch";
+import settled from "../../test/fixtures/epoch-2026-10-23-0800.json";
+import { CLOSING_GRACE_SECONDS, basketScore, countdown, executionReferences, feeOf, finalPayout, finalScore, lotView, moves, stageOf, timelineStep, withdrawSource } from "./epoch";
 
 const epoch = (phase: Epoch["phase"], extra: Partial<Epoch> = {}): Epoch => ({ address: "x", opensAt: 1000, closesAt: 2000, phase, sealed: true, entriesOpen: false, universe: [], nextNonce: null, lots: null, totalWeight: null, settlementPot: null, allZero: null, closingReferences: [], ledger: null, ...extra });
 const lot = (extra: Partial<EpochLot>): EpochLot => ({ address: "l", epochOpensAt: 1000, nonce: "0", owner: "o", grossStake: "100000000", fee: "20000", admittedAt: 1100, basket: [], backedAsset: "ETH", execution: { timestamp: 1101, references: [] }, state: "executed", score: null, weight: null, claimable: null, ...extra });
@@ -18,6 +19,17 @@ describe("epoch stage", () => {
     expect(stageOf(epoch("allocating"), 2500)).toBe("allocating");
     expect(stageOf(epoch("settled"), 2500)).toBe("settled");
     expect(stageOf(epoch("voided"), 2500)).toBe("voided");
+  });
+
+  it("stops waiting for a closing reference once the 24-hour window has passed", () => {
+    expect(stageOf(epoch("open"), 2000 + CLOSING_GRACE_SECONDS)).toBe("closing");
+    expect(stageOf(epoch("open"), 2001 + CLOSING_GRACE_SECONDS)).toBe("expired");
+    expect(timelineStep("expired")).toBe(-1);
+  });
+
+  it("calls a draft that missed its opening not opened, not scheduled", () => {
+    expect(stageOf(epoch("draft"), 500)).toBe("upcoming");
+    expect(stageOf(epoch("draft"), 1000)).toBe("unopened");
   });
 });
 
@@ -49,17 +61,73 @@ describe("moves since an entry executed", () => {
 
 describe("entry states", () => {
   it("separates waiting, active, withdrawable and history", () => {
-    expect(lotView(lot({ state: "pending", execution: null }), epoch("open")).label).toBe("Awaiting execution");
-    expect(lotView(lot({}), epoch("open")).group).toBe("active");
-    expect(lotView(lot({ state: "claimable", claimable: "149970000" }), epoch("settled"))).toEqual({ group: "withdrawable", label: "Payout withdrawable", refund: false });
-    expect(lotView(lot({ state: "claimable", claimable: "0" }), epoch("settled")).group).toBe("history");
-    expect(lotView(lot({ state: "withdrawn", claimable: "0" }), epoch("settled")).label).toBe("Withdrawn");
+    expect(lotView(lot({ state: "pending", execution: null }), epoch("open"), 1500).label).toBe("Awaiting execution");
+    expect(lotView(lot({}), epoch("open"), 1500).group).toBe("active");
+    expect(lotView(lot({ state: "claimable", claimable: "149970000" }), epoch("settled"), 2500)).toEqual({ group: "withdrawable", label: "Payout withdrawable", refund: false });
+    expect(lotView(lot({ state: "claimable", claimable: "0" }), epoch("settled"), 2500).group).toBe("history");
+    expect(lotView(lot({ state: "withdrawn", claimable: "0" }), epoch("settled"), 2500).label).toBe("Withdrawn");
   });
 
   it("calls it a refund when the round was voided, nobody rose, or the entry never executed", () => {
-    expect(lotView(lot({ state: "claimable", claimable: "100000000" }), epoch("voided")).label).toBe("Refund withdrawable");
-    expect(lotView(lot({ state: "claimable", claimable: "100000000" }), epoch("settled", { allZero: true })).refund).toBe(true);
-    expect(lotView(lot({ state: "claimable", claimable: "100000000", execution: null }), epoch("settled")).refund).toBe(true);
+    expect(lotView(lot({ state: "claimable", claimable: "100000000" }), epoch("voided"), 2500).label).toBe("Refund withdrawable");
+    expect(lotView(lot({ state: "claimable", claimable: "100000000" }), epoch("settled", { allZero: true }), 2500).refund).toBe(true);
+    expect(lotView(lot({ state: "claimable", claimable: "100000000", execution: null }), epoch("settled"), 2500).refund).toBe(true);
+  });
+
+  it("never says awaiting execution after the close", () => {
+    expect(lotView(lot({ state: "pending", execution: null }), epoch("open"), 2000)).toEqual({ group: "pending", label: "Not executed · refund due", refund: true });
+    expect(lotView(lot({}), epoch("open"), 2001 + CLOSING_GRACE_SECONDS)).toEqual({ group: "pending", label: "Awaiting refund", refund: true });
+  });
+});
+
+describe("final score and payout", () => {
+  const real = settled as unknown as { epoch: Epoch; lots: EpochLot[] };
+
+  it("reproduces the contract's scores, total weight and recorded payouts from on-chain values", () => {
+    const [btc, eth] = real.lots;
+    expect(btc!.state).toBe("withdrawn");
+    expect(btc!.score).toBeNull();
+    expect(finalScore(btc!, real.epoch)).toBe(6_761_883_418n);
+    expect(finalScore(eth!, real.epoch)).toBe(25_546_651_148n);
+    const weight = real.lots.reduce((sum, item) => sum + (BigInt(item.grossStake) - BigInt(item.fee)) * finalScore(item, real.epoch)!, 0n);
+    expect(weight).toBe(BigInt(real.epoch.totalWeight!));
+    expect(finalPayout(btc!, real.epoch)).toBe(41_849n);
+    expect(finalPayout(eth!, real.epoch)).toBe(158_110n);
+  });
+
+  it("counts only rises against $CRYPTO and scores zero when nothing rose", () => {
+    expect(basketScore([100n, 100n, 100n], [110n, 130n, 90n], 0)).toBe(250_000_000_000n);
+    expect(basketScore([100n, 100n], [90n, 100n], 0)).toBe(0n);
+    expect(basketScore([100n], [110n, 120n], 0)).toBeNull();
+  });
+
+  it("uses the program's values while they exist and refunds the gross stake when there is no result", () => {
+    expect(finalScore(lot({ state: "scored", score: "500000000000" }), null)).toBe(500_000_000_000n);
+    expect(finalPayout(lot({ state: "claimable", claimable: "7" }), null)).toBe(7n);
+    expect(finalPayout(lot({ state: "executed" }), epoch("settled"))).toBeNull();
+    expect(finalPayout(lot({ state: "withdrawn", execution: null }), epoch("settled"))).toBe(100_000_000n);
+    expect(finalPayout(lot({ state: "withdrawn" }), epoch("voided"))).toBe(100_000_000n);
+    expect(finalPayout(lot({ state: "withdrawn" }), epoch("settled", { allZero: true }))).toBe(100_000_000n);
+    expect(finalPayout(lot({ state: "withdrawn" }), epoch("settled", { totalWeight: "0", settlementPot: "0" }))).toBeNull();
+  });
+});
+
+describe("withdrawal vault", () => {
+  const mints = ["usdc", "rlusd"];
+
+  it("takes the whole amount from the first vault that can pay it", () => {
+    expect(withdrawSource(mints, { primary: 50n, secondary: 0n }, 40n)).toEqual({ mint: "usdc", index: 0 });
+    expect(withdrawSource(mints, { primary: 0n, secondary: 41n }, 40n)).toEqual({ mint: "rlusd", index: 1 });
+  });
+
+  it("withdraws part of it when neither vault holds the whole amount", () => {
+    expect(withdrawSource(mints, { primary: 30n, secondary: 20n }, 40n)).toEqual({ mint: "usdc", amount: "30", index: 0 });
+    expect(withdrawSource(mints, { primary: 0n, secondary: 0n }, 40n)).toBeNull();
+  });
+
+  it("sends no mint with a single collateral or when the vaults could not be read", () => {
+    expect(withdrawSource(["usdc"], null, 40n)).toEqual({ index: 0 });
+    expect(withdrawSource(mints, null, 40n)).toEqual({ index: 0 });
   });
 });
 

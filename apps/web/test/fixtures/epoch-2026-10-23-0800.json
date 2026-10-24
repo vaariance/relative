@@ -1,0 +1,318 @@
+{
+  "source": "GET /v1/epochs/1792742400 and /v1/epochs/1792742400/lots on 2026-10-24; recorded payouts 41849 and 158110",
+  "epoch": {
+    "address": "AnBEd8ne65Jmq5MP2dgqmx2KQHCGEz25kqBsmuzd8kjG",
+    "opensAt": 1792742400,
+    "closesAt": 1792756800,
+    "phase": "settled",
+    "sealed": true,
+    "entriesOpen": false,
+    "universe": [],
+    "nextNonce": "2",
+    "lots": {
+      "executed": 2,
+      "scored": 2,
+      "allocated": 2
+    },
+    "totalWeight": "3230207285908680",
+    "settlementPot": "199960",
+    "allZero": false,
+    "closingReferences": [
+      {
+        "assetId": "BTC",
+        "reference": "1019711061609"
+      },
+      {
+        "assetId": "ETH",
+        "reference": "1019550919439"
+      },
+      {
+        "assetId": "SOL",
+        "reference": "1025681320370"
+      },
+      {
+        "assetId": "XRP",
+        "reference": "1016816528944"
+      },
+      {
+        "assetId": "BNB",
+        "reference": "1052466243198"
+      },
+      {
+        "assetId": "TRX",
+        "reference": "1050924874676"
+      },
+      {
+        "assetId": "AVAX",
+        "reference": "1000457224361"
+      },
+      {
+        "assetId": "DOT",
+        "reference": "1079292795164"
+      },
+      {
+        "assetId": "NEAR",
+        "reference": "982635394117"
+      },
+      {
+        "assetId": "SUI",
+        "reference": "1016401071242"
+      },
+      {
+        "assetId": "APT",
+        "reference": "986576083798"
+      },
+      {
+        "assetId": "UNI",
+        "reference": "1013984658256"
+      },
+      {
+        "assetId": "ARB",
+        "reference": "1002142709943"
+      },
+      {
+        "assetId": "OP",
+        "reference": "965158500984"
+      },
+      {
+        "assetId": "INJ",
+        "reference": "970086007535"
+      },
+      {
+        "assetId": "AAVE",
+        "reference": "1002482697630"
+      },
+      {
+        "assetId": "ZEC",
+        "reference": "966136803525"
+      },
+      {
+        "assetId": "STRK",
+        "reference": "966931345494"
+      },
+      {
+        "assetId": "HYPE",
+        "reference": "1014302832641"
+      },
+      {
+        "assetId": "TAO",
+        "reference": "1009749995942"
+      },
+      {
+        "assetId": "WLD",
+        "reference": "983239744491"
+      },
+      {
+        "assetId": "ONDO",
+        "reference": "990245904279"
+      },
+      {
+        "assetId": "ENA",
+        "reference": "988001275446"
+      },
+      {
+        "assetId": "ZRO",
+        "reference": "965507226537"
+      },
+      {
+        "assetId": "FET",
+        "reference": "1005602330564"
+      },
+      {
+        "assetId": "JUP",
+        "reference": "1001981229993"
+      },
+      {
+        "assetId": "AERO",
+        "reference": "1016750407735"
+      },
+      {
+        "assetId": "RENDER",
+        "reference": "972663928083"
+      },
+      {
+        "assetId": "TIA",
+        "reference": "947543670178"
+      },
+      {
+        "assetId": "W",
+        "reference": "979293559676"
+      }
+    ],
+    "ledger": {
+      "pendingGross": "0",
+      "activeNet": "0",
+      "heldFees": "0",
+      "claimable": "0",
+      "committedFees": "40",
+      "residual": "1",
+      "liabilities": "41",
+      "vault": "41",
+      "covered": true
+    }
+  },
+  "lots": [
+    {
+      "address": "DNDPRhuUNPR3fDUZwLY3ATqHm9q2LFZxXBNqkAgAMcx6",
+      "epochOpensAt": 1792742400,
+      "nonce": "0",
+      "owner": "2aDWjWvQ3nzLq75wn1U6tHwp4Bok7LuWxHSj6KH5wg1h",
+      "grossStake": "100000",
+      "fee": "20",
+      "admittedAt": 1792742407,
+      "basket": [
+        "BTC",
+        "ETH",
+        "SOL",
+        "XRP",
+        "BNB",
+        "TRX",
+        "AVAX",
+        "DOT",
+        "NEAR",
+        "SUI",
+        "APT",
+        "UNI",
+        "ARB",
+        "OP",
+        "INJ",
+        "AAVE",
+        "ZEC",
+        "STRK",
+        "HYPE",
+        "TAO",
+        "WLD",
+        "ONDO",
+        "ENA",
+        "ZRO",
+        "FET",
+        "JUP",
+        "AERO",
+        "RENDER",
+        "TIA",
+        "W"
+      ],
+      "backedAsset": "BTC",
+      "execution": {
+        "timestamp": 1792750498,
+        "references": [
+          "1019337721660",
+          "1018142081447",
+          "1023621692854",
+          "1017713995196",
+          "1052284389922",
+          "1047925790954",
+          "1004279600086",
+          "1086583572160",
+          "983211314716",
+          "1015421761692",
+          "990451211765",
+          "1014653626213",
+          "1007219895450",
+          "965904370828",
+          "979421312667",
+          "1003756478983",
+          "957272348098",
+          "947942576199",
+          "1014465186168",
+          "1009146636772",
+          "981653705040",
+          "993011772724",
+          "986210318894",
+          "971809729242",
+          "1008652639892",
+          "994477347211",
+          "1014720070688",
+          "973383069152",
+          "954569015162",
+          "975842942469"
+        ]
+      },
+      "state": "withdrawn",
+      "score": null,
+      "weight": null,
+      "claimable": null
+    },
+    {
+      "address": "2pDqEqaHHTRCJDhpgLgjR7LxB5X5xbUUE5R8tkw3yHFE",
+      "epochOpensAt": 1792742400,
+      "nonce": "1",
+      "owner": "2aDWjWvQ3nzLq75wn1U6tHwp4Bok7LuWxHSj6KH5wg1h",
+      "grossStake": "100000",
+      "fee": "20",
+      "admittedAt": 1792742408,
+      "basket": [
+        "BTC",
+        "ETH",
+        "SOL",
+        "XRP",
+        "BNB",
+        "TRX",
+        "AVAX",
+        "DOT",
+        "NEAR",
+        "SUI",
+        "APT",
+        "UNI",
+        "ARB",
+        "OP",
+        "INJ",
+        "AAVE",
+        "ZEC",
+        "STRK",
+        "HYPE",
+        "TAO",
+        "WLD",
+        "ONDO",
+        "ENA",
+        "ZRO",
+        "FET",
+        "JUP",
+        "AERO",
+        "RENDER",
+        "TIA",
+        "W"
+      ],
+      "backedAsset": "ETH",
+      "execution": {
+        "timestamp": 1792750498,
+        "references": [
+          "1019337721660",
+          "1018142081447",
+          "1023621692854",
+          "1017713995196",
+          "1052284389922",
+          "1047925790954",
+          "1004279600086",
+          "1086583572160",
+          "983211314716",
+          "1015421761692",
+          "990451211765",
+          "1014653626213",
+          "1007219895450",
+          "965904370828",
+          "979421312667",
+          "1003756478983",
+          "957272348098",
+          "947942576199",
+          "1014465186168",
+          "1009146636772",
+          "981653705040",
+          "993011772724",
+          "986210318894",
+          "971809729242",
+          "1008652639892",
+          "994477347211",
+          "1014720070688",
+          "973383069152",
+          "954569015162",
+          "975842942469"
+        ]
+      },
+      "state": "withdrawn",
+      "score": null,
+      "weight": null,
+      "claimable": null
+    }
+  ]
+}
