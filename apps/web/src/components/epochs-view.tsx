@@ -24,9 +24,9 @@ const LOTS_MS = 20_000;
 const BASKET_SIZE = 30;
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ASSOCIATED_TOKEN_PROGRAM = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
-const panel = "rounded-card border border-line bg-surface shadow-card";
+const panel = "overflow-hidden rounded-2xl border border-line bg-surface bg-[linear-gradient(180deg,rgba(255,255,255,0.035),transparent_45%)] shadow-card";
 const field = "num h-11 w-full rounded-control border border-line bg-bg px-3 text-sm text-ink placeholder:text-muted";
-const primary = "flex h-11 w-full items-center justify-center gap-2 rounded-pill bg-accent text-sm font-medium text-accent-ink";
+const primary = "flex h-11 w-full items-center justify-center gap-2 rounded-pill bg-[linear-gradient(90deg,#f2622e,#a24bd6)] text-sm font-medium text-accent-ink";
 const quiet = "flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-pill border border-line text-sm transition-colors duration-150 hover:bg-surface-2";
 
 function useNow(start: number): number {
@@ -157,7 +157,7 @@ function ClockStrip({ epochs, epoch, now, onSelect }: { epochs: Epoch[]; epoch: 
   const arrow = "grid size-9 shrink-0 cursor-pointer place-items-center rounded-pill border border-line text-muted transition-colors duration-150 hover:text-ink disabled:cursor-not-allowed disabled:opacity-30";
 
   return (
-    <section className={`${panel} flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between`}>
+    <section className={`${panel} flex flex-col gap-3 bg-[radial-gradient(40%_160%_at_0%_0%,rgba(242,98,46,0.14),transparent_70%)] p-4 sm:flex-row sm:items-center sm:justify-between`}>
       <div className="flex items-center gap-3">
         <button type="button" className={arrow} disabled={!previous} onClick={() => previous && onSelect(previous.address)} aria-label="Previous Epoch">
           <ChevronLeft size={16} aria-hidden="true" />
@@ -201,7 +201,7 @@ function Comparison({ epoch, coins, now, backed, canPick, onPick }: { epoch: Epo
 
   return (
     <section className={`${panel} min-w-0`}>
-      <header className="flex flex-wrap items-end justify-between gap-2 border-b border-line px-4 py-3">
+      <header className="flex flex-wrap items-end justify-between gap-2 border-b border-line bg-[radial-gradient(60%_140%_at_100%_0%,rgba(242,98,46,0.16),transparent_70%)] px-4 py-3">
         <div>
           <h2 className="text-sm font-semibold">Relative moves since Epoch start</h2>
           <p className="text-xs text-muted">Each asset against $CRYPTO from the opening reference at {utcTime(epoch.opensAt)} UTC.</p>
@@ -664,14 +664,26 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
 
   return (
     <div className={`flex flex-col gap-6 ${open ? "pb-24 lg:pb-0" : ""}`}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <ModeSwitch />
-        <span className="rounded-pill border border-line px-2.5 py-1 text-[11px] uppercase tracking-wider text-muted">Devnet</span>
-      </div>
-      <div className="flex flex-col gap-1">
-        <h1 className="font-display text-title font-semibold tracking-tight">Epoch</h1>
-        <p className="max-w-2xl text-sm text-muted">Four-hour performance predictions. Back one asset within a basket of 30. Your entry starts from its execution reference and settles at the fixed Epoch close.</p>
-      </div>
+      <section className="relative isolate overflow-hidden rounded-3xl border border-line bg-[#0b0b0c] p-6 sm:p-8">
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(90%_80%_at_50%_125%,rgba(250,130,70,0.7),rgba(242,98,46,0.22)_45%,transparent_78%)]" />
+        <div aria-hidden="true" className="pointer-events-none absolute -right-24 -top-24 -z-10 size-72 rounded-full bg-[radial-gradient(closest-side,rgba(124,58,237,0.22),transparent)]" />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <ModeSwitch />
+          <span className="inline-flex items-center gap-2 rounded-pill border border-line px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-muted">
+            <span className="size-1.5 rounded-full bg-accent" /> Live on Solana devnet
+          </span>
+        </div>
+        <p className="mt-10 text-xs uppercase tracking-[0.25em] text-accent">Introducing Epochs</p>
+        <h1 className="mt-3 font-display text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl">
+          Back your analysis<span className="text-accent">.</span>
+        </h1>
+        <p className="mt-4 max-w-xl text-sm text-muted sm:text-base">Pick the coin you think will beat the rest of crypto over four hours. Your entry starts from its execution reference and settles at the fixed Epoch close.</p>
+        <div className="mt-8 flex flex-wrap gap-2 text-xs">
+          {["30 coins", "4-hour rounds", "One pot"].map((label) => (
+            <span key={label} className="rounded-pill bg-black/40 px-3.5 py-2 backdrop-blur">{label}</span>
+          ))}
+        </div>
+      </section>
 
       <ClockStrip epochs={epochs} epoch={epoch} now={now} onSelect={(address) => setSelected(address)} />
 
