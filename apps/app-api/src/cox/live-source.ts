@@ -170,6 +170,11 @@ export class LiveCoxSource implements CoxSource {
     return manifest;
   }
 
+  async methodologyRoster(digest: string): Promise<{ assets: string[]; classes: string[] }> {
+    const manifest = await this.manifestFor(digest);
+    return { assets: manifest.assets.map((asset) => asset.assetId), classes: classIds(manifest) };
+  }
+
   get poolAddress(): PublicKey {
     return this.poolKey;
   }

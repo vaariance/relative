@@ -187,7 +187,13 @@ async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transaction
         ? new PreviewFeed({ store: previewStore, identity: previewIdentity, now: nowSeconds, onError: (error: unknown) => console.error("cox preview tick failed", error) })
         : null;
       const previewHistory = previewStore
-        ? new PreviewHistory({ store: previewStore, identity: previewIdentity, now: nowSeconds, onError: (error: unknown) => console.error("cox preview history record skipped", error) })
+        ? new PreviewHistory({
+            store: previewStore,
+            identity: previewIdentity,
+            earlier: async (methodologyDigest: string) => ({ ...previewIdentity, methodologyDigest, ...(await source.methodologyRoster(methodologyDigest)) }),
+            now: nowSeconds,
+            onError: (error: unknown) => console.error("cox preview history record skipped", error),
+          })
         : null;
       if (preview && previewHistory) {
         preview.onRecord((record) => previewHistory.add(record));
