@@ -1865,3 +1865,9 @@ another agent needs to know.
 - **Rules for agents:** Use the schema-aware CRYPTO class, generation-specific state/archive/cache identities, canonical registry pages and existing frozen-Epoch filter. Publisher preparation uses the contract's eight-asset page and 8192-byte growth limits. Successful inclusion adopts its committed anchor/mappings/subscriptions in process. Do not reset/deploy/open from these source results. Preserve the uncommitted Alchemy billing entry. Recheck final ownership/activity inventory before discarding old test positions.
 - **Open:** Full running-services rehearsal and live Pause A/B remain. Joel was emailed the compatibility contract, class-0 correction, sealed/empty-round fields and deployed-evidence requirements; no API/UI implementation was changed. Old accounts/custody remain untouched. No reset timestamp has been selected.
 - **Refs:** `packages/cox-client/README.md` fresh-generation handoff; `apps/cox-publisher/README.md` lifecycle reset release; `apps/signer/README.md`; `packages/cox/fixtures/generation/`.
+
+### 2026-10-24 · Peter (Codex) · Discard scope clarification
+
+- **Area:** Clarifies “Fresh-generation registry and lifecycle source prepared”.
+- **What:** Its discard wording applies only to the approved old-generation test positions in the final inventory. Fresh-generation deposits retain all normal settlement, refund and withdrawal rights. This release does not waive those rights or sweep either generation's custody.
+- **Rules for agents:** Stop for Peter's review if the final old-generation inventory contains unexpected ownership or activity. No new live accounts have been created by this source-preparation work.
