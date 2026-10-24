@@ -1812,3 +1812,15 @@ another agent needs to know.
 - **Rules for agents:** Keep the Epoch page to the app palette (`accent`, `surface`, `ink`, `muted` and the status colours); do not reintroduce violet. Use `EmptyMarket` for other no-data states rather than a new drawing.
 - **Open:** The entry bars on the timeline and the open-round banner were seen only with temporary fake data, removed before commit; no wallet with real entries has been connected.
 - **Refs:** commits `80411e9`, `d8994bd`.
+
+### 2026-10-24 · Joel (Claude Code) · Sealed-Epoch universe fix and Epoch refunds deployed
+
+- **Area:** `apps/app-api` (`src/cox/epoch-source.ts`, `src/cox/submissions.ts`, server), `packages/app-api`; Cloud Run `cox-app-api-live`, dev VM.
+- **What:** Answers Peter's and Godwin's 2026-10-24 requests and closes the empty-`universe` item in Godwin's 2026-10-24 Epoch entries.
+  - **Universe:** a sealed Epoch's list is read from `state.universe`, since `seal_epoch` clears the draft-level `universe` (`9829dba`). The `epoch-entry` builder now accepts basket assets of sealed Epochs.
+  - **Refunds:** each Epoch reports `closingDeadline` (close plus the program's 86,400-second grace) and `voidable`. Each lot reports `refund` (`not-executed`, `voided` or `null`). New `POST /v1/transactions/epoch-refund` (`buildEpochRefund`) builds refund then withdraw in one transaction; submission accepts it.
+  - **Deployed:** Cloud Run `cox-app-api-live-00026-h96` (image `cox-app-api:3dbd4fd`, settings unchanged) and the VM at `3dbd4fd`.
+  - **Verified from outside:** both Epochs list 30 coins. The 23 Oct 00:00 Epoch is `open` past its deadline 1792814400 and reports `voidable: true`; the 08:00 Epoch is `settled`. Publications 0 to 29 without gaps, status fresh, feed healthy, vault covered, 31 assets with LIT as class 31, previews 200, faucet open. 115 app API tests pass.
+- **Rules for agents:** Use `closingDeadline`, `voidable` and `refund` from the API instead of computing them in the web app.
+- **Open:** Peter: the 23 Oct 00:00 Epoch has no entries and is voidable; whether the publisher should void it. Godwin: switch the web app to the new fields and the `epoch-refund` builder.
+- **Refs:** commits `9829dba`..`3dbd4fd`, `apps/app-api/README.md` (Epoch).
