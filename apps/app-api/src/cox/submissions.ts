@@ -26,6 +26,7 @@ const EPOCH_INSTRUCTIONS: readonly { operation: TransactionOperation; name: stri
   { operation: "epoch-entry", name: "queue" },
   { operation: "epoch-withdraw", name: "withdraw" },
   { operation: "epoch-withdraw", name: "withdraw_partial" },
+  { operation: "epoch-refund", name: "refund" },
 ];
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 const SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
@@ -104,6 +105,7 @@ export class CoxSubmissions {
         throw new TransactionInputError("transaction calls a program outside COX");
       }
     }
+    if (operations.has("epoch-refund")) operations.delete("epoch-withdraw");
     if (operations.size !== 1) throw new TransactionInputError("transaction must carry exactly one COX request operation");
     return { signature: anchor.utils.bytes.bs58.encode(transaction.signatures[0]!), owner: keys[0]!, operation: [...operations][0]!, recentBlockhash: message.recentBlockhash, expectedFeeVersion };
   }

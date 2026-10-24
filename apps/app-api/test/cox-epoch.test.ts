@@ -173,6 +173,35 @@ describe("Epoch transactions", () => {
     await expect(source.entry(input)).rejects.toThrow("not accepting entries");
   });
 
+  it("reports refunds and builds one refund-and-withdraw transaction for an entry that never executed or a voided round", async () => {
+    const t = await setup(OPEN + 14_400 + 60);
+    await t.encodeEpoch(t.sealed, OPEN, t.state);
+    t.connection.set(pdas.vault(t.sealed), token(MINT, 4_000_000n), new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"));
+    t.connection.set(pdas.testVault(t.sealed), token(TEST_MINT, 500_600n), new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"));
+    const wallet = Keypair.generate().publicKey;
+    t.connection.set(pdas.lot(t.sealed, 0n), await lotBytes(t.coder, t.sealed, 0, wallet, { pending: {} }));
+    t.connection.set(pdas.lot(t.sealed, 1n), await lotBytes(t.coder, t.sealed, 1, wallet, { executed: {} }));
+    const source = await EpochSource.open({ connection: t.connection as unknown as Connection, program: t.program, config, now: () => t.now });
+    const epoch = (await source.epoch(OPEN))!;
+    expect(epoch).toMatchObject({ phase: "open", closingDeadline: OPEN + 14_400 + 86_400, voidable: false });
+    expect((await source.lots(OPEN, wallet.toBase58())).map((lot) => [lot.nonce, lot.refund])).toEqual([["0", "not-executed"], ["1", null]]);
+    const built = await source.refund({ owner: wallet.toBase58(), opensAt: OPEN, nonce: "0" });
+    expect(built).toMatchObject({ operation: "epoch-refund", nonce: "0", amount: "2000000", requestId: pdas.lot(t.sealed, 0n).toBase58() });
+    const tx = VersionedTransaction.deserialize(Buffer.from(built.transaction, "base64"));
+    const data = tx.message.compiledInstructions.map((i) => Buffer.from(i.data).subarray(0, 8));
+    expect(tx.message.header.numRequiredSignatures).toBe(1);
+    expect(tx.message.staticAccountKeys[0]!.equals(wallet)).toBe(true);
+    expect(data[1]!.equals(discriminator("global", "refund"))).toBe(true);
+    expect(data[2]!.equals(discriminator("global", "withdraw"))).toBe(true);
+    await expect(source.refund({ owner: wallet.toBase58(), opensAt: OPEN, nonce: "1" })).rejects.toThrow("cannot be refunded");
+    t.now = OPEN + 14_400 + 86_401;
+    expect((await source.epoch(OPEN))!.voidable).toBe(true);
+    await t.encodeEpoch(t.sealed, OPEN, { ...t.state, phase: { voided: {} } });
+    source.invalidate();
+    expect((await source.lots(OPEN, wallet.toBase58())).map((lot) => lot.refund)).toEqual(["not-executed", "voided"]);
+    expect((await source.epoch(OPEN))!.voidable).toBe(false);
+  });
+
   it("builds a full or partial withdrawal only for the owner's claimable lot", async () => {
     const t = await setup(OPEN + 20_000);
     await t.encodeEpoch(t.sealed, OPEN, t.state);
@@ -211,6 +240,12 @@ describe("Epoch submissions", () => {
       await expect(without.submit(signed)).rejects.toThrow("outside COX");
       const withEpoch = new CoxSubmissions({ ...options, epochProgramId: PROGRAM, store: new FileSubmissionStore(join(dir, "b.json")) });
       expect(await withEpoch.submit(signed)).toMatchObject({ operation: "epoch-entry", owner: wallet.publicKey.toBase58(), state: "submitted" });
+      t.now = OPEN + 14_400 + 60;
+      t.connection.set(pdas.lot(t.sealed, 0n), await lotBytes(t.coder, t.sealed, 0, wallet.publicKey, { pending: {} }));
+      const refund = VersionedTransaction.deserialize(Buffer.from((await source.refund({ owner: wallet.publicKey.toBase58(), opensAt: OPEN, nonce: "0" })).transaction, "base64"));
+      refund.sign([wallet]);
+      relay.sendRawTransaction = async () => anchor.utils.bytes.bs58.encode(refund.signatures[0]!);
+      expect(await withEpoch.submit(Buffer.from(refund.serialize()).toString("base64"))).toMatchObject({ operation: "epoch-refund", owner: wallet.publicKey.toBase58() });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

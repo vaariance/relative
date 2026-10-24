@@ -12,6 +12,8 @@ import {
   type EpochLotState,
   type EpochOverview,
   type EpochPhase,
+  type EpochRefundInput,
+  type EpochRefundReason,
   type EpochWithdrawInput,
   type UnsignedTransaction,
 } from "@eox/app-api";
@@ -24,6 +26,7 @@ const LOT_EPOCH_OFFSET = 8;
 const EPOCH_CONFIG_OFFSET = 8;
 const EPOCH_OPENS_AT_OFFSET = 40;
 const PAST_EPOCHS = 2;
+const CLOSING_GRACE_SECONDS = 86_400;
 const FUTURE_EPOCHS = 6;
 const LOT_OWNER_OFFSET = 98;
 const CACHE_LIMIT = 1_000;
@@ -64,6 +67,7 @@ interface EpochState {
   settlementPot: Integer;
   allZero: boolean;
   closingReferences: { assetId: number; value: Integer }[];
+  closingSnapshot: unknown | null;
   ledger: { pendingGross: Integer; activeNet: Integer; heldFees: Integer; claimable: Integer; committedFees: Integer; residual: Integer };
 }
 
@@ -104,6 +108,11 @@ export interface EpochSourceOptions {
 }
 
 const text = (value: Integer): string => value.toString();
+const refundReason = (state: EpochLotState, phase: EpochPhase | null, ended: boolean): EpochRefundReason | null => {
+  if (state === "pending" && ended) return "not-executed";
+  if (state === "executed" && phase === "voided") return "voided";
+  return null;
+};
 const members = (account: EpochAccount): UniverseAsset[] => (account.state ? account.state.universe : account.universe);
 const seconds = (value: Integer): number => {
   const parsed = Number(value.toString());
@@ -249,7 +258,7 @@ export class EpochSource {
     const closesAt = opensAt + EPOCH_SECONDS;
     const universe = members(account).map((asset) => ({ id: asset.id, assetId: this.ticker(asset.id), originPrice: text(asset.originPrice) }));
     if (!state || vault === null) {
-      return { address: address.toBase58(), opensAt, closesAt, phase: "draft", sealed: false, entriesOpen: false, universe, nextNonce: null, lots: null, totalWeight: null, settlementPot: null, allZero: null, closingReferences: [], ledger: null };
+      return { address: address.toBase58(), opensAt, closesAt, phase: "draft", sealed: false, entriesOpen: false, universe, nextNonce: null, lots: null, totalWeight: null, settlementPot: null, allZero: null, closingReferences: [], closingDeadline: closesAt + CLOSING_GRACE_SECONDS, voidable: false, ledger: null };
     }
     if (seconds(state.opensAt) !== opensAt || seconds(state.closesAt) !== closesAt) throw new Error("EpochScheduleMismatch");
     const phase = variant(state.phase, PHASES).name;
@@ -275,6 +284,8 @@ export class EpochSource {
       settlementPot: text(state.settlementPot),
       allZero: state.allZero,
       closingReferences: state.closingReferences.map((r) => ({ assetId: this.ticker(r.assetId), reference: text(r.value) })),
+      closingDeadline: closesAt + CLOSING_GRACE_SECONDS,
+      voidable: phase === "open" && !state.closingSnapshot && now > closesAt + CLOSING_GRACE_SECONDS,
       ledger,
     };
   }
@@ -315,12 +326,15 @@ export class EpochSource {
         ],
       }),
     );
+    const epochInfo = await this.cached(`epoch:${address.toBase58()}`, () => this.options.connection.getAccountInfo(address, "finalized"));
+    const epochState = epochInfo ? this.decodeEpoch(epochInfo, address, opensAt).state : null;
+    const phase = epochState ? variant(epochState.phase, PHASES).name : null;
     return accounts
-      .map(({ pubkey, account }) => this.lot(pubkey, account, address, opensAt, holder))
+      .map(({ pubkey, account }) => this.lot(pubkey, account, address, opensAt, holder, phase))
       .sort((a, b) => (BigInt(a.nonce) < BigInt(b.nonce) ? -1 : 1));
   }
 
-  private lot(address: PublicKey, info: AccountInfo<Buffer>, epoch: PublicKey, opensAt: number, holder: PublicKey): EpochLot {
+  private lot(address: PublicKey, info: AccountInfo<Buffer>, epoch: PublicKey, opensAt: number, holder: PublicKey, phase: EpochPhase | null): EpochLot {
     const value = this.options.program.coder.accounts.decode("lotAccount", info.data) as LotAccount;
     const state = value.state;
     if (!state || !value.epoch.equals(epoch) || !this.pdas.lot(epoch, BigInt(text(value.nonce))).equals(address) || !address.equals(this.pdas.lot(epoch, BigInt(text(state.nonce))))
@@ -343,6 +357,7 @@ export class EpochSource {
       score: name === "scored" ? text(fields.score!) : null,
       weight: name === "scored" ? text(fields.weight!) : null,
       claimable: name === "claimable" ? text(fields.amount!) : null,
+      refund: refundReason(name, phase, this.now() >= opensAt + EPOCH_SECONDS),
     };
   }
 
@@ -400,7 +415,7 @@ export class EpochSource {
     const lot = this.pdas.lot(address, nonce);
     const info = await this.options.connection.getAccountInfo(lot, "confirmed");
     if (!info) throw new TransactionInputError("this lot does not exist");
-    const value = this.lot(lot, info, address, input.opensAt, wallet);
+    const value = this.lot(lot, info, address, input.opensAt, wallet, null);
     if (value.state !== "claimable") throw new TransactionInputError("this lot has nothing to withdraw");
     const destination = associatedTokenAddress(wallet, mint);
     return unsignedTransaction(this.options.connection, {
@@ -411,6 +426,33 @@ export class EpochSource {
         amount === null ? this.instructions.withdraw(wallet, destination, selection, nonce) : this.instructions.withdrawPartial(wallet, destination, selection, nonce, amount),
       ],
       details: { requestId: lot.toBase58(), nonce: nonce.toString(), amount: (amount ?? BigInt(value.claimable!)).toString() },
+    });
+  }
+
+  async refund(input: EpochRefundInput): Promise<UnsignedTransaction> {
+    const wallet = owner(input.owner);
+    const selection = this.selection(input.opensAt);
+    const nonce = integer(input.nonce, "nonce", U64_MAX, false);
+    const mint = this.collateral(input.collateralMint);
+    const address = this.pdas.epoch(selection);
+    const lot = this.pdas.lot(address, nonce);
+    const [lotInfo, epochInfo] = await this.options.connection.getMultipleAccountsInfo([lot, address], "confirmed");
+    if (!lotInfo) throw new TransactionInputError("this lot does not exist");
+    if (!epochInfo) throw new TransactionInputError("this Epoch does not exist");
+    const account = this.decodeEpoch(epochInfo, address, input.opensAt);
+    const phase = account.state ? variant(account.state.phase, PHASES).name : null;
+    const value = this.lot(lot, lotInfo, address, input.opensAt, wallet, phase);
+    if (!value.refund) throw new TransactionInputError("this lot cannot be refunded now");
+    const destination = associatedTokenAddress(wallet, mint);
+    return unsignedTransaction(this.options.connection, {
+      operation: "epoch-refund",
+      owner: wallet,
+      instructions: [
+        createTokenAccountIdempotent(wallet, wallet, mint),
+        this.instructions.refund(selection, nonce),
+        this.instructions.withdraw(wallet, destination, selection, nonce),
+      ],
+      details: { requestId: lot.toBase58(), nonce: nonce.toString(), amount: value.grossStake },
     });
   }
 }
