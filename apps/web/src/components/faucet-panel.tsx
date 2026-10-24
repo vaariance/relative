@@ -85,7 +85,9 @@ export function FaucetPanel() {
   const [gas, setGas] = useState<FaucetStatus | null>(null);
   const [checked, setChecked] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [claiming, setClaiming] = useState(false);
+  const [phase, setPhase] = useState<"idle" | "sign" | "send">("idle");
+  const attempt = useRef(0);
+  const claiming = phase !== "idle";
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   const steered = useRef<string | null>(null);
   const owner = mounted ? address : null;
@@ -149,16 +151,25 @@ export function FaucetPanel() {
 
   const claim = async () => {
     if (!owner || !signMessage || claiming) return;
-    setClaiming(true);
+    const mine = ++attempt.current;
+    const current = () => attempt.current === mine;
+    setPhase("sign");
     try {
       const challenge = await call<FaucetChallenge>(`${apiUrl}/v1/faucet/challenge`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ owner }) });
       if (!challenge.data) return fail(humanError(challenge.code, challenge.message), "Claim not sent");
+      const expires = Math.max(5_000, challenge.data.expiresAt * 1000 - Date.now());
       let signature: Uint8Array;
       try {
-        signature = await signMessage(new TextEncoder().encode(challenge.data.message));
+        signature = await Promise.race([
+          signMessage(new TextEncoder().encode(challenge.data.message)),
+          new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error("timeout")), expires)),
+        ]);
       } catch (error) {
-        return fail(walletError(error), "Claim not sent");
+        if (!current()) return;
+        return fail(error instanceof Error && error.message === "timeout" ? "Your wallet did not sign in time. Nothing was sent. Please try again." : walletError(error), "Claim not sent");
       }
+      if (!current()) return;
+      setPhase("send");
       const result = await call<FaucetClaim>(`${apiUrl}/v1/faucet/claim`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -175,8 +186,10 @@ export function FaucetPanel() {
         show({ tone: "good", title: "Claim sent", text: "It is still confirming. Check back in a moment.", link });
       }
     } finally {
-      setClaiming(false);
-      void refresh();
+      if (current()) {
+        setPhase("idle");
+        void refresh();
+      }
     }
   };
 
@@ -187,7 +200,9 @@ export function FaucetPanel() {
         ? `Log in to claim ${tokenAmount} free ${TEST_COLLATERAL.symbol}. Use it like USDC to buy, swap and enter Epochs.`
         : status && !status.enabled
           ? "Test token claims are closed right now. Get devnet USDC from Circle instead."
-          : cooling
+          : phase === "sign"
+            ? "Approve the signature request in your wallet. If its window is stuck, close it, unlock the wallet and press the button again."
+            : cooling
             ? `You claimed in the last 24 hours. Your next claim opens in ${wait((nextAt ?? now) - now)}.`
             : confirming
               ? "Your last claim is still confirming. Check back in a moment."
@@ -211,9 +226,16 @@ export function FaucetPanel() {
   ) : confirming ? (
     <button type="button" onClick={() => void refresh()} className={primary}>Confirming · check again</button>
   ) : (
-    <button type="button" onClick={() => void claim()} disabled={claiming || !signMessage} className={primary}>
-      {claiming ? "Sign in your wallet, then wait…" : `Get ${tokenAmount} ${TEST_COLLATERAL.symbol}`}
-    </button>
+    <div className="flex flex-col gap-2">
+      <button type="button" onClick={() => void claim()} disabled={claiming || !signMessage} className={primary}>
+        {phase === "sign" ? "Waiting for your wallet…" : phase === "send" ? `Sending your ${TEST_COLLATERAL.symbol}…` : `Get ${tokenAmount} ${TEST_COLLATERAL.symbol}`}
+      </button>
+      {phase === "sign" && (
+        <button type="button" onClick={() => { attempt.current += 1; setPhase("idle"); }} className="mx-auto cursor-pointer text-xs text-muted underline-offset-4 hover:text-ink hover:underline">
+          Cancel
+        </button>
+      )}
+    </div>
   );
 
   return (
