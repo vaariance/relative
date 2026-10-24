@@ -20,7 +20,7 @@ export function positionName(classId: string): string {
 }
 
 export function positionNote(classId: string): string {
-  return classId === CRYPTO_CLASS ? "Tracks the $CRYPTO index of 30 coins." : `Tracks how ${classId} performs against $CRYPTO. You do not own ${classId}.`;
+  return classId === CRYPTO_CLASS ? "Tracks the $CRYPTO index: every listed coin, weighted equally." : `Tracks how ${classId} performs against $CRYPTO. You do not own ${classId}.`;
 }
 const DEFAULT_DECIMALS = 0;
 const BATCH_SECONDS = 60;

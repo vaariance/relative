@@ -439,12 +439,12 @@ const ROSTER_NARROW = 4;
 
 const questions: Question[] = [
   { ask: "What is Relative?", answer: "A market where you back a coin to do better than the rest of crypto. You are not betting on the price going up. You are betting on your coin beating the others." },
-  { ask: "What is \"the market\"?", answer: "It is the average of all 30 coins on the board, with each coin counted equally. Every coin is scored against that average." },
+  { ask: "What is \"the market\"?", answer: "It is the average of every coin on the board, with each coin counted equally. Every coin is scored against that average." },
   { ask: "How do I win?", answer: "Your share grows when your coin does better than the market. A coin can fall in price and still win, as long as it falls less than the rest." },
   { ask: "Can I lose money?", answer: "Yes. If your coin falls behind the market, your share shrinks." },
   { ask: "Where do winnings come from?", answer: "From the other people in the pool. Everyone's money sits in one shared pool. When your coin pulls ahead, value moves to its backers from the coins that fell behind. Nothing is created from nowhere." },
   { ask: "Do I own the coin I back?", answer: "No. You hold a share of the pool that follows how the coin does against the market. You never hold the coin itself." },
-  { ask: "Which coins can I back?", answer: "The 30 coins on the board, including Bitcoin, Ethereum, Solana and a set of newer names. Stablecoins are left out because their price is not meant to move." },
+  { ask: "Which coins can I back?", answer: "Every coin on the board, including Bitcoin, Ethereum, Solana and a set of newer names. Stablecoins are left out because their price is not meant to move." },
   { ask: "How fast does an order fill?", answer: "At the next price, usually within about a minute. The price is not locked at the moment you tap, so the fill can differ a little from what you saw." },
   { ask: "Where do prices come from?", answer: "From Kraken, once a minute. If Kraken had no trade for a coin in that minute, the price comes from Coinbase, then Bybit." },
   { ask: "Can I move from one coin to another?", answer: "Yes. You can move what you have behind one coin to another coin without cashing out first." },
@@ -456,7 +456,7 @@ const questions: Question[] = [
 
 export async function Landing() {
   const [board, logos] = await Promise.all([loadBoard(), getLogos()]);
-  const total = Math.max(board?.count ?? 30, ROSTER.length);
+  const total = Math.max(board?.count ?? ROSTER.length, ROSTER.length);
   const star = board?.star ?? { rank: 1, id: "SOL", name: "Solana", lead: 0 };
   const up = star.lead >= 0;
   const picks = [...new Set([star.id, ...(board?.top ?? []).map((row) => row.id), "SOL", "BTC", "ETH"])].slice(0, 3);
@@ -642,7 +642,7 @@ export async function Landing() {
               <p {...stylex.props(styles.label)}>Status</p>
               <span {...stylex.props(styles.footFact)}>Solana devnet</span>
               <span {...stylex.props(styles.footFact)}>Devnet USDC only</span>
-              <span {...stylex.props(styles.footFact)}>{board?.count ?? 30} coins ranked</span>
+              <span {...stylex.props(styles.footFact)}>{board ? `${board.count} coins ranked` : "Coins ranked live"}</span>
               <span {...stylex.props(styles.footFact)}>Prices every minute</span>
             </div>
             <nav aria-label="Legal" {...stylex.props(styles.footColumn)}>
