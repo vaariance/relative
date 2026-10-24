@@ -8,12 +8,12 @@ const U128_MAX = (1n << 128n) - 1n;
 export type Operation = "deposit" | "switch" | "redeem";
 
 export type Intent =
-  | { operation: "deposit"; toClass: string; amount: string; minimumUnits: string; expiryBatch: number }
+  | { operation: "deposit"; toClass: string; amount: string; minimumUnits: string; expiryBatch: number; collateralMint?: string }
   | { operation: "switch"; fromClass: string; toClass: string; units: string; minimumUnits: string; expiryBatch: number }
   | { operation: "redeem"; fromClass: string; units: string; minimumProceeds: string; expiryBatch: number }
   | { operation: "cancel"; requestId: string }
-  | { operation: "refund"; requestId: string }
-  | { operation: "withdraw"; amount: string }
+  | { operation: "refund"; requestId: string; collateralMint?: string }
+  | { operation: "withdraw"; amount: string; collateralMint?: string }
   | { operation: "epoch-entry"; opensAt: number; grossStake: string; basket: string[]; backedAsset: string }
   | { operation: "epoch-withdraw"; opensAt: number; nonce: string };
 
@@ -28,6 +28,7 @@ export interface PlanInput {
   validForBatches: number;
   targetBatch: number | null;
   collateralDecimals: number;
+  collateralMint?: string;
 }
 
 export type Planned = { intent: Intent; problem: null } | { intent: null; problem: string };
@@ -61,7 +62,8 @@ export function planRequest(input: PlanInput): Planned {
     if (amount <= 0n || amount > U64_MAX) return refuse("Enter an amount above zero.");
     const minimumUnits = minimumOf(input.minimum, unitDigits, U128_MAX);
     if (minimumUnits === null) return refuse("The minimum units is not a valid number.");
-    return { intent: { operation, toClass, amount: amount.toString(), minimumUnits: minimumUnits.toString(), expiryBatch }, problem: null };
+    const collateral = input.collateralMint ? { collateralMint: input.collateralMint } : {};
+    return { intent: { operation, toClass, amount: amount.toString(), minimumUnits: minimumUnits.toString(), expiryBatch, ...collateral }, problem: null };
   }
 
   if (fromClass === null) return refuse("Choose the class to take units from.");

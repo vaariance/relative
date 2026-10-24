@@ -27,6 +27,10 @@ export function SwapForm({ classes, nextBatch, decimals }: { classes: readonly s
   const [amount, setAmount] = useState("");
   const [picked, setPicked] = useState(classes[0] ?? "");
   const classId = classes.includes(picked) ? picked : (classes[0] ?? "");
+  const [mint, setMint] = useState<string | null>(null);
+  const options = market.collaterals;
+  const chosen = options.find((item) => item.mint === mint) ?? options.find((item) => item.primary) ?? null;
+  const collateralMint = buying && options.length > 1 && chosen ? chosen.mint : undefined;
 
   const parsed = Number(amount);
   const empty = amount.trim() === "";
@@ -42,12 +46,14 @@ export function SwapForm({ classes, nextBatch, decimals }: { classes: readonly s
     validForBatches: batchesFor(market.interval),
     targetBatch: open.batch?.batch ?? null,
     collateralDecimals: decimals,
+    collateralMint,
   });
   const { quote, pending, problem } = useQuote(planned.intent);
   const quoted = quote === null ? null : buying ? (quote.mintedUnits === null ? null : toNumber(quote.mintedUnits, unitDigits(decimals))) : toNumber(quote.proceeds ?? quote.net, decimals);
   const blocked = unitsProblem ? QUOTE_MESSAGES.balance : problem ? QUOTE_MESSAGES[problem] : null;
   const name = nameOf(classId);
-  const give = buying ? COLLATERAL.symbol : name;
+  const symbol = chosen?.symbol ?? COLLATERAL.symbol;
+  const give = buying ? symbol : name;
   const get = buying ? name : COLLATERAL.symbol;
   const picker = (id: string) =>
     classes.length > 1 ? (
@@ -73,7 +79,20 @@ export function SwapForm({ classes, nextBatch, decimals }: { classes: readonly s
           </div>
           <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
             <input id="swap-amount" inputMode="decimal" placeholder="0" value={amount} onChange={(event) => setAmount(event.target.value)} className={field} />
-            {buying ? <span className={fixed}>{give}</span> : picker("swap-give")}
+            {buying && options.length > 1 ? (
+              <span className="relative">
+                <select aria-label="Pay with" value={chosen?.mint ?? ""} onChange={(event) => setMint(event.target.value)} className={select}>
+                  {options.map((item) => (
+                    <option key={item.mint} value={item.mint}>{item.symbol}</option>
+                  ))}
+                </select>
+                <ChevronDown size={14} aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted" />
+              </span>
+            ) : buying ? (
+              <span className={fixed}>{give}</span>
+            ) : (
+              picker("swap-give")
+            )}
           </div>
         </div>
 

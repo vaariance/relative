@@ -40,7 +40,7 @@ export async function buildTransaction(owner: string, intent: Intent): Promise<O
     switch (intent.operation) {
       case "deposit": {
         const expectedFeeVersion = await feeVersion();
-        return (await api.buildDeposit({ owner, toClass: intent.toClass, amount: intent.amount, minimumUnits: intent.minimumUnits, expiryBatch: intent.expiryBatch, expectedFeeVersion })).data;
+        return (await api.buildDeposit({ owner, toClass: intent.toClass, amount: intent.amount, minimumUnits: intent.minimumUnits, expiryBatch: intent.expiryBatch, expectedFeeVersion, collateralMint: intent.collateralMint })).data;
       }
       case "switch": {
         const expectedFeeVersion = await feeVersion();
@@ -53,9 +53,9 @@ export async function buildTransaction(owner: string, intent: Intent): Promise<O
       case "cancel":
         return (await api.buildCancel({ owner, requestId: intent.requestId })).data;
       case "refund":
-        return (await api.buildRefund({ owner, requestId: intent.requestId })).data;
+        return (await api.buildRefund({ owner, requestId: intent.requestId, collateralMint: intent.collateralMint })).data;
       case "withdraw":
-        return (await api.buildWithdraw({ owner, amount: intent.amount })).data;
+        return (await api.buildWithdraw({ owner, amount: intent.amount, collateralMint: intent.collateralMint })).data;
       case "epoch-entry":
         return (await api.buildEpochEntry({ owner, opensAt: intent.opensAt, grossStake: intent.grossStake, basket: intent.basket, backedAsset: intent.backedAsset })).data;
       case "epoch-withdraw":
