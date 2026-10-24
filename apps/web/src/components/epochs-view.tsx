@@ -301,16 +301,34 @@ function PromoCard({ onExplain }: { onExplain: () => void }) {
   );
 }
 
-const PAYOUT_STEPS = [
-  { title: "Back a coin", body: "Pick one coin. The other 29 are your comparison basket.", formula: "Move = closing ref / entry ref − 1" },
-  { title: "Get a score", body: "Your coin's rise as a share of all the basket's rises. Falls count as zero.", formula: "Score = your coin's rise / all rises" },
-  { title: "Weight it", body: "Your score is multiplied by your net stake.", formula: "Weight = net stake × score" },
-  { title: "Share the pot", body: "Every entry takes the pot in proportion to its weight.", formula: "Payout = pot × weight / total weight" },
+interface Slide {
+  kicker: string;
+  title: string;
+  body: string;
+  formula?: string;
+  visual?: "split";
+}
+
+const PAYOUT_SLIDES: Slide[] = [
+  { kicker: "Step 1", title: "Back a coin", body: "Pick one coin. The other 29 become your comparison basket.", formula: "Move = closing ref / entry ref − 1" },
+  { kicker: "Step 2", title: "Get a score", body: "Your coin's rise as a share of all the basket's rises. Coins that fell count as zero.", formula: "Score = your coin's rise / all rises" },
+  { kicker: "Step 3", title: "Weight it", body: "Your score is multiplied by your net stake.", formula: "Weight = net stake × score" },
+  { kicker: "Step 4", title: "Share the pot", body: "Every entry takes a slice of the pot in proportion to its weight.", formula: "Payout = pot × weight / total weight" },
+  { kicker: "Example", title: "Two entries, one pot", body: "Each has a net stake of 99.98. Scores of 10% and 30% split the 199.96 pot 25% / 75%. The first coin beat $CRYPTO and the entry still lost money.", visual: "split" },
+  { kicker: "Good to know", title: "Scores are not odds", body: "Other entries' stakes, entry times and scores decide the money, and several entries can be paid. If every score is zero, everyone is refunded in full, fee included." },
 ];
 
 function PayoutModal({ onClose }: { onClose: () => void }) {
+  const [index, setIndex] = useState(0);
+  const last = PAYOUT_SLIDES.length - 1;
+  const slide = PAYOUT_SLIDES[index];
+
   useEffect(() => {
-    const key = (event: KeyboardEvent) => event.key === "Escape" && onClose();
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+      if (event.key === "ArrowRight") setIndex((value) => Math.min(last, value + 1));
+      if (event.key === "ArrowLeft") setIndex((value) => Math.max(0, value - 1));
+    };
     const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     window.addEventListener("keydown", key);
@@ -318,59 +336,78 @@ function PayoutModal({ onClose }: { onClose: () => void }) {
       document.body.style.overflow = overflow;
       window.removeEventListener("keydown", key);
     };
-  }, [onClose]);
+  }, [onClose, last]);
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-end justify-center p-0 sm:items-center sm:p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center sm:p-6" onClick={onClose}>
       <div aria-hidden="true" className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
       <section
         role="dialog"
         aria-modal="true"
+        aria-roledescription="carousel"
         aria-labelledby="payout-title"
         onClick={(event) => event.stopPropagation()}
-        className="relative isolate flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl border border-white/[0.08] bg-surface shadow-[0_30px_80px_rgba(0,0,0,0.6)] sm:rounded-3xl"
+        className="relative isolate flex w-full max-w-md flex-col overflow-hidden rounded-t-3xl border border-white/[0.08] bg-surface shadow-[0_30px_80px_rgba(0,0,0,0.6)] sm:rounded-3xl"
       >
-        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-56 bg-[radial-gradient(80%_100%_at_20%_0%,rgba(242,98,46,0.35),transparent_70%),radial-gradient(60%_100%_at_100%_0%,rgba(124,58,237,0.25),transparent_70%)]" />
-        <header className="flex items-start justify-between gap-4 px-6 pb-2 pt-6">
-          <div className="flex flex-col gap-2">
-            <span className="text-[11px] uppercase tracking-[0.2em] text-accent">Epoch payouts</span>
-            <h2 id="payout-title" className="text-2xl font-semibold tracking-tight">How your payout works</h2>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close" className="grid size-9 shrink-0 cursor-pointer place-items-center rounded-full bg-white/5 text-muted transition-colors duration-150 hover:bg-white/10 hover:text-ink">
+        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-64 bg-[radial-gradient(90%_100%_at_15%_0%,rgba(242,98,46,0.32),transparent_70%),radial-gradient(70%_100%_at_100%_0%,rgba(124,58,237,0.22),transparent_70%)]" />
+
+        <header className="flex items-center justify-between px-7 pt-6">
+          <span className="text-[11px] uppercase tracking-[0.2em] text-accent">How payouts work</span>
+          <button type="button" onClick={onClose} aria-label="Close" className="grid size-9 cursor-pointer place-items-center rounded-full bg-white/5 text-muted transition-colors duration-150 hover:bg-white/10 hover:text-ink">
             <X size={16} aria-hidden="true" />
           </button>
         </header>
 
-        <div className="flex flex-col gap-6 overflow-y-auto px-6 pb-6 pt-4">
-          <ol className="grid gap-3 sm:grid-cols-2">
-            {PAYOUT_STEPS.map((step, index) => (
-              <li key={step.title} className="flex flex-col gap-2 rounded-2xl border border-white/[0.06] bg-bg/60 p-4">
-                <span className="flex items-center gap-2.5">
-                  <span className={`grid size-6 place-items-center rounded-full text-[11px] font-semibold text-white ${gradient}`}>{index + 1}</span>
-                  <span className="text-sm font-medium">{step.title}</span>
-                </span>
-                <p className="text-xs leading-relaxed text-muted">{step.body}</p>
-                <code className="num mt-auto rounded-lg bg-white/[0.04] px-2.5 py-1.5 text-[11px] text-ink">{step.formula}</code>
-              </li>
-            ))}
-          </ol>
-
-          <div className="flex flex-col gap-3 rounded-2xl border border-white/[0.06] bg-bg/60 p-4">
-            <span className="text-[11px] uppercase tracking-wider text-muted">Example</span>
-            <p className="text-xs leading-relaxed text-muted">Two 100 {COLLATERAL.symbol} entries, each with a net stake of 99.98. Scores of 10% and 30% split the 199.96 pot 25% / 75%.</p>
-            <div className="flex h-9 overflow-hidden rounded-xl text-[11px] font-medium">
-              <span className="flex w-1/4 items-center justify-center bg-surface-2 text-muted">49.99</span>
-              <span className={`flex w-3/4 items-center justify-center text-white ${gradient}`}>149.97</span>
-            </div>
-            <p className="text-xs text-muted">The first entry rose against $CRYPTO and still lost money.</p>
+        <div key={index} aria-live="polite" className="flex min-h-[300px] flex-col gap-5 px-7 pb-4 pt-8 motion-safe:animate-[slide-in_200ms_ease-out]">
+          <span className={`grid size-12 place-items-center rounded-2xl text-lg font-semibold text-white shadow-[0_8px_30px_rgba(242,98,46,0.35)] ${gradient}`}>
+            {index < 4 ? index + 1 : index === 4 ? "Ex" : "!"}
+          </span>
+          <div className="flex flex-col gap-3">
+            <span className="text-[11px] uppercase tracking-wider text-muted">{slide.kicker}</span>
+            <h2 id="payout-title" className="text-2xl font-semibold tracking-tight">{slide.title}</h2>
+            <p className="text-sm leading-relaxed text-muted">{slide.body}</p>
           </div>
-
-          <ul className="flex flex-col gap-2 text-xs text-muted">
-            <li className="flex gap-2"><CircleAlert size={13} aria-hidden="true" className="mt-0.5 shrink-0 text-accent" />A score is not a win probability or your share of the pot. Other entries&apos; stakes, entry times and scores decide the money, and several entries can be paid.</li>
-            <li className="flex gap-2"><Check size={13} aria-hidden="true" className="mt-0.5 shrink-0 text-up" />If every score is zero, every entry is refunded in full, held fee included.</li>
-            <li className="flex gap-2"><Lock size={13} aria-hidden="true" className="mt-0.5 shrink-0 text-muted" />These formulas explain the rules. The protocol decides the actual scores, rounding and payouts.</li>
-          </ul>
+          {slide.formula && <code className="num mt-auto w-fit rounded-xl bg-white/[0.05] px-3.5 py-2.5 text-xs text-ink">{slide.formula}</code>}
+          {slide.visual === "split" && (
+            <div className="mt-auto flex flex-col gap-2">
+              <div className="flex h-10 overflow-hidden rounded-xl text-xs font-medium">
+                <span className="flex w-1/4 items-center justify-center bg-surface-2 text-muted">49.99</span>
+                <span className={`flex w-3/4 items-center justify-center text-white ${gradient}`}>149.97</span>
+              </div>
+              <div className="flex justify-between text-[11px] text-muted"><span>Score 10%</span><span>Score 30%</span></div>
+            </div>
+          )}
         </div>
+
+        <footer className="flex items-center justify-between gap-4 px-7 pb-7 pt-4">
+          <div className="flex items-center gap-1.5" role="tablist" aria-label="Slides">
+            {PAYOUT_SLIDES.map((item, dot) => (
+              <button
+                key={item.title}
+                type="button"
+                role="tab"
+                aria-selected={dot === index}
+                aria-label={`${item.kicker}: ${item.title}`}
+                onClick={() => setIndex(dot)}
+                className={`h-1.5 cursor-pointer rounded-full transition-all duration-200 ${dot === index ? "w-6 bg-accent" : "w-1.5 bg-white/20 hover:bg-white/40"}`}
+              />
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setIndex(index - 1)} disabled={index === 0} aria-label="Previous" className="grid size-10 cursor-pointer place-items-center rounded-full bg-white/5 text-ink transition-colors duration-150 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-30">
+              <ChevronLeft size={16} aria-hidden="true" />
+            </button>
+            {index < last ? (
+              <button type="button" onClick={() => setIndex(index + 1)} className={`inline-flex h-10 cursor-pointer items-center gap-1.5 rounded-full px-5 text-sm font-medium text-white ${gradient}`}>
+                Next <ChevronRight size={16} aria-hidden="true" />
+              </button>
+            ) : (
+              <button type="button" onClick={onClose} className="inline-flex h-10 cursor-pointer items-center rounded-full bg-white px-5 text-sm font-medium text-black">
+                Got it
+              </button>
+            )}
+          </div>
+        </footer>
       </section>
     </div>,
     document.body,
