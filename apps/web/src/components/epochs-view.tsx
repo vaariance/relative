@@ -3,7 +3,7 @@
 import type { Epoch, EpochConfiguration, EpochLot, EpochOverview, PreviewHistory } from "@eox/app-api";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
-import { Activity, ArrowLeft, BarChart3, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Clock, Coins, LayoutList, Lock, Plus, Timer, X } from "lucide-react";
+import { Activity, ArrowLeft, BarChart3, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Clock, Coins, LayoutList, Lock, Plus, X } from "lucide-react";
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -27,10 +27,9 @@ const BASKET_SIZE = 30;
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ASSOCIATED_TOKEN_PROGRAM = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
-const card = "min-w-0 rounded-2xl border border-white/[0.06] bg-surface";
-const gradient = "bg-[linear-gradient(90deg,#f2622e,#c2418f_60%,#7c3aed)]";
+const card = "min-w-0 rounded-[24px] border border-white/[0.06] bg-surface";
+const gradient = "bg-[linear-gradient(90deg,#f2622e,#ff8a4c)]";
 const primary = `flex h-11 w-full items-center justify-center gap-2 rounded-pill ${gradient} text-sm font-medium text-white`;
-const pill = "inline-flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-pill bg-surface-2 px-4 text-sm transition-colors duration-150 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40";
 const quiet = "flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-pill bg-surface-2 text-sm transition-colors duration-150 hover:bg-white/10";
 const well = "rounded-xl bg-bg/70 p-3";
 const eyebrow = "text-[11px] uppercase tracking-wider text-muted";
@@ -42,12 +41,6 @@ function useNow(start: number): number {
     return () => window.clearInterval(timer);
   }, []);
   return now;
-}
-
-function useMounted(): boolean {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  return mounted;
 }
 
 function pct(value: number | null, digits = 3): string {
@@ -132,23 +125,6 @@ function CardHead({ icon, title, children }: { icon: ReactNode; title: string; c
   );
 }
 
-function Figure({ main, dim, unit }: { main: string; dim?: string; unit?: string }) {
-  return (
-    <p className="num text-[2.5rem] font-semibold leading-none tracking-tight">
-      {main}
-      {dim && <span className="text-muted/50">{dim}</span>}
-      {unit && <span className="ml-2 text-base font-normal text-muted">{unit}</span>}
-    </p>
-  );
-}
-
-function splitAmount(value: number | null, digits = 2): { main: string; dim?: string } {
-  if (value === null) return { main: "—" };
-  const text = formatAmount(value, digits);
-  const dot = text.lastIndexOf(".");
-  return dot < 0 ? { main: text } : { main: text.slice(0, dot), dim: text.slice(dot) };
-}
-
 function ModeSwitch() {
   return (
     <div role="tablist" aria-label="Mode" className="inline-flex rounded-pill bg-surface p-1">
@@ -200,110 +176,220 @@ function bannerText(epoch: Epoch, stage: Stage): string {
   }
 }
 
-function Banner({ epoch, stage }: { epoch: Epoch; stage: Stage }) {
-  const key = `${epoch.address}:${stage}`;
-  const [hidden, setHidden] = useState<string | null>(null);
-  if (hidden === key) return null;
+const HOUR = 3600;
+const DOME_POINTS = (() => {
+  const points: { left: number; top: number; size: number; depth: number }[] = [];
+  const count = 44;
+  for (let index = 0; index < count; index += 1) {
+    const y = 1 - (index / (count - 1)) * 2;
+    const radius = Math.sqrt(1 - y * y);
+    const theta = index * 2.399963;
+    const x = Math.cos(theta) * radius;
+    const z = Math.sin(theta) * radius;
+    if (z < 0.15) continue;
+    const round = (value: number) => Math.round(value * 100) / 100;
+    points.push({ left: round(50 + x * 42), top: round(50 - y * 42), size: Math.round(18 + z * 26), depth: round(z) });
+  }
+  return points.sort((a, b) => a.depth - b.depth);
+})();
+
+function CoinDome({ coins }: { coins: string[] }) {
+  if (coins.length === 0) return null;
   return (
-    <div className={`flex items-center gap-3 rounded-xl border border-white/[0.06] px-4 py-2.5 text-xs ${refundStage(stage) ? "bg-warn/10 text-warn" : "bg-[linear-gradient(90deg,rgba(242,98,46,0.22),rgba(194,65,143,0.12)_55%,rgba(124,58,237,0.06))] text-ink"}`}>
-      <CircleAlert size={15} aria-hidden="true" className="shrink-0" />
-      <p className="min-w-0 flex-1">{bannerText(epoch, stage)}</p>
-      <button type="button" onClick={() => setHidden(key)} aria-label="Dismiss" className="grid size-6 shrink-0 cursor-pointer place-items-center rounded-full text-muted hover:text-ink">
-        <X size={14} aria-hidden="true" />
-      </button>
+    <div aria-hidden="true" className="pointer-events-none absolute -bottom-32 right-[-60px] hidden size-[380px] sm:block lg:right-4">
+      <div className="absolute inset-[6%] rounded-full bg-[radial-gradient(circle_at_34%_28%,#3a3a40_0%,#1c1c1f_42%,#0d0d0f_100%)] shadow-[inset_-24px_-34px_70px_rgba(0,0,0,0.65),inset_18px_22px_50px_rgba(242,98,46,0.18),0_0_90px_rgba(242,98,46,0.28)]" />
+      <div className="absolute inset-[6%] rounded-full bg-[radial-gradient(circle_at_78%_82%,rgba(242,98,46,0.45),transparent_55%)]" />
+      {DOME_POINTS.map((point, index) => (
+        <span key={index} className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full shadow-[0_6px_14px_rgba(0,0,0,0.55)] ring-2 ring-white/15" style={{ left: `${point.left}%`, top: `${point.top}%`, opacity: Math.round((0.55 + point.depth * 0.45) * 100) / 100 }}>
+          <CoinIcon id={coins[index % coins.length]!} size={point.size} />
+        </span>
+      ))}
     </div>
   );
 }
 
-function ClockCard({ epochs, epoch, now, canEnter, onSelect, onEnter }: { epochs: Epoch[]; epoch: Epoch; now: number; canEnter: boolean; onSelect: (address: string) => void; onEnter: () => void }) {
-  const mounted = useMounted();
-  const stage = stageOf(epoch, now);
-  const index = epochs.findIndex((item) => item.address === epoch.address);
-  const previous = epochs[index - 1];
-  const next = epochs[index + 1];
-  const local = mounted ? new Date(epoch.closesAt * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null;
-  const ticking = stage === "open" || stage === "upcoming";
-  const time = ticking ? countdown((stage === "open" ? epoch.closesAt : epoch.opensAt) - now) : null;
-  const label = stage === "open" ? "Closes in" : stage === "upcoming" ? "Opens in" : stage === "unopened" ? "Was due to open" : "Closed at";
-  const shown = stage === "unopened" ? epoch.opensAt : epoch.closesAt;
-  const ends = stage === "open" || stage === "upcoming" ? "Closes" : stage === "unopened" ? "Was due to close" : "Closed";
-
-  return (
-    <section className={`${card} flex flex-col gap-5 p-5`}>
-      <CardHead icon={<Timer size={14} aria-hidden="true" />} title="Epoch">
-        <span className="num text-xs text-muted">{windowText(epoch)}</span>
-      </CardHead>
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="flex flex-col gap-3">
-          <span className={eyebrow}>{label}</span>
-          {time ? <Figure main={time.slice(0, 5)} dim={time.slice(5)} /> : <Figure main={utcTime(shown)} unit="UTC" />}
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-            <StageChip stage={stage} />
-            <span className="num">{ends} {utcTime(epoch.closesAt)} UTC{local ? ` · ${local} your time` : ""}</span>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {canEnter && (
-            <button type="button" onClick={onEnter} className={`hidden h-9 cursor-pointer items-center gap-1.5 rounded-pill px-4 text-sm font-medium text-white shadow-none xl:inline-flex xl:shadow-[0_0_24px_rgba(242,98,46,0.35)] ${gradient}`}>
-              <Plus size={14} aria-hidden="true" /> New entry
-            </button>
-          )}
-          <button type="button" className={pill} disabled={!previous} onClick={() => previous && onSelect(previous.address)}>
-            <ChevronLeft size={14} aria-hidden="true" /> Previous
-          </button>
-          <button type="button" className={pill} disabled={!next} onClick={() => next && onSelect(next.address)}>
-            Next <ChevronRight size={14} aria-hidden="true" />
-          </button>
-        </div>
-      </div>
-    </section>
-  );
+function heroClock(epoch: Epoch, stage: Stage, now: number): { label: string; value: string } {
+  if (stage === "open") return { label: "Closes in", value: countdown(epoch.closesAt - now) };
+  if (stage === "upcoming") return { label: "Opens in", value: countdown(epoch.opensAt - now) };
+  if (stage === "unopened") return { label: "Was due to open", value: `${utcTime(epoch.opensAt)} UTC` };
+  return { label: "Closed", value: `${utcTime(epoch.closesAt)} UTC` };
 }
 
-function PotCard({ epoch, now, decimals }: { epoch: Epoch; now: number; decimals: number }) {
+function HeroCard({ epoch, now, decimals, coins, canEnter, onEnter, onExplain }: { epoch: Epoch; now: number; decimals: number; coins: string[]; canEnter: boolean; onEnter: () => void; onExplain: () => void }) {
   const stage = stageOf(epoch, now);
-  const step = timelineStep(stage);
+  const clock = heroClock(epoch, stage, now);
   const settled = epoch.settlementPot !== null && (stage === "allocating" || stage === "settled");
-  const net = settled ? units(epoch.settlementPot!, decimals) : epoch.ledger ? units(epoch.ledger.activeNet, decimals) : null;
+  const pot = settled ? units(epoch.settlementPot!, decimals) : epoch.ledger ? units(epoch.ledger.activeNet, decimals) : null;
   const queued = epoch.ledger ? units(epoch.ledger.pendingGross, decimals) : null;
   const entries = epoch.nextNonce !== null ? Number(epoch.nextNonce) : (epoch.lots?.executed ?? null);
-  const figure = splitAmount(net);
+  const day = new Date(epoch.opensAt * 1000).toUTCString().slice(5, 11);
+  const stats = [
+    { label: clock.label, value: clock.value },
+    { label: settled ? "Settlement pot" : "Net stake pot", value: pot === null ? "—" : `${formatAmount(pot, 2)} ${COLLATERAL.symbol}` },
+    { label: "Entries", value: entries === null ? "—" : String(entries) },
+    { label: "Queued", value: queued === null ? "—" : `${formatAmount(queued, 2)} ${COLLATERAL.symbol}` },
+  ];
 
   return (
-    <section className={`${card} flex flex-col gap-5 p-5`}>
-      <CardHead icon={<Coins size={14} aria-hidden="true" />} title="Pot" />
-      <div className="flex flex-col gap-3">
-        <span className={eyebrow}>{settled ? "Settlement pot" : "Net stake pot"}</span>
-        <Figure main={figure.main} dim={figure.dim} unit={COLLATERAL.symbol} />
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="num rounded-pill bg-surface-2 px-2 py-0.5">{entries ?? "—"} entries</span>
-          <span className="num text-muted">Queued {queued === null ? "—" : formatAmount(queued, 2)} {COLLATERAL.symbol}</span>
+    <section className="relative isolate min-h-[260px] overflow-hidden rounded-[28px] border border-white/[0.06] bg-surface p-6 sm:p-9">
+      <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[radial-gradient(60%_90%_at_88%_100%,rgba(242,98,46,0.28),transparent_70%),radial-gradient(50%_80%_at_0%_0%,rgba(255,255,255,0.05),transparent_70%)]" />
+      <CoinDome coins={coins} />
+      <div className="relative flex max-w-xl flex-col gap-4">
+        <span className="inline-flex w-fit items-center gap-1.5 rounded-pill bg-surface-2 px-2.5 py-1 text-[11px] font-medium text-ink">
+          <span className={`size-1.5 rounded-full ${stage === "open" ? "bg-up" : refundStage(stage) ? "bg-warn" : "bg-muted"}`} />
+          {STAGE_LABEL[stage]}
+        </span>
+        <h2 className="text-3xl font-semibold leading-tight tracking-tight text-ink sm:text-4xl">
+          {day} Epoch
+          <span className="mt-1 block text-base font-normal text-muted">{utcTime(epoch.opensAt)}–{utcTime(epoch.closesAt)} UTC</span>
+        </h2>
+        <p className="max-w-md text-sm leading-relaxed text-muted">{bannerText(epoch, stage)}</p>
+        <dl className="flex flex-wrap gap-x-6 gap-y-2">
+          {stats.map((stat) => (
+            <div key={stat.label} className="flex flex-col">
+              <dt className="text-[11px] text-muted">{stat.label}</dt>
+              <dd className="num text-sm font-semibold text-ink">{stat.value}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="mt-1 flex flex-wrap gap-2">
+          {canEnter && (
+            <button type="button" onClick={onEnter} className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-xl bg-accent px-5 text-sm font-medium text-white shadow-[0_8px_24px_rgba(242,98,46,0.35)] transition-transform duration-150 hover:-translate-y-0.5">
+              <Plus size={15} aria-hidden="true" /> New entry
+            </button>
+          )}
+          <button type="button" onClick={onExplain} aria-haspopup="dialog" className={`inline-flex h-11 cursor-pointer items-center rounded-xl px-5 text-sm font-medium transition-transform duration-150 hover:-translate-y-0.5 ${canEnter ? "bg-surface-2 text-ink hover:bg-white/10" : "bg-accent text-white shadow-[0_8px_24px_rgba(242,98,46,0.35)]"}`}>
+            How payouts work
+          </button>
         </div>
-      </div>
-      <div className="flex gap-1" aria-hidden="true">
-        {TIMELINE.map((label, index) => (
-          <span key={label} className={`h-1.5 flex-1 rounded-full ${refundStage(stage) ? "bg-warn/40" : index < step ? "bg-accent" : index === step ? "bg-accent/40" : "bg-surface-2"}`} />
-        ))}
       </div>
     </section>
   );
 }
 
-function PromoCard({ onExplain }: { onExplain: () => void }) {
+const TILE_TONE: Record<Stage, string> = {
+  upcoming: "bg-surface-2 text-ink",
+  unopened: "bg-surface-2 text-muted",
+  open: "bg-accent/15 text-accent",
+  closing: "bg-warn/15 text-warn",
+  expired: "bg-warn/15 text-warn",
+  scoring: "bg-warn/15 text-warn",
+  allocating: "bg-warn/15 text-warn",
+  settled: "bg-ink text-bg",
+  voided: "bg-warn/15 text-warn",
+};
+
+function RoundList({ epochs, selected, now, onSelect }: { epochs: Epoch[]; selected: string; now: number; onSelect: (address: string) => void }) {
   return (
-    <section className="relative isolate flex min-w-0 flex-col justify-between gap-5 overflow-hidden rounded-2xl p-5">
-      <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[radial-gradient(120%_120%_at_0%_0%,#f2622e_0%,#b23a74_45%,#3b1d6e_100%)] opacity-90" />
-      <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[radial-gradient(60%_60%_at_100%_100%,rgba(0,0,0,0.35),transparent)]" />
-      <div className="flex flex-col gap-2">
-        <h2 className="text-lg font-semibold leading-tight text-white">One pot. Four hours.</h2>
-        <p className="text-xs leading-relaxed text-white/80">Every entry backs one coin in a basket of 30 and counts from its own execution. At the close, the pot is shared by score: your coin's share of the basket's gains against $CRYPTO, weighted by your net stake.</p>
+    <div className="flex min-w-0 flex-col gap-2">
+      <h3 className="px-1 text-sm font-medium">Rounds</h3>
+      <ul className="flex max-h-[420px] flex-col gap-2 overflow-y-auto pr-1 [scrollbar-width:thin]">
+        {[...epochs].reverse().map((item) => {
+          const stage = stageOf(item, now);
+          const on = item.address === selected;
+          const date = new Date(item.opensAt * 1000);
+          const chipText = stage === "open" ? countdown(item.closesAt - now).slice(0, 5) : stage === "upcoming" ? `opens ${utcTime(item.opensAt)}` : `${utcTime(item.closesAt)}`;
+          return (
+            <li key={item.address}>
+              <button type="button" onClick={() => onSelect(item.address)} aria-pressed={on} className={`flex w-full cursor-pointer items-center gap-4 rounded-2xl p-3 text-left transition-colors duration-150 ${on ? "bg-accent text-white shadow-[0_10px_24px_rgba(242,98,46,0.3)]" : "hover:bg-white/[0.04]"}`}>
+                <span className={`grid h-14 w-12 shrink-0 place-items-center rounded-xl py-1 leading-none shadow-[0_5px_0_rgba(0,0,0,0.28)] ${on ? "bg-white/20 text-white" : TILE_TONE[stage]}`}>
+                  <span className="text-[9px] font-medium uppercase tracking-wide opacity-70">{date.toUTCString().slice(0, 3)}</span>
+                  <span className="num text-xl font-semibold">{date.getUTCDate()}</span>
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col gap-1">
+                  <span className="num truncate text-sm font-medium">{utcTime(item.opensAt)}–{utcTime(item.closesAt)} UTC</span>
+                  <span className={`text-[11px] ${on ? "text-white/75" : "text-muted"}`}>{STAGE_LABEL[stage]}</span>
+                  <span className={`num w-fit rounded-md px-1.5 py-0.5 text-[10px] ${on ? "bg-white text-accent" : "bg-surface-2 text-muted"}`}>{chipText}</span>
+                </span>
+                <ChevronRight size={15} aria-hidden="true" className={on ? "text-white" : "text-muted"} />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+const BAR_TONES = [
+  "bg-[linear-gradient(90deg,#f4f4f5,#d4d4d8)] text-[#121214]",
+  "bg-[linear-gradient(90deg,rgba(242,98,46,0.45),#f2622e)] text-white",
+  "bg-[linear-gradient(90deg,#3a3a40,#55555c)] text-ink",
+];
+
+function EntryTimeline({ epoch, lots, now, decimals, connected }: { epoch: Epoch; lots: EpochLot[]; now: number; decimals: number; connected: boolean }) {
+  const span = epoch.closesAt - epoch.opensAt;
+  const at = (time: number) => Math.min(100, Math.max(0, ((time - epoch.opensAt) / span) * 100));
+  const ticks = Array.from({ length: Math.round(span / HOUR) + 1 }, (_, index) => epoch.opensAt + index * HOUR);
+  const live = now >= epoch.opensAt && now < epoch.closesAt;
+  const nowTick = live ? epoch.opensAt + Math.floor((now - epoch.opensAt) / HOUR) * HOUR : null;
+  const mine = lots.filter((lot) => lot.epochOpensAt === epoch.opensAt).sort((a, b) => (a.execution?.timestamp ?? a.admittedAt) - (b.execution?.timestamp ?? b.admittedAt));
+  const shown = mine.slice(0, 6);
+  const grid = "grid grid-cols-[72px_minmax(0,1fr)] items-center gap-3";
+
+  return (
+    <div className="flex min-w-0 flex-col gap-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 px-1">
+        <h3 className="text-sm font-medium">Entry timeline</h3>
+        <span className="text-[11px] text-muted">Each entry counts from its execution to the fixed close</span>
       </div>
-      <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={onExplain} aria-haspopup="dialog" className="h-9 cursor-pointer rounded-pill bg-white px-4 text-sm font-medium text-black transition-opacity duration-150 hover:opacity-90">
-          How payouts work
-        </button>
+      <div className="overflow-x-auto rounded-2xl bg-bg/60 p-4 [scrollbar-width:thin]">
+        <div className="flex min-w-[520px] flex-col gap-3">
+          <div className={grid}>
+            <span className="text-[11px] text-muted">{new Date(epoch.opensAt * 1000).toUTCString().slice(8, 11)}</span>
+            <div className="relative h-8">
+              {ticks.map((tick, index) => (
+                <span key={tick} className={`absolute top-1/2 -translate-y-1/2 ${index === 0 ? "" : index === ticks.length - 1 ? "-translate-x-full" : "-translate-x-1/2"}`} style={{ left: `${at(tick)}%` }}>
+                  <span className={`num grid h-7 min-w-7 place-items-center rounded-full px-1.5 text-[11px] font-medium ${tick === nowTick ? "bg-accent text-white shadow-[0_0_16px_rgba(242,98,46,0.55)]" : "text-ink/80"}`}>{utcTime(tick)}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="relative flex flex-col gap-3">
+            <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-[84px] right-0">
+              {ticks.map((tick) => <span key={tick} className="absolute inset-y-0 w-px bg-white/[0.06]" style={{ left: `${at(tick)}%` }} />)}
+              {live && <span className="absolute inset-y-[-6px] w-0.5 rounded-full bg-accent shadow-[0_0_10px_rgba(242,98,46,0.7)]" style={{ left: `${at(now)}%` }} />}
+            </div>
+            <div className={grid}>
+              <span className="text-[11px] text-muted">Window</span>
+              <div className="relative h-7">
+                <span className="absolute inset-y-0 left-0 right-0 overflow-hidden rounded-lg bg-white/[0.07]">
+                  <span className={`absolute inset-y-0 left-0 ${gradient}`} style={{ width: `${live ? at(now) : now >= epoch.closesAt ? 100 : 0}%` }} />
+                </span>
+                <span className="absolute inset-0 flex items-center px-3 text-[11px] font-medium text-white">{live ? "Entries open" : now < epoch.opensAt ? "Not open yet" : "Entries closed"}</span>
+              </div>
+            </div>
+            {shown.map((lot, index) => {
+              const start = lot.execution?.timestamp ?? lot.admittedAt;
+              const left = at(start);
+              const width = Math.max(4, 100 - left);
+              return (
+                <div key={lot.address} className={grid}>
+                  <span className="flex items-center gap-1.5 truncate text-[11px] text-muted"><CoinIcon id={lot.backedAsset} size={16} />{lot.backedAsset}</span>
+                  <div className="relative h-7">
+                    <span className={`absolute inset-y-0 flex items-center justify-end overflow-hidden rounded-lg px-2.5 text-[10px] font-medium ${lot.execution ? BAR_TONES[index % BAR_TONES.length] : "border border-dashed border-white/30 text-muted"}`} style={{ left: `${left}%`, width: `${width}%` }}>
+                      <span className="num truncate">{lot.execution ? `${utcTime(start, true)} · ${formatAmount(units(lot.grossStake, decimals), 2)} ${COLLATERAL.symbol}` : "Awaiting execution"}</span>
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+            {shown.length === 0 && (
+              <div className={grid}>
+                <span className="text-[11px] text-muted">Entries</span>
+                <p className="py-1.5 text-[11px] text-muted">{connected ? "You have no entries in this Epoch." : "Connect a wallet to see your entries here."}</p>
+              </div>
+            )}
+            {mine.length > shown.length && <p className="pl-[84px] text-[11px] text-muted">+{mine.length - shown.length} more in My entries</p>}
+          </div>
+        </div>
       </div>
-    </section>
+      <div className="flex flex-wrap gap-x-6 gap-y-1 px-1 text-[11px] text-muted">
+        <span className="flex items-center gap-1.5"><span className={`size-2 rounded-full ${gradient}`} />Entry window</span>
+        <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-ink" />Your entries</span>
+        <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-accent" />Now</span>
+      </div>
+    </div>
   );
 }
 
@@ -353,7 +439,7 @@ function PayoutModal({ onClose }: { onClose: () => void }) {
         onClick={(event) => event.stopPropagation()}
         className="relative isolate flex w-full max-w-md flex-col overflow-hidden rounded-t-3xl border border-white/[0.08] bg-surface shadow-[0_30px_80px_rgba(0,0,0,0.6)] sm:rounded-3xl"
       >
-        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-64 bg-[radial-gradient(90%_100%_at_15%_0%,rgba(242,98,46,0.32),transparent_70%),radial-gradient(70%_100%_at_100%_0%,rgba(124,58,237,0.22),transparent_70%)]" />
+        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-64 bg-[radial-gradient(90%_100%_at_15%_0%,rgba(242,98,46,0.32),transparent_70%),radial-gradient(70%_100%_at_100%_0%,rgba(255,255,255,0.05),transparent_70%)]" />
 
         <header className="flex items-center justify-between px-7 pt-6">
           <span className="text-[11px] uppercase tracking-[0.2em] text-accent">How payouts work</span>
@@ -1041,8 +1127,8 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
   const header = (
     <header className="flex flex-wrap items-end justify-between gap-4">
       <div className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold tracking-tight">Epoch</h1>
-        <p className="text-sm text-muted">Back one coin in a basket of 30. Your entry counts from its execution to the fixed Epoch close.</p>
+        <h1 className="text-3xl font-semibold tracking-tight">Epoch</h1>
+        <p className="text-sm text-muted">Your entry counts from its execution to the fixed Epoch close.</p>
       </div>
       <ModeSwitch />
     </header>
@@ -1081,16 +1167,14 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
   };
 
   return (
-    <div className={`relative isolate flex flex-col gap-4 ${open ? "pb-24 xl:pb-0" : ""}`}>
-      <div aria-hidden="true" className="pointer-events-none absolute -top-24 left-1/3 -z-10 h-72 w-2/3 bg-[radial-gradient(closest-side,rgba(242,98,46,0.10),transparent)]" />
+    <div className={`relative isolate flex flex-col gap-5 ${open ? "pb-24 xl:pb-0" : ""}`}>
       {header}
-      <Banner epoch={epoch} stage={stage} />
+      <HeroCard epoch={epoch} now={now} decimals={decimals} coins={coins} canEnter={open} onEnter={enter} onExplain={() => setExplain(true)} />
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-12">
-        <div className="md:col-span-2 xl:col-span-5"><ClockCard epochs={epochs} epoch={epoch} now={now} canEnter={open} onSelect={(address) => setSelected(address)} onEnter={enter} /></div>
-        <div className="xl:col-span-4"><PotCard epoch={epoch} now={now} decimals={decimals} /></div>
-        <div className="flex xl:col-span-3 [&>*]:flex-1"><PromoCard onExplain={() => setExplain(true)} /></div>
-      </div>
+      <section className={`${card} grid gap-6 p-5 lg:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]`}>
+        <RoundList epochs={epochs} selected={epoch.address} now={now} onSelect={(address) => setSelected(address)} />
+        <EntryTimeline epoch={epoch} lots={lots} now={now} decimals={decimals} connected={Boolean(owner)} />
+      </section>
       {!open && (
         <div className="xl:hidden">
           <EntryPanel {...entryProps} anchored={false} />
