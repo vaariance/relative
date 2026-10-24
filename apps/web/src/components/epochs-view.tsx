@@ -17,6 +17,7 @@ import { type Collateral, collateralsOf } from "@/lib/market";
 import type { Intent } from "@/lib/requests";
 import { useAccount } from "./account";
 import { CoinIcon } from "./coin-icon";
+import { EmptyMarket } from "./empty-market";
 import { useLive } from "./live";
 import { SendButton } from "./send-button";
 
@@ -536,17 +537,19 @@ function MovesCard({ epoch, coins, now, backed, canPick, onPick }: { epoch: Epoc
           : "Estimate unavailable";
   const liveBadge = stage === "open" && freshness === "live";
   const empty =
-    stage === "unopened"
-      ? "This Epoch never opened, so it has no moves."
-      : refundStage(stage)
-        ? "No closing reference was recorded, so this Epoch has no result."
-        : stage === "closing"
-          ? "Awaiting the closing reference. A later market price is not substituted."
-          : opening === undefined
-            ? "Loading the estimate at the Epoch start…"
-            : opening === null
-              ? "The estimate at the Epoch start is not available."
-              : "Awaiting the live estimate…";
+    stage === "upcoming"
+      ? { title: "Not open yet", text: `Moves appear once this Epoch opens at ${utcTime(epoch.opensAt)} UTC.`, pending: false }
+      : stage === "unopened"
+        ? { title: "No moves", text: "This Epoch never opened, so it has no moves.", pending: false }
+        : refundStage(stage)
+          ? { title: "No result", text: "No closing reference was recorded, so this Epoch has no result.", pending: false }
+          : stage === "closing"
+            ? { title: "Awaiting the close", text: "A later market price is not substituted for the closing reference.", pending: true }
+            : opening === undefined
+              ? { title: "Loading moves", text: "Reading the estimate at the Epoch start.", pending: true }
+              : opening === null
+                ? { title: "No market data", text: "The estimate at the Epoch start is not available.", pending: false }
+                : { title: "Waiting for prices", text: "Awaiting the live estimate.", pending: true };
 
   const stats = [
     { label: "Leader", value: leader ? leader.id : "—", change: leader?.change ?? null },
@@ -592,10 +595,10 @@ function MovesCard({ epoch, coins, now, backed, canPick, onPick }: { epoch: Epoc
         )}
       </div>
 
-      {stage === "upcoming" ? (
-        <p className="px-5 pb-10 pt-4 text-center text-sm text-muted">Moves appear once this Epoch opens at {utcTime(epoch.opensAt)} UTC.</p>
-      ) : !ready ? (
-        <p className="px-5 pb-10 pt-4 text-center text-sm text-muted">{empty}</p>
+      {!ready || stage === "upcoming" ? (
+        <EmptyMarket title={empty.title} pending={empty.pending}>
+          {empty.text}
+        </EmptyMarket>
       ) : (
         <>
           <div className={`grid grid-cols-[28px_minmax(0,1fr)_88px] gap-4 border-t border-white/[0.06] px-5 py-2 sm:grid-cols-[28px_150px_minmax(0,1fr)_88px] ${eyebrow}`}>
@@ -611,7 +614,6 @@ function MovesCard({ epoch, coins, now, backed, canPick, onPick }: { epoch: Epoc
           </ul>
         </>
       )}
-      {!noResult && <p className="border-t border-white/[0.06] px-5 py-3 text-[11px] text-muted">Moves start from the live estimate at {utcTime(epoch.opensAt)} UTC, because an Epoch records no opening reference on chain. 0% means matching $CRYPTO over the interval, not an unchanged USD price. This ranks assets, not entries or payouts.</p>}
     </section>
   );
 }
