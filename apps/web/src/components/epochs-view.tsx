@@ -305,15 +305,14 @@ interface Slide {
   kicker: string;
   title: string;
   body: string;
-  formula?: string;
   visual?: "split";
 }
 
 const PAYOUT_SLIDES: Slide[] = [
-  { kicker: "Step 1", title: "Back a coin", body: "Pick one coin in a basket of 30. Each coin's move runs from your entry's execution to the close, measured against $CRYPTO.", formula: "Move = closing ref / entry ref − 1" },
-  { kicker: "Step 2", title: "Get a score", body: "Your coin's rise as a share of all the basket's rises, your own coin included. Coins that did worse than $CRYPTO count as zero.", formula: "Score = your coin's rise / all rises" },
-  { kicker: "Step 3", title: "Weight it", body: "Your score is multiplied by your net stake.", formula: "Weight = net stake × score" },
-  { kicker: "Step 4", title: "Share the pot", body: "Each entry is paid its weight's share of the total weight of all entries. An entry with a score of zero gets nothing back.", formula: "Payout = pot × weight / total weight" },
+  { kicker: "Step 1", title: "Back a coin", body: "Pick one coin in a basket of 30. Each coin's move runs from your entry's execution to the close, measured against $CRYPTO." },
+  { kicker: "Step 2", title: "Get a score", body: "Your coin's rise as a share of all the basket's rises, your own coin included. Coins that did worse than $CRYPTO count as zero." },
+  { kicker: "Step 3", title: "Weight it", body: "Your score is multiplied by your net stake." },
+  { kicker: "Step 4", title: "Share the pot", body: "Each entry is paid its weight's share of the total weight of all entries. An entry with a score of zero gets nothing back." },
   { kicker: "Example", title: "Two entries, one pot", body: "Two 100 USDC entries, each with a net stake of 99.98 after the fee. Scores of 10% and 30% split the 199.96 pot 25% / 75%. The first coin beat $CRYPTO, yet that entry gets back 49.99 of its 100.", visual: "split" },
   { kicker: "Good to know", title: "Scores are not odds", body: "Other entries' stakes, entry times and scores decide the money, and several entries can be paid. If every score is zero, everyone is refunded in full, fee included." },
 ];
@@ -367,7 +366,6 @@ function PayoutModal({ onClose }: { onClose: () => void }) {
             <h2 id="payout-title" className="text-2xl font-semibold tracking-tight">{slide.title}</h2>
             <p className="text-sm leading-relaxed text-muted">{slide.body}</p>
           </div>
-          {slide.formula && <code className="num mt-auto w-fit rounded-xl bg-white/[0.05] px-3.5 py-2.5 text-xs text-ink">{slide.formula}</code>}
           {slide.visual === "split" && (
             <div className="mt-auto flex flex-col gap-2">
               <div className="flex h-10 overflow-hidden rounded-xl text-xs font-medium">
