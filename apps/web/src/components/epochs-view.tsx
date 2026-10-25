@@ -10,7 +10,7 @@ import { createPortal } from "react-dom";
 import { walletEpochLots } from "@/app/actions";
 import { parseScaled } from "@/lib/amounts";
 import { COLLATERAL } from "@/lib/config";
-import { type LotGroup, type Move, type Stage, STAGE_LABEL, TEAMMATES, type VaultBalances, basketProblem, byMove, defaultTeam, entryBasket, leaveOutCount, countdown, epochBasket, executionReferences, feeOf, finalPayout, lotView, moves, refundStage, stageOf, units, utcTime, windowText, withdrawSource } from "@/lib/epoch";
+import { type LotGroup, type Move, type Stage, STAGE_LABEL, TEAMMATES, type VaultBalances, basketProblem, leavesOut, mateLocked, toggleMate, byMove, defaultTeam, entryBasket, leaveOutCount, countdown, epochBasket, executionReferences, feeOf, finalPayout, lotView, moves, refundStage, stageOf, units, utcTime, windowText, withdrawSource } from "@/lib/epoch";
 import { historyEstimates } from "@/lib/estimate";
 import { formatAmount } from "@/lib/format";
 import { type Collateral, collateralsOf } from "@/lib/market";
@@ -525,15 +525,11 @@ function TeamEditor({ epoch, coins, now, backed, mates, onSave, onClose }: { epo
   const change = new Map(rows.map((row) => [row.id, row.change]));
   const others = coins.filter((id) => id !== backed).sort((a, b) => byMove(change.get(a) ?? null, change.get(b) ?? null));
   const leave = leaveOutCount(coins);
-  const excluding = leave <= TEAMMATES;
+  const excluding = leavesOut(coins);
   const out = others.filter((id) => !draft.includes(id));
   const done = draft.length === TEAMMATES;
-  const toggle = (id: string) =>
-    setDraft((current) => {
-      if (current.includes(id)) return excluding && others.length - current.length >= leave ? current : current.filter((item) => item !== id);
-      return current.length >= TEAMMATES ? current : [...current, id];
-    });
-  const locked = (on: boolean) => (excluding ? on && out.length >= leave : !on && draft.length >= TEAMMATES);
+  const toggle = (id: string) => setDraft((current) => toggleMate(coins, backed, current, id));
+  const locked = (id: string) => mateLocked(coins, draft, id);
   const count = excluding ? `${out.length} / ${leave} left out` : `${draft.length} / ${TEAMMATES} picked`;
   const remaining = excluding ? leave - out.length : TEAMMATES - draft.length;
 
@@ -582,7 +578,7 @@ function TeamEditor({ epoch, coins, now, backed, mates, onSave, onClose }: { epo
             const move = change.get(id) ?? null;
             return (
               <li key={id}>
-                <button type="button" aria-pressed={on} disabled={locked(on)} onClick={() => toggle(id)} className={`flex h-14 w-full cursor-pointer items-center gap-2 rounded-xl border px-3 text-left transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40 ${on ? "border-white/20 bg-white/[0.05]" : "border-dashed border-white/15 bg-transparent opacity-60 hover:opacity-100"}`}>
+                <button type="button" aria-pressed={on} disabled={locked(id)} onClick={() => toggle(id)} className={`flex h-14 w-full cursor-pointer items-center gap-2 rounded-xl border px-3 text-left transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40 ${on ? "border-white/20 bg-white/[0.05]" : "border-dashed border-white/15 bg-transparent opacity-60 hover:opacity-100"}`}>
                   <CoinIcon id={id} size={20} />
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className={`truncate text-sm font-medium ${on ? "" : "line-through"}`}>{id}</span>
@@ -611,7 +607,7 @@ function EntryPanel(props: { epoch: Epoch; basket: string[]; now: number; decima
   const [amount, setAmount] = useState("");
   const [editing, setEditing] = useState(false);
   const choosable = coins.length > EPOCH_BASKET_SIZE;
-  const out = backed && leaveOutCount(coins) <= TEAMMATES ? coins.filter((id) => id !== backed && !mates.includes(id)) : [];
+  const out = backed && leavesOut(coins) ? coins.filter((id) => id !== backed && !mates.includes(id)) : [];
   const [sent, setSent] = useState(0);
   const [pay, setPay] = useState<string | null>(null);
   const chosen = collaterals.find((item) => item.mint === pay) ?? collaterals[0] ?? null;

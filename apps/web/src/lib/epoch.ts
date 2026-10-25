@@ -1,4 +1,4 @@
-import { EPOCH_BASKET_SIZE, type Epoch, type EpochLot } from "@eox/app-api";
+import { EPOCH_BASKET_SIZE, type Epoch, type EpochLot} from "@eox/app-api";
 
 export const SCORE_DIGITS = 12;
 export const CLOSING_GRACE_SECONDS = 86_400;
@@ -38,6 +38,27 @@ export function byMove(a: number | null, b: number | null): number {
 
 export function leaveOutCount(universe: readonly string[]): number {
   return Math.max(0, universe.length - EPOCH_BASKET_SIZE);
+}
+
+export function leavesOut(universe: readonly string[]): boolean {
+  return leaveOutCount(universe) <= TEAMMATES;
+}
+
+export function toggleMate(universe: readonly string[], backed: string, draft: readonly string[], id: string): string[] {
+  if (id === backed || !universe.includes(id)) return [...draft];
+  if (draft.includes(id)) {
+    const out = universe.length - 1 - draft.length;
+    if (leavesOut(universe) && out >= leaveOutCount(universe)) return [...draft];
+    return draft.filter((item) => item !== id);
+  }
+  if (!leavesOut(universe) && draft.length >= TEAMMATES) return [...draft];
+  return [...draft, id];
+}
+
+export function mateLocked(universe: readonly string[], draft: readonly string[], id: string): boolean {
+  const on = draft.includes(id);
+  if (leavesOut(universe)) return on && universe.length - 1 - draft.length >= leaveOutCount(universe);
+  return !on && draft.length >= TEAMMATES;
 }
 
 export function entryBasket(universe: readonly string[], backed: string, mates: readonly string[]): string[] {

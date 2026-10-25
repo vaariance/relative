@@ -1,7 +1,7 @@
 import type { Epoch, EpochLot } from "@eox/app-api";
 import { describe, expect, it } from "vitest";
 import settled from "../../test/fixtures/epoch-2026-10-23-0800.json";
-import { CLOSING_GRACE_SECONDS, basketProblem, basketScore, byMove, defaultTeam, entryBasket, leaveOutCount, epochBasket, countdown, executionReferences, feeOf, finalPayout, finalScore, lotView, moves, stageOf, timelineStep, withdrawSource } from "./epoch";
+import { CLOSING_GRACE_SECONDS, basketProblem, basketScore, byMove, defaultTeam, entryBasket, leaveOutCount, leavesOut, mateLocked, toggleMate, epochBasket, countdown, executionReferences, feeOf, finalPayout, finalScore, lotView, moves, stageOf, timelineStep, withdrawSource } from "./epoch";
 
 const epoch = (phase: Epoch["phase"], extra: Partial<Epoch> = {}): Epoch => ({ address: "x", opensAt: 1000, closesAt: 2000, phase, sealed: true, entriesOpen: false, universe: [], nextNonce: null, lots: null, totalWeight: null, settlementPot: null, allZero: null, closingReferences: [], closingDeadline: 88_400, voidable: false, terminal: false, ledger: null, registry: null, ...extra });
 const lot = (extra: Partial<EpochLot>): EpochLot => ({ address: "l", epochOpensAt: 1000, nonce: "0", owner: "o", grossStake: "100000000", fee: "20000", admittedAt: 1100, basket: [], backedAsset: "ETH", execution: { timestamp: 1101, references: [] }, state: "executed", score: null, weight: null, claimable: null, refund: null, ...extra });
@@ -190,5 +190,70 @@ describe("Epoch basket", () => {
     expect(basketProblem(universe, "C0", [...thirty.slice(1, 29), "C0"])).toBe("Your team has a coin that is not in this round.");
     expect(basketProblem(universe, "C0", [...thirty.slice(1, 29), "DOGE"])).toBe("Your team has a coin that is not in this round.");
     expect(basketProblem(universe, "DOGE", thirty.slice(1))).toBe("Your team has a coin that is not in this round.");
+  });
+});
+
+describe("baskets in rounds of more than 30 coins", () => {
+  const roundOf = (size: number) => Array.from({ length: size }, (_, i) => `A${i}`);
+  const swap = (universe: string[], backed: string, mates: string[]) => {
+    const out = universe.find((id) => id !== backed && !mates.includes(id))!;
+    const dropped = mates[0]!;
+    if (leavesOut(universe)) return { out, dropped, team: toggleMate(universe, backed, toggleMate(universe, backed, mates, out), dropped) };
+    return { out, dropped, team: toggleMate(universe, backed, toggleMate(universe, backed, mates, dropped), out) };
+  };
+
+  for (const size of [31, 32, 45, 59, 60, 100, 255]) {
+    describe(`${size} coins`, () => {
+      const universe = roundOf(size);
+
+      it("starts with a valid basket of 30 for any backed coin", () => {
+        for (const backed of [universe[0]!, universe[29]!, universe[30]!, universe.at(-1)!]) {
+          const mates = defaultTeam(universe, backed);
+          expect(entryBasket(universe, backed, mates)).toHaveLength(30);
+          expect(entryBasket(universe, backed, mates)).toContain(backed);
+          expect(basketProblem(universe, backed, mates)).toBeNull();
+        }
+        expect(leaveOutCount(universe)).toBe(size - 30);
+      });
+
+      it("swaps a coin that is in for one that is out", () => {
+        const backed = universe.at(-1)!;
+        const { out, dropped, team } = swap(universe, backed, defaultTeam(universe, backed));
+        expect(team).toContain(out);
+        expect(team).not.toContain(dropped);
+        expect(new Set(team).size).toBe(29);
+        expect(basketProblem(universe, backed, team)).toBeNull();
+      });
+
+      it("never lets the basket go above 30 or below 30 at submission", () => {
+        const backed = universe[0]!;
+        let draft = defaultTeam(universe, backed);
+        for (const id of universe) draft = toggleMate(universe, backed, draft, id);
+        expect(draft).not.toContain(backed);
+        expect(draft.every((id) => universe.includes(id))).toBe(true);
+        if (leavesOut(universe)) expect(universe.length - 1 - draft.length).toBeLessThanOrEqual(leaveOutCount(universe));
+        else expect(draft.length).toBeLessThanOrEqual(29);
+      });
+
+      it("only locks a coin when clicking it would break the basket", () => {
+        const backed = universe[0]!;
+        const mates = defaultTeam(universe, backed);
+        const outside = universe.find((id) => id !== backed && !mates.includes(id))!;
+        expect(mateLocked(universe, mates, outside)).toBe(!leavesOut(universe));
+        expect(mateLocked(universe, mates, mates[0]!)).toBe(leavesOut(universe));
+      });
+
+      it("ignores the backed coin and coins from outside the round", () => {
+        const backed = universe[0]!;
+        const mates = defaultTeam(universe, backed);
+        expect(toggleMate(universe, backed, mates, backed)).toEqual(mates);
+        expect(toggleMate(universe, backed, mates, "NOT-IN-ROUND")).toEqual(mates);
+      });
+    });
+  }
+
+  it("asks to leave coins out up to 59 coins and to pick 29 above that", () => {
+    expect(leavesOut(roundOf(59))).toBe(true);
+    expect(leavesOut(roundOf(60))).toBe(false);
   });
 });
