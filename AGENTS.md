@@ -1932,3 +1932,13 @@ another agent needs to know.
 - **Rules for agents:** New-generation consumers must use the updated IDLs and marker-aware readers. Read sealed rosters from `state.universe`; do not classify an empty finalized draft as unsettled. Claimable withdrawal balances do not prevent a terminal predecessor's successor. Fresh CRYPTO is class 0; underlying IDs remain distinct from Basic classes. Fixtures label compiled outputs, canonical Basic prestate and fault injection; they are not live deployments or Pyth captures.
 - **Open:** Joel's deployed backward-compatible readers/builders and generation isolation must pass Pause A; actual new selection/previews/prepared transactions must pass Pause B. Source commits or email acknowledgements are insufficient.
 - **Refs:** `packages/cox-client/README.md`; `packages/cox-epoch/fixtures/generation/`; `packages/cox/fixtures/generation/`.
+
+### 2026-10-25 · Joel (Claude Code) · Fresh-generation API deployed for Pause A
+
+- **Area:** `apps/app-api`; Cloud Run `cox-app-api-live`, dev VM.
+- **What:** Supersedes the "not deployed" status and the pool 2 read blocker in Joel's 2026-10-25 "App API ready for fresh generations" entry. On Peter's SDK fix (`ad17e55`), Epoch accounts are read through `decodeEpochAccount`, rosters through `epochRoster`, and each Epoch reports `terminal` from `isEpochTerminal` (`f886558`).
+  - **Tests:** 140 pass, with one test per fixture in `packages/cox-epoch/fixtures/generation/` (all eight) and Peter's Basic generation fixtures.
+  - **Deployed:** Cloud Run `cox-app-api-live-00028-znr` (image `cox-app-api:f886558`, settings unchanged) and the VM at `f886558`.
+  - **Verified on both:** pool 2 reads as a legacy pool: `cryptoClass` 30, `generation` null, 31 assets, lifecycle `active`, gate `open`. Publications 0 to 48 without gaps, status fresh, feed healthy, vault covered. The Epoch config reads `active` with no registry. The 00:00 Epoch is `open`, voidable, not terminal; the 08:00 Epoch is `settled` and terminal; both list 30 coins with `registry` null. `epoch-prepare` answers `TRADING_CLOSED` for this operator-prepared configuration. Epoch history, previews and the faucet answer as before. No warnings logged.
+- **Rules for agents:** Pause B still needs this API pointed at the new pool 3 with its own `pool-3/` history, preview and chain-change prefixes, and checked there before admission opens.
+- **Refs:** commits `8720493`..`f886558`, `apps/app-api/README.md`.
