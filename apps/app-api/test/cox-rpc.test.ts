@@ -65,10 +65,16 @@ describe("RPC failover", () => {
     await expect(failoverConnection([a.url, b.url], "finalized").getGenesisHash()).rejects.toThrow(/returned HTTP 500/);
   });
 
-  it("requires every endpoint to be on the expected network", async () => {
+  it("refuses an endpoint on another network, skips one that cannot answer, and needs at least one", async () => {
     const devnet = await endpoint(() => ({ status: 200, result: "DEVNET" }));
     const other = await endpoint(() => ({ status: 200, result: "MAINNET" }));
-    await checkGenesis([devnet.url], "DEVNET");
+    const down = await endpoint(() => ({ status: 502 }));
+    expect(await checkGenesis([devnet.url], "DEVNET")).toEqual([devnet.url]);
     await expect(checkGenesis([devnet.url, other.url], "DEVNET")).rejects.toThrow("is not on the expected network");
+    const skipped: string[] = [];
+    expect(await checkGenesis([down.url, devnet.url], "DEVNET", (host, reason) => skipped.push(`${host} ${reason}`))).toEqual([devnet.url]);
+    expect(skipped).toEqual([`${new URL(down.url).host} HTTP 502`]);
+    expect(skipped.join(" ")).not.toContain("secret");
+    await expect(checkGenesis([down.url], "DEVNET")).rejects.toThrow("no RPC endpoint answered");
   });
 });

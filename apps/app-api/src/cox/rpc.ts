@@ -49,17 +49,28 @@ export function failoverFetch(urls: readonly string[], onFailover?: (from: strin
   };
 }
 
-export async function checkGenesis(urls: readonly string[], genesis: string): Promise<void> {
+export async function checkGenesis(urls: readonly string[], genesis: string, onUnreachable?: (host: string, reason: string) => void): Promise<string[]> {
+  const usable: string[] = [];
   for (const url of urls) {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getGenesisHash" }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    const body = (await response.json()) as { result?: string };
-    if (body.result !== genesis) throw new Error(`RPC ${rpcHost(url)} is not on the expected network`);
+    let result: unknown;
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getGenesisHash" }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      result = ((await response.json()) as { result?: unknown }).result;
+    } catch (error) {
+      onUnreachable?.(rpcHost(url), error instanceof Error ? error.message : "request failed");
+      continue;
+    }
+    if (result !== genesis) throw new Error(`RPC ${rpcHost(url)} is not on the expected network`);
+    usable.push(url);
   }
+  if (usable.length === 0) throw new Error("no RPC endpoint answered on the expected network");
+  return usable;
 }
 
 export function failoverConnection(urls: readonly string[], commitment: Commitment, onFailover?: (from: string, to: string, reason: string) => void): Connection {

@@ -111,8 +111,7 @@ async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transaction
   const pollMs = Number(process.env.COX_POLL_MS ?? "5000");
   if (!Number.isInteger(pollMs) || pollMs < 1000) throw new Error(`invalid COX_POLL_MS: ${pollMs}`);
   const stateDir = resolve(required("APP_API_STATE_DIR"));
-  const urls = parseRpcUrls(process.env.COX_RPC_URLS, "COX_RPC_URLS");
-  await checkGenesis(urls, genesis);
+  const urls = await checkGenesis(parseRpcUrls(process.env.COX_RPC_URLS, "COX_RPC_URLS"), genesis, (host, reason) => console.warn(`cox rpc ${host} skipped at start: ${reason}`));
   const connection = failoverConnection(urls, "finalized", (from, to, reason) => console.warn(`cox rpc failover from ${from} to ${to}: ${reason}`));
   const program = loadProgram(connection, process.env.COX_IDL_PATH ?? join(here, "..", "..", "..", "packages", "cox", "idl", "cox.json"));
   const poolId = BigInt(poolText);
