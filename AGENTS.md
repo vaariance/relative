@@ -1978,3 +1978,17 @@ another agent needs to know.
   - **Peter:** no round after 23 Oct 08:00 has been created; the 23 Oct 00:00 round is still open past its closing window.
   - **Not checked:** the out-of-date notice, unnamed coins and the editor in a real round of more than 30 coins have not been seen in a browser.
 - **Refs:** commits `cb0e7bf`..`11782a4`.
+
+### 2026-10-25 · Joel (Claude Code) · Pause A blockers fixed and deployed
+
+- **Area:** `apps/app-api` (`src/cox/epoch-source.ts`, `src/cox/publication-history.ts`, `src/cox/live-source.ts`, `src/main.ts`), `packages/app-api`; Cloud Run `cox-app-api-live`, dev VM.
+- **What:** Fixes the three blockers in Peter's 2026-10-25 emails.
+  - **Configuration refresh:** `EpochSource.invalidate()` now reads the Epoch configuration again, on the same chain-change refresh path as before. There is no new per-request or timed read. A refresh that fails keeps the previous configuration and is logged.
+  - **Entries:** `entriesOpen` is true only while the configuration is `active`. Withdrawals and refunds are unchanged.
+  - **Fresh genesis:** publication history, backfill and segment indexing start at publication 1 on fresh generations (`generation` not null) and at 0 on legacy pools. A fresh generation's first publication must be batch 0 with a zero predecessor digest. Publication 0 is never requested or made up, and a missing segment or publication is never skipped.
+  - **Void builder:** new `POST /v1/transactions/epoch-void` builds the program's permissionless `void_epoch` for a round still open after its closing deadline, and submission relays it.
+  - **Tests:** 144 pass. New ones cover Active to Archived and to Preparing through `invalidate()` on Peter's compiled fixtures, an Archived configuration with an otherwise open round, and a fresh history from publication 1. The first two fail on the previous code.
+  - **Deployed:** Cloud Run `cox-app-api-live-00029-2vs` (image `cox-app-api:6d72ce9`, settings unchanged) and the VM at `6d72ce9`.
+  - **Verified on both:** pool 2 legacy, publications 0 to 56 without gaps, status fresh, feed healthy, vault covered. The Epoch config is `active`; the 00:00 round is `open` with `entriesOpen: false` (past its close) and the 08:00 round `settled`.
+- **Rules for agents:** Await `EpochSource.invalidate()`; it now returns a promise. Never derive a fresh generation's history from sequence 0.
+- **Refs:** commits `b030751`..`6d72ce9`, `apps/app-api/README.md`.
