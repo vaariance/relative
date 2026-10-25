@@ -78,16 +78,25 @@ describe("adaptive methodology", () => {
 });
 
 describe("adaptive trading gate", () => {
-  const pool = (overrides: Partial<Pool> = {}) => ({ schemaVersion: 4, initialized: true, tradingOpensAt: new anchor.BN(OPENS_AT), ...overrides }) as Pool;
+  const pool = (overrides: Partial<Pool> = {}) => ({ schemaVersion: 4, initialized: true, tradingOpensAt: new anchor.BN(OPENS_AT), lifecycleVersion: 0, lifecycle: { preparing: {} }, ...overrides }) as Pool;
   const registry = (paused: boolean) => ({ paused }) as Registry;
 
   it("opens only after the first publication, with the registry unpaused, at the scheduled time", () => {
-    expect(tradingStatus(pool(), registry(false), OPENS_AT)).toEqual({ open: true, gate: "open", opensAt: OPENS_AT });
-    expect(tradingStatus(pool(), registry(false), OPENS_AT - 1)).toEqual({ open: false, gate: "before-opening", opensAt: OPENS_AT });
+    expect(tradingStatus(pool(), registry(false), OPENS_AT)).toEqual({ open: true, gate: "open", lifecycle: "active", opensAt: OPENS_AT });
+    expect(tradingStatus(pool(), registry(false), OPENS_AT - 1)).toEqual({ open: false, gate: "before-opening", lifecycle: "active", opensAt: OPENS_AT });
     expect(tradingStatus(pool({ initialized: false }), registry(false), OPENS_AT)).toMatchObject({ open: false, gate: "not-initialized" });
     expect(tradingStatus(pool({ initialized: false }), registry(true), OPENS_AT)).toMatchObject({ open: false, gate: "paused" });
-    expect(tradingStatus(pool({ schemaVersion: 3 }), registry(true), OPENS_AT)).toEqual({ open: false, gate: "retired", opensAt: null });
-    expect(tradingStatus(pool({ schemaVersion: 2 }), registry(false), 0)).toEqual({ open: true, gate: "open", opensAt: null });
+    expect(tradingStatus(pool({ schemaVersion: 3 }), registry(true), OPENS_AT)).toEqual({ open: false, gate: "retired", lifecycle: "archived", opensAt: null });
+    expect(tradingStatus(pool({ schemaVersion: 2 }), registry(false), 0)).toEqual({ open: true, gate: "open", lifecycle: "active", opensAt: null });
+  });
+
+  it("reports a fresh pool's lifecycle before the pause, and keeps legacy pools active", () => {
+    const fresh = (lifecycle: object) => pool({ schemaVersion: 4, lifecycleVersion: 1, lifecycle } as Partial<Pool>);
+    expect(tradingStatus(fresh({ preparing: {} }), registry(true), OPENS_AT)).toEqual({ open: false, gate: "preparing", lifecycle: "preparing", opensAt: OPENS_AT });
+    expect(tradingStatus(fresh({ archived: {} }), registry(false), OPENS_AT)).toEqual({ open: false, gate: "archived", lifecycle: "archived", opensAt: OPENS_AT });
+    expect(tradingStatus(fresh({ active: {} }), registry(true), OPENS_AT)).toEqual({ open: false, gate: "paused", lifecycle: "active", opensAt: OPENS_AT });
+    expect(tradingStatus(fresh({ active: {} }), registry(false), OPENS_AT)).toEqual({ open: true, gate: "open", lifecycle: "active", opensAt: OPENS_AT });
+    expect(() => tradingStatus(pool({ lifecycleVersion: 2 } as Partial<Pool>), registry(false), OPENS_AT)).toThrow("UnsupportedLifecycleVersion");
   });
 
   it("treats adaptive and migrated pools as fee-aware", () => {

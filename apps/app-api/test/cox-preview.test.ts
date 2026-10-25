@@ -337,12 +337,12 @@ describe("preview portfolio", () => {
 
 class PreviewSource implements CoxSource {
   async deployment() {
-    return { origin: "live" as const, network: "solana-devnet", program: PROGRAM, poolId: "2", poolAddress: POOL, collateralMint: null, collateralDecimals: 6, secondaryCollateralMint: null, testCollateral: true as const, transferRule: "COX/TRANSFER/MVP-0" as const, methodology: { digest: METHODOLOGY, label: "x", status: "sealed" as const, assetCount: 2 }, mode: "adaptive" as const, publicationIntervalSeconds: 1, tradingOpensAt: null, fixtureSource: null };
+    return { origin: "live" as const, network: "solana-devnet", program: PROGRAM, poolId: "2", poolAddress: POOL, collateralMint: null, collateralDecimals: 6, secondaryCollateralMint: null, testCollateral: true as const, transferRule: "COX/TRANSFER/MVP-0" as const, methodology: { digest: METHODOLOGY, label: "x", status: "sealed" as const, assetCount: 2 }, mode: "adaptive" as const, publicationIntervalSeconds: 1, tradingOpensAt: null, cryptoClass: null, generation: null, fixtureSource: null };
   }
   async status(now: number): Promise<CoxStatus> {
     return {
       asOf: now, latestSequence: 1, latestBatch: 1, latestCutoff: T - 30, ageSeconds: 30, missedCutoffs: 0, state: "fresh", executing: false, monitor: null, reconciliation: null,
-      fees: { policy: "COX/FEES/V1", migrated: true, active: { version: "1", bps: 2, cap: "200000" }, scheduled: null, committed: "0" }, currentBatch: null, trading: { open: true, gate: "open", opensAt: null },
+      fees: { policy: "COX/FEES/V1", migrated: true, active: { version: "1", bps: 2, cap: "200000" }, scheduled: null, committed: "0" }, currentBatch: null, trading: { open: true, gate: "open", lifecycle: "active" as const, opensAt: null },
     };
   }
   async assets() {

@@ -1,5 +1,5 @@
 import anchor, { type Program } from "@coral-xyz/anchor";
-import { checkedPublication, CoxReader, committedRequest, decodeAccount, discriminator, type Batch, type Pool, type Registry, type Request } from "@cox/client";
+import { checkedPublication, CoxReader, committedRequest, decodeAccount, discriminator, marketGenerationKey, marketLifecycle, type Batch, type Pool, type Registry, type Request } from "@cox/client";
 import { PublicKey, type AccountInfo, type Connection } from "@solana/web3.js";
 import {
   ACCEPTANCE_DEADLINE_SECONDS,
@@ -15,6 +15,8 @@ import {
   type CoxStatus,
   type CryptoComposition,
   type FeeStatus,
+  type MarketGeneration,
+  type MarketLifecycle,
   type Portfolio,
   type Publication,
   type ReceiptStatus,
@@ -56,6 +58,7 @@ export interface LiveCoxSourceOptions {
   poolId: bigint;
   network: string;
   history: { path: string; store: SegmentStore; segmentSize?: number; cacheSegments?: number };
+  epochConfig?: PublicKey | null;
   pollMs?: number;
   archive?: PublicationArchive | null;
   changes?: ChainChangeFeed | null;
@@ -92,14 +95,25 @@ export class PoolMethodologyChanged extends Error {
   }
 }
 
+function marketGeneration(pool: Pool, address: PublicKey, epochConfig: PublicKey | null): MarketGeneration | null {
+  if (pool.lifecycleVersion === 0) return null;
+  const id = Uint8Array.from(pool.generation);
+  if (id.every((byte) => byte === 0) || pool.assetRegistry.equals(PublicKey.default)) throw new Error("PoolGenerationMissing");
+  const key = epochConfig ? marketGenerationKey({ generation: id, assetRegistry: pool.assetRegistry, basicPool: address, epochConfig }) : null;
+  return { id: Buffer.from(id).toString("hex"), assetRegistry: pool.assetRegistry.toBase58(), epochConfig: epochConfig?.toBase58() ?? null, key };
+}
+
 export function tradingStatus(pool: Pool, registry: Registry, now: number): TradingStatus {
   const opensAt = adaptivePool(pool) ? Number(pool.tradingOpensAt.toString()) : null;
+  const lifecycle = marketLifecycle(pool);
   const gate = pool.schemaVersion === RETIRED_POOL_SCHEMA ? "retired"
+    : lifecycle === "archived" ? "archived"
+    : lifecycle === "preparing" ? "preparing"
     : registry.paused ? "paused"
     : !pool.initialized ? "not-initialized"
     : opensAt !== null && now < opensAt ? "before-opening"
     : "open";
-  return { open: gate === "open", gate, opensAt };
+  return { open: gate === "open", gate, lifecycle, opensAt };
 }
 
 export class LiveCoxSource implements CoxSource {
@@ -129,6 +143,7 @@ export class LiveCoxSource implements CoxSource {
     readonly tradingOpensAt: number | null,
     private readonly log: PublicationHistory,
     private readonly methodologyKey: PublicKey,
+    readonly market: { lifecycle: MarketLifecycle; generation: MarketGeneration | null },
   ) {
     this.reader = new CoxReader(options.program);
     this.poolKey = this.reader.pdas.pool(options.poolId);
@@ -149,13 +164,15 @@ export class LiveCoxSource implements CoxSource {
     if (!methodology.sealed) throw new Error("PoolMethodologyNotSealed");
     const manifest = parseManifest(methodology);
     if (manifest.classes.length !== pool.classes.length || manifest.origin !== Number(pool.origin.toString())) throw new Error("PoolManifestMismatch");
+    if (pool.cryptoClass !== manifest.cryptoClass) throw new Error("PoolCryptoClassMismatch");
+    const generation = marketGeneration(pool, reader.pdas.pool(options.poolId), options.epochConfig ?? null);
     const mint = await options.connection.getAccountInfo(pool.collateralMint, "finalized");
     if (!mint || mint.data.length <= MINT_DECIMALS_OFFSET) throw new Error("CollateralMintMissing");
     const log = await PublicationHistory.open({ ...options.history, identity: { program: options.program.programId.toBase58(), pool: reader.pdas.pool(options.poolId).toBase58() } });
     const adaptive = adaptivePool(pool);
     if (adaptive !== (manifest.mode === "adaptive")) throw new Error("PoolManifestMismatch");
     const opensAt = adaptive ? Number(pool.tradingOpensAt.toString()) : null;
-    return new LiveCoxSource(options, manifest, pool.collateralMint, mint.data[MINT_DECIMALS_OFFSET]!, adaptive ? pool.testCollateralMint : null, opensAt, log, pool.methodology);
+    return new LiveCoxSource(options, manifest, pool.collateralMint, mint.data[MINT_DECIMALS_OFFSET]!, adaptive ? pool.testCollateralMint : null, opensAt, log, pool.methodology, { lifecycle: marketLifecycle(pool), generation });
   }
 
   private async manifestFor(digest: string): Promise<Manifest> {
@@ -343,6 +360,8 @@ export class LiveCoxSource implements CoxSource {
       mode: this.manifest.mode,
       publicationIntervalSeconds: this.interval,
       tradingOpensAt: this.tradingOpensAt,
+      cryptoClass: this.manifest.cryptoClass,
+      generation: this.market.generation,
       fixtureSource: null,
     };
   }
@@ -370,7 +389,7 @@ export class LiveCoxSource implements CoxSource {
       reconciliation,
       fees: view ? this.fees(view.pool) : null,
       currentBatch: current,
-      trading: view ? tradingStatus(view.pool, view.registry, now) : { open: false, gate: "not-initialized", opensAt: this.tradingOpensAt },
+      trading: view ? tradingStatus(view.pool, view.registry, now) : { open: false, gate: "not-initialized", lifecycle: this.market.lifecycle, opensAt: this.tradingOpensAt },
       chain: {
         readAt: view?.readAt ?? null,
         slot: view?.slot ?? null,

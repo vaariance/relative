@@ -24,12 +24,22 @@ export type ClassId = string;
 export type PriceVenue = "kraken" | "coinbase" | "bybit" | "pyth";
 export type FallbackStep = 0 | 1 | 2 | 3 | 4;
 export type PoolMode = "minute" | "adaptive";
-export type TradingGate = "open" | "paused" | "not-initialized" | "before-opening" | "retired";
+export type TradingGate = "open" | "paused" | "not-initialized" | "before-opening" | "retired" | "preparing" | "archived";
+
+export type MarketLifecycle = "preparing" | "active" | "archived";
 
 export interface TradingStatus {
   open: boolean;
   gate: TradingGate;
+  lifecycle: MarketLifecycle;
   opensAt: UnixSeconds | null;
+}
+
+export interface MarketGeneration {
+  id: string;
+  assetRegistry: string;
+  epochConfig: string | null;
+  key: string | null;
 }
 
 export interface Methodology {
@@ -54,6 +64,8 @@ export interface CoxDeployment {
   mode: PoolMode;
   publicationIntervalSeconds: number;
   tradingOpensAt: UnixSeconds | null;
+  cryptoClass: number | null;
+  generation: MarketGeneration | null;
   fixtureSource: string | null;
 }
 

@@ -152,7 +152,7 @@ async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transaction
       })
     : null;
   if (changes) epochs?.cacheUntilInvalidated();
-  const options = { connection, program, poolId, network, history: { path: join(stateDir, `publications-${poolId}.jsonl`), store: segments }, pollMs, archive, changes, onError: (error: unknown) => {
+  const options = { connection, program, poolId, network, epochConfig: epochConfig ? new PublicKey(epochConfig) : null, history: { path: join(stateDir, `publications-${poolId}.jsonl`), store: segments }, pollMs, archive, changes, onError: (error: unknown) => {
     if (error instanceof PoolMethodologyChanged) {
       console.error("cox pool methodology changed; restarting to load the new roster");
       process.exit(1);

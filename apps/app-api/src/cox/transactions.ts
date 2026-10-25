@@ -1,5 +1,5 @@
 import type { Program } from "@coral-xyz/anchor";
-import { CoxInstructions, CoxSimulations, decodeAccount, dynamicPositionSpace, type OwnerKeys, type Pool } from "@cox/client";
+import { CoxInstructions, CoxSimulations, decodeAccount, dynamicPositionSpace, marketLifecycle, type OwnerKeys, type Pool } from "@cox/client";
 import {
   ComputeBudgetProgram,
   PublicKey,
@@ -200,6 +200,9 @@ export class CoxTransactions {
 
   private open(pool: Pool): void {
     if (pool.schemaVersion === 3) throw new TradingClosedError("this pool is retired and accepts no new requests");
+    const lifecycle = marketLifecycle(pool);
+    if (lifecycle === "archived") throw new TradingClosedError("this market is archived and accepts no new requests");
+    if (lifecycle === "preparing") throw new TradingClosedError("this market is still being prepared");
     if (!pool.initialized) throw new TradingClosedError("this pool has not published its first prices yet");
     if (pool.schemaVersion === 4 || pool.schemaVersion === 5) {
       const opensAt = Number(pool.tradingOpensAt.toString());

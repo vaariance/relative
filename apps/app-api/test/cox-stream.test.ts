@@ -27,7 +27,7 @@ class MemorySource implements CoxSource {
   feeVersion = "0";
 
   async deployment() {
-    return { origin: "live" as const, network: "test", program: null, poolId: "1", poolAddress: null, collateralMint: null, collateralDecimals: 6, secondaryCollateralMint: null, testCollateral: true as const, transferRule: "COX/TRANSFER/MVP-0" as const, methodology: { digest: null, label: "x", status: "sealed" as const, assetCount: 0 }, mode: "minute" as const, publicationIntervalSeconds: 60, tradingOpensAt: null, fixtureSource: null };
+    return { origin: "live" as const, network: "test", program: null, poolId: "1", poolAddress: null, collateralMint: null, collateralDecimals: 6, secondaryCollateralMint: null, testCollateral: true as const, transferRule: "COX/TRANSFER/MVP-0" as const, methodology: { digest: null, label: "x", status: "sealed" as const, assetCount: 0 }, mode: "minute" as const, publicationIntervalSeconds: 60, tradingOpensAt: null, cryptoClass: null, generation: null, fixtureSource: null };
   }
 
   async status(now: number): Promise<CoxStatus> {
@@ -35,7 +35,7 @@ class MemorySource implements CoxSource {
     return {
       asOf: now, latestSequence: latest.identity.sequence, latestBatch: latest.identity.batch, latestCutoff: latest.identity.cutoff, ageSeconds: now - latest.identity.cutoff,
       missedCutoffs: 0, state: "fresh", executing: false, monitor: null, reconciliation: null,
-      fees: { policy: "COX/FEES/V1", migrated: true, active: { version: this.feeVersion, bps: 0, cap: "0" }, scheduled: null, committed: "0" }, currentBatch: null, trading: { open: true, gate: "open", opensAt: null },
+      fees: { policy: "COX/FEES/V1", migrated: true, active: { version: this.feeVersion, bps: 0, cap: "0" }, scheduled: null, committed: "0" }, currentBatch: null, trading: { open: true, gate: "open", lifecycle: "active" as const, opensAt: null },
     };
   }
 

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import anchor, { type Idl, type Program } from "@coral-xyz/anchor";
-import { DYNAMIC_CRYPTO_CLASS, readDynamicManifest, type Batch as BatchAccount, type checkedPublication, type Methodology as MethodologyAccount } from "@cox/client";
+import { dynamicCryptoClass, readDynamicManifest, type Batch as BatchAccount, type checkedPublication, type Methodology as MethodologyAccount } from "@cox/client";
 import type { Connection } from "@solana/web3.js";
 import { COX_FEE_POLICY, CRYPTO_CLASS, type ClassState, type FallbackStep, type FeeConfiguration, type PoolMode, type PriceVenue, type Publication, type VenueSymbols } from "@eox/app-api";
 
@@ -155,13 +155,14 @@ function parseDynamicManifest(account: MethodologyAccount): Manifest {
   }));
   const origin = Number(account.origin.toString());
   if (!Number.isSafeInteger(origin) || origin <= 0) throw new Error("ManifestOriginInvalid");
+  const cryptoClass = dynamicCryptoClass(manifest.schemaVersion);
   return {
     digest: hex(account.digest),
     version: manifest.version.toString(),
     sealed: account.sealed,
     assets,
-    classes: classTable(assets, DYNAMIC_CRYPTO_CLASS),
-    cryptoClass: DYNAMIC_CRYPTO_CLASS,
+    classes: classTable(assets, cryptoClass),
+    cryptoClass,
     origin,
     mode: "adaptive",
     dynamic: true,
