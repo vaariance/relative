@@ -257,3 +257,33 @@ describe("baskets in rounds of more than 30 coins", () => {
     expect(leavesOut(roundOf(60))).toBe(false);
   });
 });
+
+describe("coins the API has not named yet", () => {
+  const named = Array.from({ length: 30 }, (_, i) => `A${i}`);
+  const member = (assetId: string, id: number) => ({ id, assetId, originPrice: "1" });
+
+  it("are left out of the round until they have a name", () => {
+    const universe = [...named, "#30", "#31"].map(member);
+    expect(epochBasket(epoch("open", { universe }))).toEqual(named);
+    expect(epochBasket(epoch("settled", { closingReferences: [...named, "#30"].map((assetId) => ({ assetId, reference: "1" })) }))).toEqual(named);
+  });
+
+  it("only treat names like #31 as unnamed", () => {
+    const universe = [...named, "W", "#", "#x"].map(member);
+    expect(epochBasket(epoch("open", { universe }))).toEqual([...named, "W", "#", "#x"]);
+  });
+
+  it("show up as soon as they are named", () => {
+    const before = epochBasket(epoch("open", { universe: [...named, "#30"].map(member) }));
+    const after = epochBasket(epoch("open", { universe: [...named, "LIT"].map(member) }));
+    expect(before).toHaveLength(30);
+    expect(after).toEqual([...named, "LIT"]);
+    expect(leaveOutCount(after)).toBe(1);
+  });
+
+  it("block entries when hiding them leaves fewer than 30 coins", () => {
+    const basket = epochBasket(epoch("open", { universe: [...named.slice(0, 29), "#29"].map(member) }));
+    expect(basket).toHaveLength(29);
+    expect(basketProblem(basket, "A0", defaultTeam(basket, "A0"))).toBe("This Epoch's asset list is not available yet.");
+  });
+});

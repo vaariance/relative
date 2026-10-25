@@ -19,11 +19,17 @@ export function stageOf(epoch: Epoch, now: number): Stage {
 }
 
 export function epochBasket(epoch: Epoch): string[] {
-  if (epoch.universe.length > 0) return epoch.universe.map((member) => member.assetId);
-  return epoch.closingReferences.map((item) => item.assetId);
+  const ids = epoch.universe.length > 0 ? epoch.universe.map((member) => member.assetId) : epoch.closingReferences.map((item) => item.assetId);
+  return ids.filter((id) => !isUnnamedCoin(id));
 }
 
 export const TEAMMATES = EPOCH_BASKET_SIZE - 1;
+
+const UNNAMED = /^#\d+$/;
+
+export function isUnnamedCoin(id: string): boolean {
+  return UNNAMED.test(id);
+}
 
 export function defaultTeam(universe: readonly string[], backed: string): string[] {
   return universe.filter((id) => id !== backed).slice(0, TEAMMATES);
