@@ -324,6 +324,7 @@ async fn deterministic_successor_failure_records_reschedule_and_unblocks_current
             registry: zero(),
             methodology: zero(),
             batch: None,
+            staging_bytes: None,
             requests: vec![],
         },
         epoch_config: zero(),

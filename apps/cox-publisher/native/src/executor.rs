@@ -53,6 +53,41 @@ pub struct Executor<S> {
     epoch_retry_ms: u64,
     inclusion: Option<crate::inclusion_execution::Shared>,
     current_epoch_preparation: Vec<Instruction>,
+    staging_preparation: Vec<Instruction>,
+}
+const STAGING_CAPACITY_ID: &str = "basic:staging-capacity";
+fn staging_capacity_plan(
+    state: &ChainState,
+    operator: solana_address::Address,
+) -> Result<Vec<Instruction>, worker::Error> {
+    let basic = &state.basic;
+    let required = cox::dynamic_batch_space(basic.pool.classes.len());
+    if basic.pool.schema_version != 5
+        || !basic.pool.initialized
+        || required <= 8192
+        || basic.pool.stage.is_some()
+    {
+        return Ok(vec![]);
+    }
+    let sizes = basic.staging_bytes.ok_or(worker::Error::Storage)?;
+    let mut instructions = vec![];
+    for (target, allocated) in [basic.accounts.batch, basic.accounts.publication]
+        .into_iter()
+        .zip(sizes)
+    {
+        if allocated < 8192 || allocated % 8192 != 0 || allocated > required {
+            return Err(worker::Error::Storage);
+        }
+        if allocated < required {
+            instructions.push(
+                basic
+                    .accounts
+                    .grow_staging(operator, target, (required - allocated).min(8192) as u32)
+                    .map_err(|_| worker::Error::Chain)?,
+            );
+        }
+    }
+    Ok(instructions)
 }
 pub(crate) fn validate_methodology_policy(
     methodology: &cox::Methodology,
@@ -89,10 +124,32 @@ pub(crate) fn validate_methodology_policy(
     Ok(())
 }
 fn now() -> Result<u64, worker::Error> {
+    #[cfg(test)]
+    if let Some(timestamp) = LOCAL_REHEARSAL_CLOCK.with(|value| value.get()) {
+        return Ok(timestamp);
+    }
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|v| v.as_secs())
         .map_err(|_| worker::Error::Clock)
+}
+#[cfg(test)]
+thread_local! {
+    static LOCAL_REHEARSAL_CLOCK: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+#[cfg(test)]
+pub(crate) struct LocalRehearsalClock(Option<u64>);
+#[cfg(test)]
+impl LocalRehearsalClock {
+    pub(crate) fn at(timestamp: u64) -> Self {
+        Self(LOCAL_REHEARSAL_CLOCK.with(|value| value.replace(Some(timestamp))))
+    }
+}
+#[cfg(test)]
+impl Drop for LocalRehearsalClock {
+    fn drop(&mut self) {
+        LOCAL_REHEARSAL_CLOCK.with(|value| value.set(self.0));
+    }
 }
 fn chain_error<T, E>(value: Result<T, E>) -> Result<T, worker::Error> {
     value.map_err(|_| worker::Error::Chain)
@@ -189,6 +246,7 @@ impl<S: DraftSigner> Executor<S> {
             epoch_retry_ms: 0,
             inclusion: None,
             current_epoch_preparation: vec![],
+            staging_preparation: vec![],
         })
     }
     pub fn with_chain_changes(
@@ -403,7 +461,6 @@ impl<S: DraftSigner> Executor<S> {
             if state.basic.pool.origin.checked_mul(1_000_000) != Some(self.anchor.timestamp_us)
                 || state.epoch_config.origin_benchmark != self.anchor.benchmark as u128
                 || state.epoch_config.methodology != state.basic.methodology.digest
-                || state.basic.pool.trading_opens_at > self.discovery.first_epoch()
             {
                 return Err(worker::Error::Snapshot);
             }
@@ -440,7 +497,15 @@ impl<S: DraftSigner> Executor<S> {
                 }
             }
         }
-        if state.basic.pool.trading_opens_at > self.discovery.first_epoch() {
+        let shared_registry = state.basic.pool.lifecycle_version == 1
+            && state.basic.pool.asset_registry != anchor_lang::prelude::Pubkey::default();
+        if shared_registry {
+            if state.epoch_config.lifecycle_version != 1
+                || state.epoch_config.asset_registry != state.basic.pool.asset_registry
+            {
+                return Err(worker::Error::Snapshot);
+            }
+        } else if state.basic.pool.trading_opens_at > self.discovery.first_epoch() {
             return Err(worker::Error::Snapshot);
         }
         for epoch in &state.epochs {
@@ -1070,6 +1135,14 @@ fn critical_digest(state: &ChainState) -> [u8; 32] {
     hash.update([u8::from(basic.registry.paused)]);
     hash.update(basic.registry.runtime.to_bytes());
     hash.update(basic.methodology.digest);
+    if let Some(sizes) = basic.staging_bytes {
+        hash.update([1]);
+        for size in sizes {
+            hash.update((size as u64).to_le_bytes());
+        }
+    } else {
+        hash.update([0]);
+    }
     hash.update(basic.pool.fee_version.to_le_bytes());
     hash.update(basic.pool.fee_bps.to_le_bytes());
     hash.update(basic.pool.fee_cap.to_le_bytes());
@@ -1325,6 +1398,14 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
             crate::inclusion_execution::filter_work(control, now_ms, &mut work)?;
             work.extend(inclusion_work.into_iter().filter(|work|!matches!(work,Work::Maintenance{id,..} if id==crate::inclusion_execution::ROLLOUT_ID && self.epoch_stage.is_some())));
         }
+        self.staging_preparation = staging_capacity_plan(&state, self.reader.operator)?;
+        if !self.staging_preparation.is_empty() {
+            work.retain(|item| matches!(item, Work::Maintenance { .. }));
+            work.push(Work::Maintenance {
+                id: STAGING_CAPACITY_ID.into(),
+                pool: Pool::Basic,
+            });
+        }
         self.last_state = Some(state);
         Ok(work)
     }
@@ -1356,6 +1437,7 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
             !authoritative.contains(item)
                 && !(id(item) == crate::epoch_lifecycle::PREPARE_ID
                     && !self.current_epoch_preparation.is_empty())
+                && !(id(item) == STAGING_CAPACITY_ID && !self.staging_preparation.is_empty())
                 && !(self.inclusion.is_some()
                     && crate::inclusion_execution::Controller::matches(item))
                 && !self
@@ -1375,7 +1457,12 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
             && has_epoch_work
             && (self.epoch_stage.is_some() || (self.mapping.len() > 30 && observation.is_some()));
         let rollout=work.iter().any(|work|matches!(work,Work::Maintenance{id,..} if id==crate::inclusion_execution::ROLLOUT_ID));
-        let mut instructions = if lifecycle {
+        let mut instructions = if work.iter().any(|item| id(item) == STAGING_CAPACITY_ID) {
+            if self.staging_preparation.is_empty() {
+                return Err(worker::Error::StaleDraft);
+            }
+            self.staging_preparation.clone()
+        } else if lifecycle {
             if self.current_epoch_preparation.is_empty() {
                 return Err(worker::Error::StaleDraft);
             }
@@ -1525,6 +1612,13 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
                         .pointer("/value/err")
                         .unwrap_or(&serde_json::Value::Null)
                 );
+                #[cfg(test)]
+                if LOCAL_REHEARSAL_CLOCK.with(|value| value.get().is_some()) {
+                    eprintln!(
+                        "Local rehearsal simulation logs: {:?}",
+                        result.pointer("/value/logs")
+                    );
+                }
                 return Err(worker::Error::Simulation);
             }
             break transaction;
@@ -1724,6 +1818,77 @@ impl DraftSigner for crate::signing::RemoteSigner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn expanded_publication_staging_grows_in_bounded_restart_safe_pages() {
+        let mut state = crate::chain::tests::dynamic_state(32);
+        state.basic.pool.initialized = true;
+        state.basic.staging_bytes = Some([8192, 8192]);
+        let operator = state.basic.accounts.pool;
+        let instructions = staging_capacity_plan(&state, operator).unwrap();
+        assert_eq!(instructions.len(), 2);
+        for (instruction, target) in instructions
+            .iter()
+            .zip([state.basic.accounts.batch, state.basic.accounts.publication])
+        {
+            assert_eq!(
+                &instruction.data[..8],
+                &Sha256::digest(b"global:grow_dynamic_account")[..8]
+            );
+            assert_eq!(
+                u32::from_le_bytes(instruction.data[8..12].try_into().unwrap()),
+                8192
+            );
+            assert_eq!(instruction.accounts[3].pubkey, target);
+            assert_eq!(
+                instruction
+                    .accounts
+                    .iter()
+                    .map(|account| (account.is_signer, account.is_writable))
+                    .collect::<Vec<_>>(),
+                vec![
+                    (true, true),
+                    (false, false),
+                    (false, true),
+                    (false, true),
+                    (false, false)
+                ]
+            );
+        }
+        state.basic.staging_bytes = Some([16384, 8192]);
+        assert_eq!(staging_capacity_plan(&state, operator).unwrap().len(), 1);
+        state.basic.staging_bytes = Some([16384, 16384]);
+        assert!(staging_capacity_plan(&state, operator).unwrap().is_empty());
+        state.basic.staging_bytes = Some([24576, 16384]);
+        assert_eq!(
+            staging_capacity_plan(&state, operator),
+            Err(worker::Error::Storage)
+        );
+        state.basic.pool.stage = Some(anchor_lang::prelude::Pubkey::new_unique());
+        assert!(staging_capacity_plan(&state, operator).unwrap().is_empty());
+        state.basic.pool.stage = None;
+        state.basic.pool.classes.resize(256, cox::Class::default());
+        state.basic.staging_bytes = Some([8192, 8192]);
+        for instruction in staging_capacity_plan(&state, operator).unwrap() {
+            assert_eq!(
+                u32::from_le_bytes(instruction.data[8..12].try_into().unwrap()),
+                8192
+            );
+        }
+    }
+    #[test]
+    fn local_rehearsal_clock_is_scoped_and_restores_wall_time() {
+        let wall = now().unwrap();
+        {
+            let _outer = LocalRehearsalClock::at(10);
+            assert_eq!(now().unwrap(), 10);
+            {
+                let _inner = LocalRehearsalClock::at(20);
+                assert_eq!(now().unwrap(), 20);
+            }
+            assert_eq!(now().unwrap(), 10);
+        }
+        assert!(now().unwrap() >= wall);
+    }
     mod universe_fixture {
         use crate as relative_publisher;
         include!("../tests/support/universe.rs");
@@ -2230,6 +2395,62 @@ mod tests {
             0
         );
         state.basic.methodology.roster.push(2);
+        assert_eq!(
+            executor.validate_anchor(&state),
+            Err(worker::Error::Snapshot)
+        );
+    }
+    #[test]
+    fn shared_registry_current_epoch_accepts_admission_after_its_opening() {
+        let mut universe = transactions::dynamic_test_universe(31);
+        universe.sealed = false;
+        universe.schema_version = 2;
+        universe.capture.timestamp = 43_200;
+        universe.capture.predecessor_sequence = 0;
+        universe.capture.predecessor_state_digest = [0; 32];
+        for (index, asset) in universe.instruments.iter_mut().enumerate() {
+            asset.class_id = (index + 1) as u16;
+            asset.original_timestamp = 43_200;
+        }
+        universe.seal_genesis().unwrap();
+        let canonical = universe.canonical_bytes().unwrap();
+        let view = crate::universe_runtime::view(&canonical).unwrap();
+        let mut executor = dynamic_executor(31);
+        executor.anchor = view.anchor.clone();
+        executor.mapping = view.mapping.clone();
+        executor.dynamic = Some((view.clone(), view.anchor.clone()));
+        executor.discovery = crate::chain::Discovery::new(
+            executor.reader.epoch_program,
+            executor.reader.epoch_config,
+            43_200,
+        )
+        .unwrap();
+        let mut state = crate::chain::tests::dynamic_state(31);
+        state.basic.methodology.canonical = canonical;
+        state.basic.methodology.digest = view.digest;
+        state.basic.pool.origin = 43_200;
+        state.basic.pool.trading_opens_at = 46_800;
+        state.basic.pool.lifecycle_version = 1;
+        state.basic.pool.crypto_class = 0;
+        state.basic.pool.asset_registry = anchor_lang::prelude::Pubkey::new_unique();
+        state.epoch_config.origin_benchmark = view.anchor.benchmark as u128;
+        state.epoch_config.methodology = view.source_methodology;
+        state.epoch_config.lifecycle_version = 1;
+        state.epoch_config.asset_registry = state.basic.pool.asset_registry;
+        executor.validate_anchor(&state).unwrap();
+        state.epoch_config.asset_registry = anchor_lang::prelude::Pubkey::new_unique();
+        assert_eq!(
+            executor.validate_anchor(&state),
+            Err(worker::Error::Snapshot)
+        );
+        state.epoch_config.asset_registry = state.basic.pool.asset_registry;
+        state.epoch_config.lifecycle_version = 0;
+        assert_eq!(
+            executor.validate_anchor(&state),
+            Err(worker::Error::Snapshot)
+        );
+        state.epoch_config.lifecycle_version = 1;
+        state.basic.pool.asset_registry = anchor_lang::prelude::Pubkey::default();
         assert_eq!(
             executor.validate_anchor(&state),
             Err(worker::Error::Snapshot)

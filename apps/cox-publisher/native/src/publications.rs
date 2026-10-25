@@ -253,6 +253,39 @@ impl Archive {
         }
         Ok(record)
     }
+    fn fresh_genesis(publication: &cox::Publication) -> Result<bool, Error> {
+        if publication.schema_version != 4 || publication.sequence != 1 || publication.batch != 0 {
+            return Ok(false);
+        }
+        let mut rest = publication.state_preimage.as_slice();
+        let state = State::deserialize(&mut rest).map_err(|_| Error::State)?;
+        let fees = Fees::deserialize(&mut rest).map_err(|_| Error::State)?;
+        let origin = 100 * cox_math::SCALE;
+        Ok(state.previous == [0; 32]
+            && state._benchmark == origin
+            && state
+                .references
+                .iter()
+                .all(|reference| *reference == origin)
+            && state.classes.iter().all(|class| {
+                class._pre_backing == 0
+                    && class._pre_units == 0
+                    && class._post_backing == 0
+                    && class._post_units == 0
+            })
+            && state._executed == 0
+            && state._rejected == 0
+            && state._active == 0
+            && state._pending == 0
+            && state._payable == 0
+            && state._residual == 0
+            && fees._fees == 0
+            && fees._batch_fees == 0
+            && fees._version == 1
+            && fees._bps == 2
+            && fees._cap == 200_000
+            && fees._initial_scheduled)
+    }
     pub fn preserve(
         &self,
         owner: Address,
@@ -268,9 +301,13 @@ impl Archive {
             return Err(Error::State);
         }
         if publication.sequence > 0 {
-            let prior = self.read(publication.sequence - 1)?.ok_or(Error::Gap)?;
-            if prior.state_digest != hex::encode(previous) {
-                return Err(Error::Conflict);
+            match self.read(publication.sequence - 1)? {
+                Some(prior) if prior.state_digest != hex::encode(previous) => {
+                    return Err(Error::Conflict);
+                }
+                Some(_) => {}
+                None if Self::fresh_genesis(&publication)? => {}
+                None => return Err(Error::Gap),
             }
         }
         if let Some(prior) = self.read(publication.sequence)? {
@@ -420,6 +457,9 @@ mod tests {
         )
     }
     fn dynamic_fixture(archive: &Archive, assets: usize) -> Vec<u8> {
+        dynamic_fixture_with_genesis(archive, assets, false)
+    }
+    fn dynamic_fixture_with_genesis(archive: &Archive, assets: usize, genesis: bool) -> Vec<u8> {
         use anchor_lang::Discriminator;
         let mut raw = vec![0; 8192];
         raw[..8].copy_from_slice(cox::Pool::DISCRIMINATOR);
@@ -434,6 +474,15 @@ mod tests {
         pool.classes = vec![cox::Class::default(); assets + 1];
         batch.cutoff = 100;
         batch.snapshot_digest = [5; 32];
+        if genesis {
+            pool.references.fill(100 * cox_math::SCALE);
+            pool.fee_version = 1;
+            pool.fee_bps = 2;
+            pool.fee_cap = 200_000;
+            pool.fee_initial_scheduled = true;
+            batch.sequence = 1;
+            batch.benchmark = 100 * cox_math::SCALE;
+        }
         let preimage = cox::state_bytes(
             &Pubkey::new_from_array(archive.program.to_bytes()),
             &Pubkey::new_from_array(archive.pool.to_bytes()),
@@ -451,7 +500,7 @@ mod tests {
             )
             .1,
             pool: Pubkey::new_from_array(archive.pool.to_bytes()),
-            sequence: 0,
+            sequence: u64::from(genesis),
             batch: 0,
             state_digest: Sha256::digest(&preimage).into(),
             snapshot_digest: [5; 32],
@@ -478,6 +527,123 @@ mod tests {
         assert!(bytes.len() <= allocated);
         bytes.resize(allocated, 0);
         bytes
+    }
+    #[test]
+    fn fresh_dynamic_genesis_starts_at_one_without_inventing_zero() {
+        let path = directory();
+        let archive = archive(&path);
+        let bytes = dynamic_fixture_with_genesis(&archive, 31, true);
+        let publication = cox::Publication::try_deserialize(&mut bytes.as_slice()).unwrap();
+        archive
+            .preserve(
+                archive.program,
+                archive.address,
+                &bytes,
+                12,
+                1,
+                publication.state_digest,
+            )
+            .unwrap();
+        assert!(archive.read(0).unwrap().is_none());
+        let restarted = super::Archive::new(&path, archive.program, archive.pool);
+        restarted
+            .preserve(
+                archive.program,
+                archive.address,
+                &bytes,
+                13,
+                1,
+                publication.state_digest,
+            )
+            .unwrap();
+        assert!(restarted.read(1).unwrap().is_some());
+        let mut second = publication.clone();
+        second.sequence = 2;
+        second.batch = 1;
+        let position = 4 + "COX/STATE/DYNAMIC/V1".len() + 64;
+        second.state_preimage[position..position + 8].copy_from_slice(&2u64.to_le_bytes());
+        second.state_preimage[position + 8..position + 16].copy_from_slice(&1u64.to_le_bytes());
+        second.state_preimage[position + 24..position + 56]
+            .copy_from_slice(&publication.state_digest);
+        second.state_digest = Sha256::digest(&second.state_preimage).into();
+        restarted
+            .preserve(
+                archive.program,
+                archive.address,
+                &encode_publication(&second, bytes.len()),
+                14,
+                2,
+                second.state_digest,
+            )
+            .unwrap();
+        fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
+    fn genesis_exception_rejects_non_genesis_dynamic_and_legacy_gaps() {
+        let path = directory();
+        let archive = archive(&path);
+        let bytes = dynamic_fixture_with_genesis(&archive, 31, true);
+        let publication = cox::Publication::try_deserialize(&mut bytes.as_slice()).unwrap();
+        for mutation in 0..8 {
+            let mut wrong = publication.clone();
+            match mutation {
+                0 => wrong.batch = 1,
+                1 => wrong.sequence = 2,
+                2 => {
+                    let position = 4 + "COX/STATE/DYNAMIC/V1".len() + 64 + 24;
+                    wrong.state_preimage[position] = 1;
+                }
+                3 => {
+                    let position = 4 + "COX/STATE/DYNAMIC/V1".len() + 64 + 24 + 96;
+                    wrong.state_preimage[position] ^= 1;
+                }
+                _ => {
+                    let references =
+                        4 + "COX/STATE/DYNAMIC/V1".len() + 64 + 24 + 96 + 16 + 4 + 31 * 8 + 4;
+                    let classes = references + 32 * 16 + 4;
+                    let position = match mutation {
+                        4 => references,
+                        5 => classes,
+                        6 => classes + 32 * 48 + 16,
+                        _ => {
+                            let mut rest = wrong.state_preimage.as_slice();
+                            State::deserialize(&mut rest).unwrap();
+                            wrong.state_preimage.len() - rest.len()
+                        }
+                    };
+                    wrong.state_preimage[position] ^= 1;
+                }
+            }
+            if mutation < 2 {
+                let position =
+                    4 + "COX/STATE/DYNAMIC/V1".len() + 64 + if mutation == 0 { 8 } else { 0 };
+                let value = if mutation == 0 {
+                    wrong.batch
+                } else {
+                    wrong.sequence
+                };
+                wrong.state_preimage[position..position + 8].copy_from_slice(&value.to_le_bytes());
+            }
+            wrong.state_digest = Sha256::digest(&wrong.state_preimage).into();
+            let wrong_bytes = encode_publication(&wrong, bytes.len());
+            assert_eq!(
+                archive.preserve(
+                    archive.program,
+                    archive.address,
+                    &wrong_bytes,
+                    12,
+                    wrong.sequence,
+                    wrong.state_digest
+                ),
+                Err(Error::Gap)
+            );
+        }
+        let (legacy, digest) = fixture(&archive, 1, [0; 32]);
+        assert_eq!(
+            archive.preserve(archive.program, archive.address, &legacy, 12, 1, digest),
+            Err(Error::Gap)
+        );
+        assert!(!path.exists());
     }
     #[test]
     fn dynamic_protocol_publications_archive_migration_inclusion_and_maximum_capacity() {

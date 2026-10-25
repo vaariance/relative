@@ -173,7 +173,7 @@ pub fn prepare_fresh_genesis(request: FreshGenesisRequest) -> Result<Receipt, Er
     use anchor_lang::prelude::Pubkey;
     use cox::{Instrument, UniverseCapture};
     if request.schema != "relative.fresh-genesis-universe-request/v1"
-        || request.basic_pool_id < 2
+        || request.basic_pool_id == 1
         || request.policy_digest == [0; 32]
         || request.universe_digest == [0; 32]
         || !(30..=255).contains(&request.capture.assets.len())

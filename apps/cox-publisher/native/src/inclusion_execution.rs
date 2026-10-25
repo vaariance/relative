@@ -8,7 +8,7 @@ use crate::{
     journal::{self, FileHistory},
     preview::PreviewCutoff,
     pyth,
-    rpc::{Rpc, DEVNET_GENESIS},
+    rpc::Rpc,
     scheduler::Work,
     worker,
 };
@@ -479,7 +479,7 @@ pub async fn observe(
         return Ok(vec![]);
     };
     let fresh = ScheduleEvidence {
-        genesis_hash: DEVNET_GENESIS.into(),
+        genesis_hash: crate::rpc::protocol_genesis(),
         program: cox::ID.to_string(),
         address: schedule_key.to_string(),
         owner: cox::ID.to_string(),
@@ -620,7 +620,7 @@ pub async fn plan(
     let (schedule_slot, schedule_row) = account(rpc, schedule_key, min_slot).await?;
     let (schedule_bytes, _) = schedule_row.ok_or(worker::Error::Snapshot)?;
     let schedule = ScheduleEvidence {
-        genesis_hash: DEVNET_GENESIS.into(),
+        genesis_hash: crate::rpc::protocol_genesis(),
         program: cox::ID.to_string(),
         address: schedule_key.to_string(),
         owner: cox::ID.to_string(),
@@ -684,7 +684,7 @@ pub async fn plan(
         &state.basic.accounts,
         operator,
         inclusion_rollout::Confirmed {
-            genesis_hash: DEVNET_GENESIS,
+            genesis_hash: &crate::rpc::protocol_genesis(),
             commitment: Commitment::Confirmed,
             slot,
             now_ms: now,

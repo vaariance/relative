@@ -398,6 +398,22 @@ fn fresh_generation_initializes_31_assets_at_100_without_adaptive_root_or_pool_t
         .0
     );
     assert_eq!(manifest.source_methodology, [19; 32]);
+    let mut first_pool = request.clone();
+    first_pool.basic_pool_id = 0;
+    let first_pool = universe_runtime::prepare_fresh_genesis(first_pool).unwrap();
+    let first_manifest = UniverseVersion::from_canonical(&first_pool.canonical).unwrap();
+    assert_eq!(
+        first_manifest.pool,
+        anchor_lang::prelude::Pubkey::find_program_address(
+            &[b"pool", &0_u64.to_le_bytes()],
+            &cox::ID
+        )
+        .0
+    );
+    assert_eq!(first_pool.validate().unwrap().mapping.len(), 31);
+    let mut retired = request.clone();
+    retired.basic_pool_id = 1;
+    assert!(universe_runtime::prepare_fresh_genesis(retired).is_err());
     let mut wrong = request.clone();
     wrong.mapping[30].basic_id = 0;
     assert!(universe_runtime::prepare_fresh_genesis(wrong).is_err());

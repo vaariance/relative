@@ -41,6 +41,31 @@ use std::{
 };
 use tokio::sync::Mutex;
 pub const DEVNET_GENESIS: &str = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
+#[cfg(test)]
+thread_local! { static LOCAL_PROTOCOL_GENESIS: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) }; }
+pub(crate) fn protocol_genesis() -> String {
+    #[cfg(test)]
+    if let Some(genesis) = LOCAL_PROTOCOL_GENESIS.with(|value| value.borrow().clone()) {
+        return genesis;
+    }
+    DEVNET_GENESIS.into()
+}
+#[cfg(test)]
+pub(crate) struct LocalProtocolGenesis(Option<String>);
+#[cfg(test)]
+impl LocalProtocolGenesis {
+    pub(crate) fn at(genesis: String) -> Self {
+        assert!(!genesis.is_empty());
+        Self(LOCAL_PROTOCOL_GENESIS.with(|value| value.replace(Some(genesis))))
+    }
+}
+#[cfg(test)]
+impl Drop for LocalProtocolGenesis {
+    fn drop(&mut self) {
+        LOCAL_PROTOCOL_GENESIS.with(|value| value.replace(self.0.take()));
+    }
+}
+
 const PUBLIC_DEVNET: &str = "https://api.devnet.solana.com";
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
@@ -62,6 +87,44 @@ pub struct Rpc {
     usage: StdMutex<Usage>,
 }
 impl Rpc {
+    #[cfg(test)]
+    pub(crate) fn local_rehearsal(endpoint: &str) -> Result<Self, Error> {
+        let url = Url::parse(endpoint).map_err(|_| Error::Configuration)?;
+        let loopback = url
+            .host_str()
+            .and_then(|host| {
+                host.trim_start_matches('[')
+                    .trim_end_matches(']')
+                    .parse::<std::net::IpAddr>()
+                    .ok()
+            })
+            .is_some_and(|address| address.is_loopback());
+        if url.scheme() != "http"
+            || !loopback
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+            || !matches!(url.path(), "" | "/")
+        {
+            return Err(Error::Configuration);
+        }
+        Ok(Self {
+            client: Client::builder()
+                .timeout(Duration::from_secs(5))
+                .connect_timeout(Duration::from_secs(2))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .map_err(|_| Error::Configuration)?,
+            urls: [url.clone(), url],
+            state: Mutex::new(State {
+                verified: [true; 2],
+                retry_primary: None,
+            }),
+            serial: AtomicU64::new(1),
+            usage: StdMutex::new(Usage::default()),
+        })
+    }
     pub fn direct_devnet(key: &str) -> Result<Self, Error> {
         if key.is_empty()
             || !key
@@ -177,6 +240,9 @@ impl Rpc {
         Err(Error::Unavailable)
     }
 }
+#[cfg(test)]
+#[path = "local_rehearsal.rs"]
+mod local_rehearsal;
 
 #[cfg(test)]
 mod usage_tests {

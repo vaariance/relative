@@ -108,3 +108,24 @@ fn successor_can_record_a_new_operator_without_rewriting_the_previous_attestor()
         .validate_for_operator(&previous.operator)
         .is_err());
 }
+
+#[test]
+fn transition_version_must_match_the_canonical_predecessor_class_layout() {
+    let mut changed = request();
+    changed.preparation.request.schema = "relative.inclusion-request/v2".into();
+    for binding in changed
+        .preparation
+        .request
+        .previous_bindings
+        .iter_mut()
+        .chain(&mut changed.preparation.request.next_bindings)
+    {
+        binding.basic_class_id += 1;
+    }
+    changed.preparation =
+        relative_methodology::transition::prepare(changed.preparation.request).unwrap();
+    assert_eq!(
+        inclusion_pipeline::build_successor(changed),
+        Err(inclusion_pipeline::Error::Binding)
+    );
+}

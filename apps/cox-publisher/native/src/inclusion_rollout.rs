@@ -1,6 +1,5 @@
 use crate::{
     inclusion_pipeline::{self, Commitment, Prepared, ScheduleEvidence},
-    rpc::DEVNET_GENESIS,
     transactions::BasicAccounts,
 };
 use anchor_lang::{prelude::Pubkey, AccountSerialize, InstructionData, ToAccountMetas};
@@ -119,7 +118,7 @@ pub fn plan(
     let next_key = Pubkey::find_program_address(&[b"methodology", &next.digest], &cox::ID).0;
     let previous_key =
         Pubkey::find_program_address(&[b"methodology", &previous.digest], &cox::ID).0;
-    if state.genesis_hash != DEVNET_GENESIS
+    if state.genesis_hash != crate::rpc::protocol_genesis()
         || state.slot == 0
         || state.max_publication_age_ms == 0
         || state.max_publication_age_ms > 5000

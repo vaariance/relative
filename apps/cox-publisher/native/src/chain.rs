@@ -41,6 +41,7 @@ pub struct BasicState {
     pub registry: Registry,
     pub methodology: Methodology,
     pub batch: Option<Batch>,
+    pub staging_bytes: Option<[usize; 2]>,
     pub requests: Vec<Request>,
 }
 pub struct EpochState {
@@ -490,12 +491,29 @@ impl ChainReader {
         let methodology_key = address(pool.methodology);
         let batch_key = pda(self.basic_program, &[b"batch", pool_key.as_ref()]);
         let mut keys = vec![methodology_key];
-        if pool.stage.is_some() {
+        let expanded_staging = pool.schema_version == 5
+            && pool.initialized
+            && cox::dynamic_batch_space(pool.classes.len()) > 8192;
+        if pool.stage.is_some() || expanded_staging {
             keys.push(batch_key);
+        }
+        if expanded_staging {
+            keys.push(pda(
+                self.basic_program,
+                &[b"publication", pool_key.as_ref()],
+            ));
         }
         let (s, extra) = self.multiple(&keys, slot).await?;
         slot = s;
         let methodology: Methodology = decode(&extra[0], self.basic_program)?;
+        let staging_bytes = if expanded_staging {
+            if extra[1].owner != self.basic_program || extra[2].owner != self.basic_program {
+                return Err(Error::WrongOwner);
+            }
+            Some([extra[1].data.len(), extra[2].data.len()])
+        } else {
+            None
+        };
         if methodology_key != pda(self.basic_program, &[b"methodology", &methodology.digest])
             || (if pool.schema_version == 5 {
                 cox::read_dynamic_manifest(&methodology)
@@ -812,6 +830,7 @@ impl ChainReader {
                 registry,
                 methodology,
                 batch,
+                staging_bytes,
                 requests,
             },
             epoch_config,
@@ -1347,6 +1366,7 @@ pub(crate) mod tests {
                 registry,
                 methodology: zero(),
                 batch: None,
+                staging_bytes: None,
                 requests: vec![],
             },
             epoch_config: zero(),

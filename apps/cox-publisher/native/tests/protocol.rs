@@ -302,11 +302,79 @@ fn exact_closing_archive_and_durable_signed_transaction_survive_restart() {
 
 #[test]
 fn scheduled_preparation_uses_only_the_origin_reference_and_never_mixes_later_entries() {
-    let work=vec![Work::Entry{id:"basic:bootstrap".into(),pool:Pool::Basic,eligible_after_ms:9_999},Work::Entry{id:"epoch:entry".into(),pool:Pool::Epoch,eligible_after_ms:10_500}];
-    let checkpoint=Checkpoint::default();
-    match decide(20_000,&checkpoint,&work,16).unwrap(){
-        Decision::Publish{work,closing_ms,..}=>{assert_eq!(work.len(),1);assert_eq!(closing_ms,Some(10_000));},
-        _=>panic!("bootstrap must bind the historical origin"),
+    let work = vec![
+        Work::Entry {
+            id: "basic:bootstrap".into(),
+            pool: Pool::Basic,
+            eligible_after_ms: 9_999,
+        },
+        Work::Entry {
+            id: "epoch:entry".into(),
+            pool: Pool::Epoch,
+            eligible_after_ms: 10_500,
+        },
+    ];
+    let checkpoint = Checkpoint::default();
+    match decide(20_000, &checkpoint, &work, 16).unwrap() {
+        Decision::Publish {
+            work, closing_ms, ..
+        } => {
+            assert_eq!(work.len(), 1);
+            assert_eq!(closing_ms, Some(10_000));
+        }
+        _ => panic!("bootstrap must bind the historical origin"),
     }
-    assert_eq!(decide(9_999,&checkpoint,&[work[0].clone()],16).unwrap(),Decision::Idle{wake_ms:Some(10_000)});
+    assert_eq!(
+        decide(9_999, &checkpoint, &[work[0].clone()], 16).unwrap(),
+        Decision::Idle {
+            wake_ms: Some(10_000)
+        }
+    );
+}
+
+#[test]
+fn closing_timestamp_cursor_cycles_exact_groups_without_skipping_old_work() {
+    let work = vec![
+        Work::Close {
+            id: "old:a".into(),
+            timestamp_ms: 8_000,
+        },
+        Work::Close {
+            id: "old:b".into(),
+            timestamp_ms: 8_000,
+        },
+        Work::Close {
+            id: "middle".into(),
+            timestamp_ms: 9_000,
+        },
+        Work::Close {
+            id: "boundary".into(),
+            timestamp_ms: 10_000,
+        },
+    ];
+    let mut state = Checkpoint::default();
+    for expected in [8_000, 9_000, 10_000, 8_000] {
+        match decide(12_000, &state, &work, 8).unwrap() {
+            Decision::Publish {
+                work,
+                closing_ms: Some(timestamp),
+                ..
+            } => {
+                assert_eq!(timestamp, expected);
+                assert!(work.iter().all(
+                    |item| matches!(item,Work::Close{timestamp_ms,..} if *timestamp_ms == expected)
+                ));
+                assert_eq!(work.len(), if expected == 8_000 { 2 } else { 1 });
+                state.last_closing_ms = Some(timestamp);
+            }
+            other => panic!("unexpected decision {other:?}"),
+        }
+    }
+}
+#[test]
+fn legacy_checkpoint_defaults_to_oldest_due_closing_group() {
+    let mut value = serde_json::to_value(Checkpoint::default()).unwrap();
+    value.as_object_mut().unwrap().remove("last_closing_ms");
+    let loaded: Checkpoint = serde_json::from_value(value).unwrap();
+    assert_eq!(loaded.last_closing_ms, None);
 }

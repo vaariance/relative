@@ -60,6 +60,8 @@ pub struct Checkpoint {
     pub next_attempt_ms: u64,
     pub next_pool: Pool,
     pub closing_next: bool,
+    #[serde(default)]
+    pub last_closing_ms: Option<u64>,
     #[serde(default = "prefer_maintenance")]
     pub maintenance_next: bool,
     pub pending: Option<PendingTransaction>,
@@ -75,6 +77,7 @@ impl Default for Checkpoint {
             next_attempt_ms: 0,
             next_pool: Pool::Basic,
             closing_next: true,
+            last_closing_ms: None,
             maintenance_next: true,
             pending: None,
             unsigned: None,
@@ -213,8 +216,16 @@ pub fn decide(
         _ => unreachable!(),
     });
     if !closes.is_empty() && (checkpoint.closing_next || entries.iter().all(Vec::is_empty)) {
-        let timestamp = match closes[0] {
-            Work::Close { timestamp_ms, .. } => timestamp_ms,
+        let next = checkpoint
+            .last_closing_ms
+            .and_then(|last| {
+                closes.iter().find(
+                    |item| matches!(item, Work::Close { timestamp_ms, .. } if *timestamp_ms > last),
+                )
+            })
+            .unwrap_or(&closes[0]);
+        let timestamp = match next {
+            Work::Close { timestamp_ms, .. } => *timestamp_ms,
             _ => unreachable!(),
         };
         return Ok(Decision::Publish { work: closes.into_iter().filter(|item| matches!(item, Work::Close { timestamp_ms, .. } if *timestamp_ms == timestamp)).take(limit).collect(), closing_ms: Some(timestamp), next_pool: checkpoint.next_pool, closing_next: false });

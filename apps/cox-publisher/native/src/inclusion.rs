@@ -35,7 +35,7 @@ impl ScheduleEvidence {
         let program: Pubkey = self.program.parse().map_err(|_| Error::Schedule)?;
         let owner: Pubkey = self.owner.parse().map_err(|_| Error::Schedule)?;
         let address: Pubkey = self.address.parse().map_err(|_| Error::Schedule)?;
-        if self.genesis_hash != DEVNET_GENESIS
+        if self.genesis_hash != crate::rpc::protocol_genesis()
             || program != cox::ID
             || owner != program
             || self.slot == 0
@@ -204,7 +204,10 @@ pub fn build_successor(request: Request) -> Result<Prepared, Error> {
     let previous_view =
         universe_runtime::view(&request.previous_canonical).map_err(|_| Error::Universe)?;
     let transition = &request.preparation.request;
-    if transition.previous_bindings.len() != previous.instruments.len()
+    if !matches!(
+        (previous.schema_version, transition.schema.as_str()),
+        (1, "relative.inclusion-request/v1") | (2, "relative.inclusion-request/v2")
+    ) || transition.previous_bindings.len() != previous.instruments.len()
         || request.captured.request.previous_anchor != previous_view.anchor
         || request.preparation.activation_timestamp_us != request.captured.captured.timestamp_us
         || transition.previous.version != previous.version

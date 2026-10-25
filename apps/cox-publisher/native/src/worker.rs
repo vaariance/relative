@@ -165,7 +165,7 @@ impl<C: Chain, P: Snapshots, S: Store> Publisher<C, P, S> {
                 } else {
                     wake_ms
                 }))
-            },
+            }
             Decision::Wait { wake_ms } => Ok(Tick::Waiting(wake_ms)),
             Decision::Reconcile => Err(Error::Storage),
             Decision::Maintenance { work, next_pool } => {
@@ -185,6 +185,15 @@ impl<C: Chain, P: Snapshots, S: Store> Publisher<C, P, S> {
                 closing_next,
             } => {
                 state.next_attempt_ms = next_ms;
+                state.next_pool = next_pool;
+                state.closing_next = closing_next;
+                if work
+                    .iter()
+                    .any(|item| matches!(item, crate::scheduler::Work::Close { .. }))
+                {
+                    state.last_closing_ms = closing_ms;
+                }
+                state.maintenance_next = true;
                 self.persist(state.clone())?;
                 let selection_ms = self.prices.selection_time_ms(now_ms)?;
                 let ceiling_ms = self.chain.price_timestamp_ceiling_ms(selection_ms)?;
@@ -209,9 +218,6 @@ impl<C: Chain, P: Snapshots, S: Store> Publisher<C, P, S> {
                 {
                     return Err(Error::Chain);
                 }
-                state.next_pool = next_pool;
-                state.closing_next = closing_next;
-                state.maintenance_next = true;
                 state.unsigned = Some(draft);
                 self.persist(state.clone())?;
                 self.sign_and_send(state, next_ms).await

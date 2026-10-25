@@ -86,6 +86,28 @@ impl BasicAccounts {
             test_vault: None,
         }
     }
+    pub fn grow_staging(
+        &self,
+        operator: Address,
+        target: Address,
+        additional: u32,
+    ) -> Result<Instruction, Error> {
+        if ![self.batch, self.publication].contains(&target) || !(1..=8192).contains(&additional) {
+            return Err(Error::InvalidBoundary);
+        }
+        Ok(instruction(
+            self.program,
+            "grow_dynamic_account",
+            vec![
+                AccountMeta::new(operator, true),
+                readonly(self.registry),
+                writable(self.pool),
+                writable(target),
+                readonly(SYSTEM_PROGRAM),
+            ],
+            &additional.to_le_bytes(),
+        ))
+    }
     pub fn publish(
         &self,
         operator: Address,

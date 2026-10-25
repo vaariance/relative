@@ -263,6 +263,40 @@ pub struct SnapshotArchive {
     max_feed_age_us: u64,
 }
 impl SnapshotArchive {
+    #[cfg(test)]
+    pub(crate) fn local_rehearsal_signers(&mut self, signers: Vec<pyth::TrustedSigner>) {
+        *self
+            .trusted_signers
+            .write()
+            .expect("test snapshot signer lock") = Some(signers);
+    }
+    #[cfg(test)]
+    pub(crate) fn local_rehearsal_feed_watch(&mut self) -> watch::Receiver<Vec<u32>> {
+        let feeds = self
+            .anchor
+            .read()
+            .expect("test snapshot anchor")
+            .assets
+            .iter()
+            .map(|asset| asset.feed_id)
+            .collect();
+        let (sender, receiver) = watch::channel(feeds);
+        self.feed_updates = Some(sender);
+        receiver
+    }
+    #[cfg(test)]
+    pub(crate) fn local_rehearsal_reload(&self) -> Result<(), worker::Error> {
+        let anchor = self.anchor.read().map_err(|_| worker::Error::Storage)?;
+        let latest = self
+            .history
+            .latest_for_anchor(&anchor)
+            .map_err(|_| worker::Error::Storage)?;
+        if let Some(value) = &latest {
+            self.validate_for_anchor(&anchor, value)?;
+        }
+        *self.latest.write().map_err(|_| worker::Error::Storage)? = latest;
+        Ok(())
+    }
     pub fn new(anchor: Anchor, history: FileHistory, max_age_ms: u64) -> Result<Self, Error> {
         let resumed = history
             .latest_for_anchor(&anchor)
