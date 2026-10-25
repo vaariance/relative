@@ -1871,3 +1871,18 @@ another agent needs to know.
 - **Area:** Clarifies “Fresh-generation registry and lifecycle source prepared”.
 - **What:** Its discard wording applies only to the approved old-generation test positions in the final inventory. Fresh-generation deposits retain all normal settlement, refund and withdrawal rights. This release does not waive those rights or sweep either generation's custody.
 - **Rules for agents:** Stop for Peter's review if the final old-generation inventory contains unexpected ownership or activity. No new live accounts have been created by this source-preparation work.
+
+### 2026-10-25 · Joel (Claude Code) · App API ready for fresh generations; live pool 2 unreadable by the new SDK (not deployed)
+
+- **Area:** `apps/app-api`, `packages/app-api`; branch `working`.
+- **What:** Peter's 2026-10-24 fresh-generation handoff (`18ec5cd`, SDK `76d5e0c`).
+  - **Pools:** the CRYPTO class comes from the methodology's universe schema (class 0 for schema 2, 30 for schema 1), and the API refuses a pool whose own `cryptoClass` disagrees. `status.trading` adds `lifecycle` (`preparing`, `active`, `archived`) and the gates `preparing` and `archived`, apart from `paused`. Preparing and archived markets refuse trades and quotes; cancel, refund and withdraw stay available. `deployment` adds `cryptoClass` and `generation` (id, asset registry, Epoch config and the SDK's composite key).
+  - **Epoch:** configurations report `lifecycle` and `assetRegistry`, and entries need an active configuration. Rounds marked `emptyFinalized` show as phase `empty`, sealed or not. Registry-bound rounds report `registry`: the frozen version, universe digest and each asset's origin benchmark, with scale 10^12.
+  - **Preparation:** `POST /v1/transactions/epoch-prepare` builds the next bounded transaction of the SDK's `prepareCurrentEpoch` for the current round, using the registry version effective at its opening. It answers `TRADING_CLOSED` while an asset change due at or before the opening is unresolved, and `NOTHING_TO_DO` once sealed. `POST /v1/transactions/epoch-finalize-empty` builds `finalizeEmpty`. Submission relays both.
+  - **Startup:** an RPC that cannot answer at start is skipped with a warning instead of stopping the API (`4a5cb2c`). This was the 22 Oct market-page 500: Cloud Run revision `00007` could not start because the old proxy failed its network check. No API 5xx since 24 Oct.
+  - **Verified:** 132 app API tests pass, including Peter's preparing, active and archived generation fixtures. Read-only devnet run: the live Epoch config and both Epochs read correctly with the new Epoch IDL.
+- **Rules for agents:** Do not deploy these commits yet. Peter's SDK `decodeAccount` cannot read the live pool 2: it is schema 5 like fresh pools, and since LIT joined, the bytes where the SDK expects `lifecycleVersion` hold leftover data (`0x48` at offset 2180 of 4,096), so decoding fails. The deployed API still uses the older SDK and is unaffected.
+- **Open:**
+  - **Peter:** a rule to tell a legacy schema-5 pool from a fresh one, in the SDK and the program, before Pause A can be verified.
+  - **Godwin:** `TradingStatus` now has `lifecycle`; `apps/web/src/lib/market.test.ts` needs it, and `market.ts` has no wording for the `preparing` and `archived` gates.
+- **Refs:** `apps/app-api/README.md` (Adaptive pools and Epoch), commits `8720493`..`4a5cb2c`.
