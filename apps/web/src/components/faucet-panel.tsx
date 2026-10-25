@@ -216,8 +216,12 @@ export function FaucetPanel() {
             ? "Your SOL balance could not be checked. Please try again shortly."
             : `Get at least ${MIN_GAS_SOL} devnet SOL first: a first trade uses about that much to open your position on chain. Pick SOL above.`
         : picked === "usdc"
-          ? "Opens Circle's faucet with your address copied. Choose USDC and Solana Devnet, then paste it."
-          : "Opens Solana's faucet with your address copied. Paste it there. Every trade costs a tiny fee in SOL.";
+          ? owner
+            ? "Opens Circle's faucet with your address copied. Choose USDC and Solana Devnet, then paste it."
+            : "Opens Circle's faucet. Choose USDC and Solana Devnet, then paste your wallet address."
+          : owner
+            ? "Opens Solana's faucet with your address copied. Paste it there. Every trade costs a tiny fee in SOL."
+            : "Opens Solana's faucet. Paste your wallet address there. Every trade costs a tiny fee in SOL.";
 
   const claimButton = !owner ? (
     <button type="button" onClick={openLogin} className={primary}>Connect wallet</button>
@@ -294,8 +298,6 @@ export function FaucetPanel() {
         <div className="flex flex-col gap-2">
           {picked === "rlusd" ? (
             claimButton
-          ) : !owner ? (
-            <button type="button" onClick={openLogin} className={primary}>Connect wallet</button>
           ) : locked ? (
             <button type="button" disabled className={primary}>{checking ? "Checking" : "Get SOL first"}</button>
           ) : (

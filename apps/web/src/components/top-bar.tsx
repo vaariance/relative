@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, ArrowLeftRight, BarChart3, Droplets, Timer, Home, PanelLeftClose, PanelLeftOpen, Wallet, type LucideIcon } from "lucide-react";
+import { Activity, ArrowLeftRight, CandlestickChart, Droplets, PanelLeftClose, PanelLeftOpen, Wallet, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -14,27 +14,26 @@ import { WalletButton } from "./wallet-button";
 type Item = { href: string; label: string; icon: LucideIcon };
 
 const main: Item[] = [
-  { href: "/markets", label: "Markets", icon: BarChart3 },
-  { href: "/crypto", label: "$CRYPTO", icon: Activity },
+  { href: "/markets", label: "Trade", icon: CandlestickChart },
+  { href: "/crypto", label: "Benchmark", icon: Activity },
   { href: "/portfolio", label: "Portfolio", icon: Wallet },
-  { href: "/swap", label: "Swap", icon: ArrowLeftRight },
-  { href: "/epochs", label: "Epochs", icon: Timer },
 ];
 
 const more: Item[] = [
+  { href: "/swap", label: "Swap", icon: ArrowLeftRight },
   { href: "/faucet", label: "Faucet", icon: Droplets },
 ];
 
 const wordmark = stencilPath("RELATIVE", 1, 0.34);
 
 function isCurrent(pathname: string, href: string): boolean {
-  if (href === "/markets") return pathname.startsWith("/markets") || pathname.startsWith("/assets");
+  if (href === "/markets") return pathname.startsWith("/markets") || pathname.startsWith("/assets") || pathname.startsWith("/epochs");
   return pathname.startsWith(href);
 }
 
 function Wordmark() {
   return (
-    <Link href="/markets" aria-label="Relative" className="flex items-center text-ink">
+    <Link href="/" aria-label="Relative home page" className="flex items-center text-ink">
       <svg aria-hidden="true" viewBox={`-0.5 -0.5 ${wordmark.width + 1} 7`} className="h-5 w-auto overflow-visible">
         <path d={wordmark.path} fill="none" stroke="currentColor" strokeWidth={1} />
       </svg>
@@ -47,8 +46,7 @@ const STORE = "relative-sidebar";
 export function SideBar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
-  const items = [...main, ...more];
-  const active = items.find((item) => isCurrent(pathname, item.href))?.href;
+  const active = [...main, ...more].find((item) => isCurrent(pathname, item.href))?.href;
 
   useEffect(() => {
     try {
@@ -87,7 +85,7 @@ export function SideBar() {
       <nav aria-label="Main" className="flex-1">
         {collapsed ? (
           <ul className="flex flex-col items-center gap-1">
-            {items.map((item) => {
+            {main.map((item) => {
               const current = item.href === active;
               return (
                 <li key={item.href}>
@@ -99,19 +97,33 @@ export function SideBar() {
             })}
           </ul>
         ) : (
-          <TreeNav items={items.map(({ href, label }) => ({ href, label }))} activeHref={active} />
+          <TreeNav items={main.map(({ href, label }) => ({ href, label }))} activeHref={active} />
         )}
       </nav>
       {collapsed ? (
-        <Link href="/" aria-label="Home page" title="Home page" className={`${control} self-center`}>
-          <Home size={16} aria-hidden="true" />
-        </Link>
+        <ul className="flex flex-col items-center gap-1">
+          {more.map((item) => (
+            <li key={item.href}>
+              <Link href={item.href} aria-label={item.label} title={item.label} aria-current={item.href === active ? "page" : undefined} className={`${control} ${item.href === active ? "bg-surface-2 text-accent hover:text-accent" : ""}`}>
+                <item.icon size={16} aria-hidden="true" />
+              </Link>
+            </li>
+          ))}
+        </ul>
       ) : (
         <div className="flex flex-col">
-          <Link href="/" className="flex h-9 items-center gap-2.5 whitespace-nowrap rounded-control px-2 text-[13px] text-muted transition-colors duration-150 hover:text-ink">
-            <Home size={15} aria-hidden="true" />
-            Home page
-          </Link>
+          {more.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              aria-current={item.href === active ? "page" : undefined}
+              className={`flex h-9 items-center gap-2.5 whitespace-nowrap rounded-control px-2 text-[13px] transition-colors duration-150 ${item.href === active ? "bg-surface-2 text-ink" : "text-muted hover:text-ink"}`}
+            >
+              <item.icon size={15} aria-hidden="true" />
+              {item.label}
+            </Link>
+          ))}
+          <span aria-hidden="true" className="my-2 h-px bg-line" />
           <Link href="/terms" className="flex h-9 items-center gap-2.5 whitespace-nowrap rounded-control px-2 text-[13px] text-muted transition-colors duration-150 hover:text-ink">Terms of Use</Link>
           <Link href="/privacy" className="flex h-9 items-center gap-2.5 whitespace-nowrap rounded-control px-2 text-[13px] text-muted transition-colors duration-150 hover:text-ink">Privacy Policy</Link>
           <CookieSettingsButton className="flex h-9 cursor-pointer items-center gap-2.5 whitespace-nowrap rounded-control px-2 text-left text-[13px] text-muted transition-colors duration-150 hover:text-ink" />
@@ -138,15 +150,15 @@ export function TopBar() {
           <WalletButton />
         </div>
       </div>
-      <nav aria-label="Main" className="flex gap-1 overflow-x-auto px-3 pb-2 lg:hidden">
-        {items.map((item) => {
+      <nav aria-label="Main" className="flex items-center gap-1 overflow-x-auto px-3 pb-2 lg:hidden">
+        {items.map((item, index) => {
           const current = isCurrent(pathname, item.href);
           return (
             <Link
               key={item.href}
               href={item.href}
               aria-current={current ? "page" : undefined}
-              className={`flex h-10 shrink-0 items-center gap-2 rounded-pill px-3 text-sm transition-colors duration-150 ${
+              className={`${index === main.length ? "ml-auto" : ""} flex h-10 shrink-0 items-center gap-2 rounded-pill px-3 text-sm transition-colors duration-150 ${
                 current ? "bg-surface-2 text-ink" : "text-muted hover:text-ink"
               }`}
             >

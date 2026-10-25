@@ -6,6 +6,7 @@ import { LeaderCards } from "@/components/leader-cards";
 import { LiveChange, LiveFigure, LiveSparkline } from "@/components/live";
 import { RowLink } from "@/components/row-link";
 import { CardTitle, Figure, StatCard } from "@/components/stat-card";
+import { TradeModes } from "@/components/trade-modes";
 import { getAssets, getDeployment, getPublications } from "@/lib/data";
 import { formatAmount } from "@/lib/format";
 import { classViews, currentOf, decimalsOf, latest, levelSeries, marketRow, standings } from "@/lib/view";
@@ -45,7 +46,10 @@ export default async function MarketsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="font-display text-title font-semibold tracking-tight">Markets</h1>
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <h1 className="font-display text-title font-semibold tracking-tight">Markets</h1>
+        <TradeModes current="basic" />
+      </header>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard

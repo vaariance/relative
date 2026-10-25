@@ -11,6 +11,7 @@ import { holdingsOf, nameOf, toNumber, unitDigits, unlockedProblem } from "@/lib
 import { useAccount } from "./account";
 import { Dots, FeeNote } from "./fee-note";
 import { useOpenBatch } from "./open-batch";
+import { FundsHint } from "./funds-hint";
 import { SendButton } from "./send-button";
 import { QUOTE_MESSAGES, useQuote } from "./use-quote";
 
@@ -114,6 +115,7 @@ export function SwapForm({ classes, nextBatch, decimals }: { classes: readonly s
         </div>
 
         <div className="mt-auto flex flex-col gap-2">
+          <FundsHint />
           <SendButton trading describe={`Swap ${amount} ${give} for ${get}`} intent={planned.intent} label={empty ? "Enter an amount" : pending ? "Calculating" : "Swap"} connectLabel="Connect wallet to swap" problem={empty ? "" : (planned.problem ?? blocked ?? (pending ? "" : null))} className="h-11 rounded-pill bg-accent text-sm font-medium text-accent-ink" />
         </div>
       </form>

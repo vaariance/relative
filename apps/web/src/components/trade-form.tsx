@@ -6,10 +6,11 @@ import { COLLATERAL } from "@/lib/config";
 import { formatAmount } from "@/lib/format";
 import { batchesFor } from "@/lib/market";
 import { planRequest } from "@/lib/requests";
-import { CRYPTO_CLASS, type ClassView, holdingsOf, toNumber, unitDigits, unlockedProblem } from "@/lib/view";
+import { CRYPTO_CLASS, CRYPTO_NAME, type ClassView, holdingsOf, toNumber, unitDigits, unlockedProblem } from "@/lib/view";
 import { useAccount } from "./account";
 import { Dots, FeeNote } from "./fee-note";
 import { useOpenBatch } from "./open-batch";
+import { FundsHint } from "./funds-hint";
 import { SendButton } from "./send-button";
 import { QUOTE_MESSAGES, useQuote } from "./use-quote";
 
@@ -39,7 +40,7 @@ export function TradeForm({ claim, crypto, nextBatch, decimals }: { claim: Class
   const primaryOption = options.find((item) => item.primary) ?? options[0]!;
   const chosen = pay === CRYPTO_PAY ? null : buying ? (options.find((item) => item.mint === pay) ?? primaryOption) : primaryOption;
   const direct = chosen !== null;
-  const pays = buying ? (direct ? chosen.symbol : "$CRYPTO") : direct ? COLLATERAL.symbol : "$CRYPTO";
+  const pays = buying ? (direct ? chosen.symbol : CRYPTO_NAME) : direct ? COLLATERAL.symbol : CRYPTO_NAME;
   const collateralMint = buying && direct && market.collaterals.length > 1 ? chosen.mint : undefined;
   const from = buying ? CRYPTO_CLASS : claim.id;
   const to = buying ? claim.id : CRYPTO_CLASS;
@@ -84,7 +85,7 @@ export function TradeForm({ claim, crypto, nextBatch, decimals }: { claim: Class
           {!empty && !valid && <p className="mt-1 text-xs text-down">Enter an amount above zero.</p>}
           <div role="group" aria-label={buying ? "Pay with" : "Receive"} className="mt-2 flex flex-wrap items-center gap-1 text-xs">
             <span className="mr-1 text-muted">{buying ? "Pay with" : "Receive"}</span>
-            {[...(buying ? options : options.filter((item) => item.primary)).map((item) => ({ id: item.mint, label: item.symbol, on: chosen?.mint === item.mint })), { id: CRYPTO_PAY, label: "$CRYPTO", on: !direct }].map((item) => (
+            {[...(buying ? options : options.filter((item) => item.primary)).map((item) => ({ id: item.mint, label: item.symbol, on: chosen?.mint === item.mint })), { id: CRYPTO_PAY, label: CRYPTO_NAME, on: !direct }].map((item) => (
               <button key={item.id} type="button" aria-pressed={item.on} onClick={() => setPay(item.id)} className={`h-7 cursor-pointer rounded-pill px-3 transition-colors duration-150 ${item.on ? "bg-surface-2 text-ink" : "text-muted hover:text-ink"}`}>
                 {item.label}
               </button>
@@ -92,7 +93,7 @@ export function TradeForm({ claim, crypto, nextBatch, decimals }: { claim: Class
           </div>
           {needsCrypto && (
             <p className="mt-1 text-xs text-muted">
-              You have no $CRYPTO.{" "}
+              You hold no benchmark units.{" "}
               <button type="button" onClick={() => setPay("collateral")} className="cursor-pointer text-accent underline">
                 Pay with {COLLATERAL.symbol}
               </button>{" "}
@@ -112,6 +113,9 @@ export function TradeForm({ claim, crypto, nextBatch, decimals }: { claim: Class
           </div>
           <FeeNote pending={pending} quote={quote} decimals={decimals} />
         </dl>
+
+
+        <FundsHint />
 
 
         <SendButton trading describe={buying ? `Buy ${claim.id} with ${amount} ${pays}` : `Sell ${amount} ${claim.id} units for ${pays}`} intent={planned.intent} label={empty ? "Enter an amount" : pending ? "Calculating" : buying ? `Buy ${claim.id}` : `Sell ${claim.id}`} connectLabel="Connect wallet to continue" problem={empty ? "" : (planned.problem ?? (needsCrypto ? "" : blocked) ?? (pending ? "" : null))} className="h-11 rounded-pill bg-accent text-sm font-medium text-accent-ink" />

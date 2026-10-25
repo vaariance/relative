@@ -2,35 +2,17 @@
 
 import { WalletReadyState, type WalletName } from "@solana/wallet-adapter-base";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { Check, Copy, LogOut, Wallet, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { shortAddress } from "@/lib/address";
-import { CIRCLE_DEVNET_USDC, TEST_COLLATERAL } from "@/lib/config";
+import { TEST_COLLATERAL } from "@/lib/config";
 import { formatAmount } from "@/lib/format";
 import { walletError } from "@/lib/errors";
+import { type Balances, readBalances } from "./funds-hint";
 import { onLogin, useSigner } from "./signer";
 import { useSnackbar } from "./snackbar";
 
 const primary = "flex h-10 cursor-pointer items-center gap-2 whitespace-nowrap rounded-pill bg-accent px-3 text-sm font-medium text-accent-ink transition-opacity duration-150 hover:opacity-90 sm:px-4";
-const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-const ASSOCIATED_TOKEN_PROGRAM = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
-
-interface Balances {
-  sol: number;
-  usdc: number;
-  testUsdc: number;
-}
-
-function tokenAccountOf(owner: PublicKey, mint: string): PublicKey {
-  return PublicKey.findProgramAddressSync([owner.toBuffer(), TOKEN_PROGRAM.toBuffer(), new PublicKey(mint).toBuffer()], ASSOCIATED_TOKEN_PROGRAM)[0];
-}
-
-function tokenAmount(info: { owner: PublicKey; data: Uint8Array } | null, decimals: number): number {
-  if (!info || !info.owner.equals(TOKEN_PROGRAM) || info.data.length !== 165) return 0;
-  return Number(new DataView(info.data.buffer, info.data.byteOffset, info.data.byteLength).getBigUint64(64, true)) / 10 ** decimals;
-}
-
 const row = "flex h-11 w-full cursor-pointer items-center gap-3 rounded-control px-3 text-left text-sm transition-colors duration-150 hover:bg-surface-2";
 
 export function WalletButton() {
@@ -63,11 +45,9 @@ export function WalletButton() {
   const loadBalances = useCallback(() => {
     if (!signer.address) return () => undefined;
     let current = true;
-    const owner = new PublicKey(signer.address);
-    connection
-      .getMultipleAccountsInfo([owner, tokenAccountOf(owner, CIRCLE_DEVNET_USDC), tokenAccountOf(owner, TEST_COLLATERAL.mint)])
-      .then(([account, usdc, testUsdc]) => {
-        if (current) setBalances({ sol: (account?.lamports ?? 0) / LAMPORTS_PER_SOL, usdc: tokenAmount(usdc ?? null, 6), testUsdc: tokenAmount(testUsdc ?? null, TEST_COLLATERAL.decimals) });
+    readBalances(connection, signer.address)
+      .then((next) => {
+        if (current) setBalances(next);
       })
       .catch(() => undefined);
     return () => {
