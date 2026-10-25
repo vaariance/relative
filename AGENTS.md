@@ -1962,3 +1962,19 @@ another agent needs to know.
 - **Rules for agents:** Do not tell users the basket is optional or "up to" 29; it is exactly 30. Keep the basket size in `EPOCH_BASKET_SIZE` and `TEAMMATES`, never a literal.
 - **Open:** Every live round so far has 30 coins, so the basket picker has only been seen on a development-only preview round of 31 coins; it needs a check on the first real round with LIT. The last settled round (23 Oct 08:00) predates the API's preview history, so its ranking and coin board show "Prices from the start of this round are not available". Nothing was checked with a connected wallet; no entry was signed.
 - **Refs:** commits `c054b1a`, `3bc94f0`, `8679ba9`; `apps/web/README.md` (Epochs page).
+
+### 2026-10-25 · Godwin (Claude Code) · Epoch page: baskets beyond 30 coins, unnamed coins, failed refreshes, real rounds only
+
+- **Area:** `apps/web` (`src/lib/epoch.ts`, `src/lib/data.ts`, `src/components/epochs-view.tsx`, Epochs page, tests); Vercel project `cox-web`.
+- **What:** At Godwin's request.
+  - **Basket editor:** in a round of 31 to 59 coins, the editor opened full with the right coins already left out, so no coin could be swapped. The click rules are now `toggleMate` and `mateLocked`. With 31 to 59 coins you choose which to leave out; with 60 or more you pick 29. Tests cover rounds of 31, 32, 45, 59, 60, 100 and 255 coins.
+  - **Unnamed coins:** a coin named like `#31` is left out of every coin list on the page (`epochBasket`) until it has a name. Scores and payouts still use every coin in the round. If hiding leaves fewer than 30 coins, entries for that round are blocked with "This Epoch's asset list is not available yet."
+  - **Failed refreshes:** if `/v1/epochs` fails, the page shows the newest rounds it has, from the server's last good read or the browser's, with "Rounds could not be refreshed. Showing them as of HH:MM UTC." A failed `/v1/assets` request no longer breaks the page.
+  - **Hero:** it no longer makes up a next round at the coming four-hour boundary. It shows the last finished round and an open or scheduled round only when one exists, and slides only when there are two; with none it says "No round scheduled". Supersedes the next-round slide in Godwin's 2026-10-25 "Epoch page reworked with automatic baskets; deployed" entry.
+  - **Verified:** 132 web tests and the type check pass. `11782a4` is deployed to production at <https://getrelative.trade> (`cox-rll9n3r10-gef-228639f6`); `/epochs` shows only the settled 23 Oct 08:00 round.
+- **Rules for agents:** Never show a round in the Epoch page that the API does not list. Read a round's coins through `epochBasket`, never `universe` directly, so unnamed coins stay hidden.
+- **Open:**
+  - **Joel:** `ticker()` in `apps/app-api/src/cox/epoch-source.ts` throws `EpochAssetUnknown` for an Epoch asset id the manifest does not name, which fails all of `/v1/epochs`. Godwin asked Joel to return `#<id>` with a warning instead, and to add API tests for an entry with an unnamed coin and an entry in a round of more than 30 coins.
+  - **Peter:** no round after 23 Oct 08:00 has been created; the 23 Oct 00:00 round is still open past its closing window.
+  - **Not checked:** the out-of-date notice, unnamed coins and the editor in a real round of more than 30 coins have not been seen in a browser.
+- **Refs:** commits `cb0e7bf`..`11782a4`.
