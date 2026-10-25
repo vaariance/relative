@@ -80,6 +80,8 @@ function token(mint: PublicKey, amount: bigint): Buffer {
   return data;
 }
 
+const marker = (extension: object, magic: string): number[] => (Object.keys(extension).length > 0 ? [...Buffer.from(magic)] : Array(8).fill(0));
+
 async function setup(now: number, configExtension: object = {}) {
   const connection = new EpochConnection();
   const program = loadProgram(connection as unknown as Connection, idlPath);
@@ -96,14 +98,14 @@ async function setup(now: number, configExtension: object = {}) {
   };
   connection.set(config, Buffer.from(await coder.encode("poolConfig", {
     admin: ADMIN, configId: bn(2), operator: OPERATOR, mint: MINT, testMint: TEST_MINT, methodology: Array(32).fill(4), originBenchmark: bn("100000000000000"), maxEntryPriceAge: bn(5), maxLots: 4096, bump: 254,
-    lifecycleVersion: 0, lifecycle: { preparing: {} }, assetRegistry: PublicKey.default, ...configExtension,
+    lifecycleExtension: { magic: marker(configExtension, "RLCFG001"), lifecycleVersion: 0, lifecycle: { preparing: {} }, assetRegistry: PublicKey.default, ...configExtension },
   })));
   const sealed = pdas.epoch({ config, opensAt: BigInt(OPEN) });
   const draft = pdas.epoch({ config, opensAt: BigInt(DRAFT) });
   const encodeEpoch = async (address: PublicKey, opensAt: number, value: object | null, extension: object = {}) => {
     connection.set(address, encodeLarge(coder, "epochAccount", {
       config, opensAt: bn(opensAt), vault: pdas.vault(address), testVault: pdas.testVault(address), bump: 250, universe: value ? [] : universe, state: value,
-      bindingVersion: 0, registryVersion: PublicKey.default, registryOriginBenchmarks: [], universeDigest: Array(32).fill(0), emptyFinalized: false, ...extension,
+      registryBinding: { magic: marker(extension, "RLEPCH01"), bindingVersion: 0, registryVersion: PublicKey.default, registryOriginBenchmarks: [], universeDigest: Array(32).fill(0), emptyFinalized: false, ...extension },
     }));
   };
   return { connection, program, coder, sealed, draft, encodeEpoch, state, configValue, now, universe };
@@ -339,7 +341,10 @@ describe("permissionless Epoch round preparation", () => {
     const partial = Buffer.alloc(2_048 + 8_192);
     encodeLarge(t.coder, "epochAccount", {
       config, opensAt: bn(OPEN), vault: pdas.vault(t.sealed), testVault: pdas.testVault(t.sealed), bump: 250, universe: t.universe.slice(0, 8), state: null,
-      bindingVersion: 1, registryVersion: new PublicKey(fixed("assetRegistryVersion").address), registryOriginBenchmarks: [], universeDigest: Array(32).fill(0), emptyFinalized: false,
+      registryBinding: {
+        magic: [...Buffer.from("RLEPCH01")], bindingVersion: 1, registryVersion: new PublicKey(fixed("assetRegistryVersion").address),
+        registryOriginBenchmarks: t.universe.slice(0, 8).map(() => bn("100000000000000")), universeDigest: Array(32).fill(9), emptyFinalized: false,
+      },
     }).copy(partial);
     t.connection.set(t.sealed, partial);
     const resumed = await source.prepare({ owner: payer.toBase58() });

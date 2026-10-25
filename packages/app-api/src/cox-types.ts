@@ -617,6 +617,7 @@ export interface Epoch {
   closingReferences: { assetId: string; reference: Scaled }[];
   closingDeadline: UnixSeconds;
   voidable: boolean;
+  terminal: boolean;
   ledger: EpochLedger | null;
   registry: EpochRegistryBinding | null;
 }

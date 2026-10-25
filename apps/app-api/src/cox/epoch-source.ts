@@ -1,5 +1,5 @@
 import anchor, { type Program } from "@coral-xyz/anchor";
-import { addresses, currentEpochWindow, decodeAccount, discriminator, EPOCH_FEE_BPS, EPOCH_FEE_CAP, EpochInstructions, epochAddresses, marketLifecycle, readDynamicManifest, type EpochPreparationProgress, type EpochRegistryBinding as ChainRegistryBinding, type EpochSelection, type LifecycleValue } from "@cox/client";
+import { addresses, currentEpochWindow, decodeAccount, decodeEpochAccount, discriminator, epochRoster, isEpochTerminal, type EpochRoundAccount, EPOCH_FEE_BPS, EPOCH_FEE_CAP, EpochInstructions, epochAddresses, marketLifecycle, readDynamicManifest, type EpochPreparationProgress, type EpochRegistryBinding as ChainRegistryBinding, type EpochSelection, type LifecycleValue } from "@cox/client";
 import { PublicKey, TransactionInstruction, TransactionMessage, VersionedTransaction, type AccountInfo, type Connection } from "@solana/web3.js";
 import {
   EPOCH_BASKET_SIZE,
@@ -129,7 +129,7 @@ const refundReason = (state: EpochLotState, phase: EpochPhase | null, ended: boo
   if (state === "executed" && phase === "voided") return "voided";
   return null;
 };
-const members = (account: EpochAccount): UniverseAsset[] => (account.state ? account.state.universe : account.universe);
+const members = (account: EpochAccount): readonly UniverseAsset[] => epochRoster(account as unknown as EpochRoundAccount);
 const seconds = (value: Integer): number => {
   const parsed = Number(value.toString());
   if (!Number.isSafeInteger(parsed)) throw new Error("EpochTimeOutOfRange");
@@ -180,7 +180,7 @@ export class EpochSource {
     const info = await options.connection.getAccountInfo(options.config, "finalized");
     if (!info) throw new Error("EpochConfigNotFound");
     if (!info.owner.equals(options.program.programId)) throw new Error("EpochConfigOwnerMismatch");
-    const account = options.program.coder.accounts.decode("poolConfig", info.data) as ConfigAccount;
+    const account = decodeEpochAccount(options.program, "poolConfig", info) as unknown as ConfigAccount;
     if (!epochAddresses(options.program.programId).config(account.admin, BigInt(text(account.configId))).equals(options.config)) throw new Error("EpochConfigIdentityMismatch");
     return new EpochSource(options, account);
   }
@@ -223,7 +223,7 @@ export class EpochSource {
 
   private decodeEpoch(info: AccountInfo<Buffer>, address: PublicKey, opensAt: number): EpochAccount {
     if (!info.owner.equals(this.options.program.programId)) throw new Error("EpochOwnerMismatch");
-    const value = this.options.program.coder.accounts.decode("epochAccount", info.data) as EpochAccount;
+    const value = decodeEpochAccount(this.options.program, "epochAccount", info) as unknown as EpochAccount;
     if (!value.config.equals(this.options.config) || seconds(value.opensAt) !== opensAt) throw new Error("EpochIdentityMismatch");
     if (!value.vault.equals(this.pdas.vault(address)) || !value.testVault.equals(this.pdas.testVault(address))) throw new Error("EpochVaultMismatch");
     return value;
@@ -281,8 +281,9 @@ export class EpochSource {
     const closesAt = opensAt + EPOCH_SECONDS;
     const universe = members(account).map((asset) => ({ id: asset.id, assetId: this.ticker(asset.id), originPrice: text(asset.originPrice) }));
     const registry = this.registry(account);
+    const terminal = isEpochTerminal(account as unknown as EpochRoundAccount);
     if (!state || vault === null) {
-      return { address: address.toBase58(), opensAt, closesAt, phase: account.emptyFinalized ? "empty" : "draft", sealed: false, entriesOpen: false, universe, nextNonce: null, lots: null, totalWeight: null, settlementPot: null, allZero: null, closingReferences: [], closingDeadline: closesAt + CLOSING_GRACE_SECONDS, voidable: false, ledger: null, registry };
+      return { address: address.toBase58(), opensAt, closesAt, phase: account.emptyFinalized ? "empty" : "draft", sealed: false, entriesOpen: false, universe, nextNonce: null, lots: null, totalWeight: null, settlementPot: null, allZero: null, closingReferences: [], closingDeadline: closesAt + CLOSING_GRACE_SECONDS, voidable: false, terminal, ledger: null, registry };
     }
     if (seconds(state.opensAt) !== opensAt || seconds(state.closesAt) !== closesAt) throw new Error("EpochScheduleMismatch");
     const phase = account.emptyFinalized ? "empty" : variant(state.phase, PHASES).name;
@@ -310,6 +311,7 @@ export class EpochSource {
       closingReferences: state.closingReferences.map((r) => ({ assetId: this.ticker(r.assetId), reference: text(r.value) })),
       closingDeadline: closesAt + CLOSING_GRACE_SECONDS,
       voidable: phase === "open" && !state.closingSnapshot && now > closesAt + CLOSING_GRACE_SECONDS,
+      terminal,
       ledger,
       registry,
     };
@@ -372,7 +374,7 @@ export class EpochSource {
   }
 
   private lot(address: PublicKey, info: AccountInfo<Buffer>, epoch: PublicKey, opensAt: number, holder: PublicKey, phase: EpochPhase | null): EpochLot {
-    const value = this.options.program.coder.accounts.decode("lotAccount", info.data) as LotAccount;
+    const value = decodeEpochAccount(this.options.program, "lotAccount", info) as unknown as LotAccount;
     const state = value.state;
     if (!state || !value.epoch.equals(epoch) || !this.pdas.lot(epoch, BigInt(text(value.nonce))).equals(address) || !address.equals(this.pdas.lot(epoch, BigInt(text(state.nonce))))
       || seconds(state.epoch) !== opensAt || !Buffer.from(state.owner).equals(holder.toBuffer())) {
