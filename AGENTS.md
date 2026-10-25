@@ -2042,3 +2042,11 @@ another agent needs to know.
 - **Verification:** Methodology 26 tests and native inclusion checks pass; the actual local 31→32 transition passed with fresh class 0.
 - **Rules for agents:** Use request v2 only for fresh universe schema 2. Do not silently reinterpret a v1 request or change legacy commitments.
 - **Refs:** `packages/cox-methodology/README.md`; private `.cox/local-rehearsal/completion-verification.json`.
+
+### 2026-10-25 · Peter (Codex) · Rotate due closing timestamps without substituting prices
+
+- **Area:** Native scheduler, worker, protocol and worker tests.
+- **What:** Supplements Peter’s earlier “Missing closing data yields publisher scheduling turns” entry: entry/maintenance fairness alone did not stop an older missing Epoch close from monopolizing later close-only work, including an inclusion boundary. Added a persisted optional closing-timestamp cursor with backward-compatible checkpoint defaults. Due timestamp groups rotate; work at one exact timestamp remains batched together. Missing data remains pending under its original timestamp.
+- **Verification:** Actual local first attempt captured the boundary but safely required rescheduling while the old market and accepted deposit continued. After the fix, the exact replacement boundary publication and full inclusion completed. Restart tests cover multiple missing closes followed by a later available boundary. No freshness window or 24-hour failure rule changed.
+- **Rules for agents:** Never replace an unavailable closing reference with a later price or permanently skip its round.
+- **Refs:** `apps/cox-publisher/README.md`; private `.cox/local-rehearsal/inclusion-attempt-1/`.
