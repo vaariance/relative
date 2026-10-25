@@ -39,15 +39,15 @@ describe("collateral mints", () => {
 describe("trading gate", () => {
   it("is open when the API says so or says nothing", () => {
     expect(tradingClosed(null)).toBe(false);
-    expect(tradingClosed({ open: true, gate: "open", opensAt: null })).toBe(false);
-    expect(closedLabel({ open: true, gate: "open", opensAt: null }, NOW)).toBeNull();
+    expect(tradingClosed({ open: true, gate: "open", lifecycle: "active", opensAt: null })).toBe(false);
+    expect(closedLabel({ open: true, gate: "open", lifecycle: "active", opensAt: null }, NOW)).toBeNull();
   });
 
   it("names the reason it is closed", () => {
-    expect(closedLabel({ open: false, gate: "paused", opensAt: NOW - 60 }, NOW)).toBe("Trading paused");
-    expect(closedLabel({ open: false, gate: "before-opening", opensAt: NOW + 7200 }, NOW)).toBe("Opens at 14:00 UTC");
-    expect(closedLabel({ open: false, gate: "before-opening", opensAt: NOW + 86400 }, NOW)).toBe("Opens at 23 Oct, 12:00 UTC");
-    expect(closedLabel({ open: false, gate: "retired", opensAt: null }, NOW)).toBe("Market retired");
-    expect(closedNote({ open: false, gate: "not-initialized", opensAt: null }, NOW)).toBe("This market has not opened yet.");
+    expect(closedLabel({ open: false, gate: "paused", lifecycle: "active", opensAt: NOW - 60 }, NOW)).toBe("Trading paused");
+    expect(closedLabel({ open: false, gate: "before-opening", lifecycle: "active", opensAt: NOW + 7200 }, NOW)).toBe("Opens at 14:00 UTC");
+    expect(closedLabel({ open: false, gate: "before-opening", lifecycle: "active", opensAt: NOW + 86400 }, NOW)).toBe("Opens at 23 Oct, 12:00 UTC");
+    expect(closedLabel({ open: false, gate: "retired", lifecycle: "active", opensAt: null }, NOW)).toBe("Market retired");
+    expect(closedNote({ open: false, gate: "not-initialized", lifecycle: "active", opensAt: null }, NOW)).toBe("This market has not opened yet.");
   });
 });
