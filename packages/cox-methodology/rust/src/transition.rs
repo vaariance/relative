@@ -56,7 +56,12 @@ pub enum Error {
     ReferenceChanged,
     InvalidCommitment,
 }
-fn bindings(universe: &UniverseSnapshot, values: &[Binding], previous: bool) -> Result<(), Error> {
+fn bindings(
+    universe: &UniverseSnapshot,
+    values: &[Binding],
+    previous: bool,
+    crypto_class: u16,
+) -> Result<(), Error> {
     if values.len() != universe.assets.len() {
         return Err(Error::InvalidBinding);
     }
@@ -79,7 +84,7 @@ fn bindings(universe: &UniverseSnapshot, values: &[Binding], previous: bool) -> 
                 })
             || binding.pro_feed_id == 0
             || binding.basic_class_id >= 256
-            || binding.basic_class_id == 30
+            || binding.basic_class_id == crypto_class
             || binding.epoch_asset_id >= 256
             || binding.epoch_feed_id == [0; 32]
             || !stable.insert(&binding.stable_asset_id)
@@ -107,9 +112,11 @@ fn bindings(universe: &UniverseSnapshot, values: &[Binding], previous: bool) -> 
     Ok(())
 }
 pub fn prepare(request: Request) -> Result<Preparation, Error> {
-    if request.schema != "relative.inclusion-request/v1" {
-        return Err(Error::InvalidBinding);
-    }
+    let crypto_class = match request.schema.as_str() {
+        "relative.inclusion-request/v1" => 30,
+        "relative.inclusion-request/v2" => 0,
+        _ => return Err(Error::InvalidBinding),
+    };
     assert_snapshot(&request.previous).map_err(|_| Error::InvalidUniverse)?;
     assert_snapshot(&request.next).map_err(|_| Error::InvalidUniverse)?;
     if request.next.predecessor_digest.as_ref() != Some(&request.previous.digest)
@@ -119,8 +126,13 @@ pub fn prepare(request: Request) -> Result<Preparation, Error> {
     {
         return Err(Error::InvalidLineage);
     }
-    bindings(&request.previous, &request.previous_bindings, true)?;
-    bindings(&request.next, &request.next_bindings, false)?;
+    bindings(
+        &request.previous,
+        &request.previous_bindings,
+        true,
+        crypto_class,
+    )?;
+    bindings(&request.next, &request.next_bindings, false, crypto_class)?;
     for (asset, binding) in request
         .previous
         .assets

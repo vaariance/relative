@@ -733,3 +733,44 @@ fn validation_authority_has_an_explicit_utf8_byte_bound_without_truncation() {
         Err(Error::InvalidValidationEvidence)
     );
 }
+
+#[test]
+fn fresh_inclusion_reserves_class_zero_and_keeps_class_thirty_as_an_asset() {
+    use relative_methodology::transition::{self, Error};
+    let mut request = transition_request();
+    request.schema = "relative.inclusion-request/v2".into();
+    for binding in request
+        .previous_bindings
+        .iter_mut()
+        .chain(&mut request.next_bindings)
+    {
+        binding.basic_class_id += 29;
+    }
+    let prepared = transition::prepare(request.clone()).unwrap();
+    transition::validate(&prepared).unwrap();
+    assert_eq!(prepared.request.previous_bindings[1].basic_class_id, 30);
+    for previous in [false, true] {
+        let mut invalid = request.clone();
+        if previous {
+            invalid.previous_bindings[0].basic_class_id = 0;
+        } else {
+            invalid.next_bindings[2].basic_class_id = 0;
+        }
+        assert_eq!(transition::prepare(invalid), Err(Error::InvalidBinding));
+    }
+    request.next_bindings[0].basic_class_id = 32;
+    assert_eq!(transition::prepare(request), Err(Error::ReferenceChanged));
+}
+
+#[test]
+fn legacy_inclusion_encoding_remains_unchanged_and_unknown_versions_are_rejected() {
+    use relative_methodology::transition::{self, Error};
+    let prepared = transition::prepare(transition_request()).unwrap();
+    assert_eq!(
+        prepared.digest,
+        "fd8cb1a459608e934ac4c1e00a37b1efef961f12c15e333cc88ee70d4c0d697d"
+    );
+    let mut invalid = transition_request();
+    invalid.schema = "relative.inclusion-request/v3".into();
+    assert_eq!(transition::prepare(invalid), Err(Error::InvalidBinding));
+}

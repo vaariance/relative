@@ -21,6 +21,8 @@ Canonical adaptive methodology preparation lives in the native publisher. Legacy
 
 Price-only instruments represent `tokenMint` as `null`; no mint is fabricated for an index feed. Minted asset/universe commitments retain their V1 domains, while null-mint identities use V2 domains. Activation requires the exact scheduled second; missing its qualifying signed capture requires an explicitly new schedule. Existing assets retain permanent references and class identities across transitions.
 
+Transition requests explicitly version the CRYPTO reservation: `relative.inclusion-request/v1` retains legacy class 30; `relative.inclusion-request/v2` reserves fresh class 0 and permits underlying class 30. The native successor validator binds that request version to the canonical predecessor universe schema. Preparation commitments still include the entire request; legacy commitment bytes remain unchanged. Neither version permits rebinding existing classes, feeds or permanent origins.
+
 Admission evidence limits `sourceAuthority` to 256 UTF-8 bytes. Oversized identities are rejected without truncation or normalization; source documents remain separately bound by their digests.
 
 The native inclusion request reader is bounded at 4 MiB; approved/execution journals are bounded at 16 MiB. Capacity verification includes a signed 254-to-255 transition with 64-byte stable IDs, 16-byte symbols, mint bindings and maximum-length authority strings requiring JSON escaping. Large-universe rollout backup configurations must allow 16 MiB per file; the older 1 MiB limit is insufficient for the execution journal.
