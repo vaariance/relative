@@ -23,10 +23,22 @@ export function epochBasket(epoch: Epoch): string[] {
   return epoch.closingReferences.map((item) => item.assetId);
 }
 
-export function basketProblem(basket: readonly string[]): string | null {
-  if (basket.length === EPOCH_BASKET_SIZE) return null;
-  if (basket.length > EPOCH_BASKET_SIZE) return `This Epoch offers ${basket.length} coins. Choosing ${EPOCH_BASKET_SIZE} of them is not supported in the app yet.`;
-  return "This Epoch's asset list is not available yet.";
+export const TEAMMATES = EPOCH_BASKET_SIZE - 1;
+
+export function defaultTeam(universe: readonly string[], backed: string): string[] {
+  return universe.filter((id) => id !== backed).slice(0, TEAMMATES);
+}
+
+export function entryBasket(universe: readonly string[], backed: string, mates: readonly string[]): string[] {
+  return universe.filter((id) => id === backed || mates.includes(id));
+}
+
+export function basketProblem(universe: readonly string[], backed: string, mates: readonly string[]): string | null {
+  if (universe.length < EPOCH_BASKET_SIZE) return "This Epoch's asset list is not available yet.";
+  if (!universe.includes(backed) || mates.some((id) => id === backed || !universe.includes(id)) || new Set(mates).size !== mates.length) return "Your team has a coin that is not in this round.";
+  if (mates.length < TEAMMATES) return `Add ${TEAMMATES - mates.length} more to your team.`;
+  if (mates.length > TEAMMATES) return `Remove ${mates.length - TEAMMATES} from your team.`;
+  return null;
 }
 
 export function refundStage(stage: Stage): boolean {

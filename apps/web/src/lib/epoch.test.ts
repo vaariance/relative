@@ -1,7 +1,7 @@
 import type { Epoch, EpochLot } from "@eox/app-api";
 import { describe, expect, it } from "vitest";
 import settled from "../../test/fixtures/epoch-2026-10-23-0800.json";
-import { CLOSING_GRACE_SECONDS, basketProblem, basketScore, epochBasket, countdown, executionReferences, feeOf, finalPayout, finalScore, lotView, moves, stageOf, timelineStep, withdrawSource } from "./epoch";
+import { CLOSING_GRACE_SECONDS, basketProblem, basketScore, defaultTeam, entryBasket, epochBasket, countdown, executionReferences, feeOf, finalPayout, finalScore, lotView, moves, stageOf, timelineStep, withdrawSource } from "./epoch";
 
 const epoch = (phase: Epoch["phase"], extra: Partial<Epoch> = {}): Epoch => ({ address: "x", opensAt: 1000, closesAt: 2000, phase, sealed: true, entriesOpen: false, universe: [], nextNonce: null, lots: null, totalWeight: null, settlementPot: null, allZero: null, closingReferences: [], closingDeadline: 88_400, voidable: false, ledger: null, ...extra });
 const lot = (extra: Partial<EpochLot>): EpochLot => ({ address: "l", epochOpensAt: 1000, nonce: "0", owner: "o", grossStake: "100000000", fee: "20000", admittedAt: 1100, basket: [], backedAsset: "ETH", execution: { timestamp: 1101, references: [] }, state: "executed", score: null, weight: null, claimable: null, refund: null, ...extra });
@@ -153,9 +153,31 @@ describe("Epoch basket", () => {
     expect(epochBasket(epoch("open"))).toEqual([]);
   });
 
-  it("only allows entries with exactly 30 coins", () => {
-    expect(basketProblem(thirty)).toBeNull();
-    expect(basketProblem([])).toBe("This Epoch's asset list is not available yet.");
-    expect(basketProblem([...thirty, "LIT"])).toBe("This Epoch offers 31 coins. Choosing 30 of them is not supported in the app yet.");
+  it("fills a 30-coin round with every other coin", () => {
+    const mates = defaultTeam(thirty, "C5");
+    expect(mates).toHaveLength(29);
+    expect(mates).not.toContain("C5");
+    expect(entryBasket(thirty, "C5", mates)).toEqual(thirty);
+    expect(basketProblem(thirty, "C5", mates)).toBeNull();
+  });
+
+  it("starts a larger round with the first 29 other coins in the round's order", () => {
+    const universe = [...thirty, "LIT"];
+    const mates = defaultTeam(universe, "C0");
+    expect(mates).toEqual(thirty.slice(1));
+    expect(entryBasket(universe, "C0", mates)).toEqual(thirty);
+    const swapped = [...mates.filter((id) => id !== "C3"), "LIT"];
+    expect(entryBasket(universe, "C0", swapped)).toEqual([...thirty.filter((id) => id !== "C3"), "LIT"]);
+    expect(basketProblem(universe, "C0", swapped)).toBeNull();
+  });
+
+  it("only allows a team of exactly 30 coins from the round, the backed coin included", () => {
+    const universe = [...thirty, "LIT"];
+    expect(basketProblem([], "C0", [])).toBe("This Epoch's asset list is not available yet.");
+    expect(basketProblem(universe, "C0", thirty.slice(1, 28))).toBe("Add 2 more to your team.");
+    expect(basketProblem(universe, "C0", [...thirty.slice(1), "LIT"])).toBe("Remove 1 from your team.");
+    expect(basketProblem(universe, "C0", [...thirty.slice(1, 29), "C0"])).toBe("Your team has a coin that is not in this round.");
+    expect(basketProblem(universe, "C0", [...thirty.slice(1, 29), "DOGE"])).toBe("Your team has a coin that is not in this round.");
+    expect(basketProblem(universe, "DOGE", thirty.slice(1))).toBe("Your team has a coin that is not in this round.");
   });
 });

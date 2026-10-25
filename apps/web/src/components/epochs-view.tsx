@@ -1,16 +1,16 @@
 "use client";
 
-import type { Epoch, EpochConfiguration, EpochLot, EpochOverview, PreviewHistory } from "@eox/app-api";
+import { EPOCH_BASKET_SIZE, type Epoch, type EpochConfiguration, type EpochLot, type EpochOverview, type PreviewHistory } from "@eox/app-api";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
-import { Activity, ArrowLeft, BarChart3, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Clock, Coins, LayoutList, Lock, Plus, X } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Clock, X } from "lucide-react";
 import Link from "next/link";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { walletEpochLots } from "@/app/actions";
 import { parseScaled } from "@/lib/amounts";
 import { COLLATERAL } from "@/lib/config";
-import { type LotGroup, type Move, type Stage, STAGE_LABEL, type VaultBalances, TIMELINE, basketProblem, countdown, epochBasket, executionReferences, feeOf, finalPayout, lotView, moves, refundStage, scoreOf, stageOf, timelineStep, units, utcTime, windowText, withdrawSource } from "@/lib/epoch";
+import { type LotGroup, type Move, type Stage, STAGE_LABEL, TEAMMATES, type VaultBalances, basketProblem, defaultTeam, entryBasket, countdown, epochBasket, executionReferences, feeOf, finalPayout, lotView, moves, refundStage, stageOf, units, utcTime, windowText, withdrawSource } from "@/lib/epoch";
 import { historyEstimates } from "@/lib/estimate";
 import { formatAmount } from "@/lib/format";
 import { type Collateral, collateralsOf } from "@/lib/market";
@@ -24,7 +24,7 @@ import { SendButton } from "./send-button";
 const REFERENCE_DIGITS = 12;
 const PREVIEW_BASE = 100;
 const LOTS_MS = 20_000;
-const BASKET_SIZE = 30;
+const REORDER_MS = 60_000;
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ASSOCIATED_TOKEN_PROGRAM = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
@@ -33,7 +33,6 @@ const gradient = "bg-[linear-gradient(90deg,#f2622e,#ff8a4c)]";
 const primary = `flex h-11 w-full items-center justify-center gap-2 rounded-pill ${gradient} text-sm font-medium text-white`;
 const quiet = "flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-pill bg-surface-2 text-sm transition-colors duration-150 hover:bg-white/10";
 const well = "rounded-xl bg-bg/70 p-3";
-const eyebrow = "text-[11px] uppercase tracking-wider text-muted";
 
 function useNow(start: number): number {
   const [now, setNow] = useState(start);
@@ -52,10 +51,6 @@ function pct(value: number | null, digits = 3): string {
 
 function tone(value: number | null): string {
   return value === null || value === 0 ? "text-muted" : value > 0 ? "text-up" : "text-down";
-}
-
-function chip(value: number | null): string {
-  return value === null || value === 0 ? "bg-surface-2 text-muted" : value > 0 ? "bg-up/15 text-up" : "bg-down/15 text-down";
 }
 
 function pickDefault(epochs: readonly Epoch[], now: number): string | null {
@@ -114,18 +109,6 @@ function useWalletCollateral(mint: string | null, decimals: number, refreshKey: 
   return balance;
 }
 
-function CardHead({ icon, title, children }: { icon: ReactNode; title: string; children?: ReactNode }) {
-  return (
-    <div className="flex min-h-9 items-center justify-between gap-3">
-      <h2 className="flex items-center gap-2.5 text-sm font-medium">
-        <span className="grid size-7 place-items-center rounded-full bg-surface-2 text-ink">{icon}</span>
-        {title}
-      </h2>
-      {children}
-    </div>
-  );
-}
-
 function ModeSwitch() {
   return (
     <div role="tablist" aria-label="Mode" className="inline-flex rounded-pill bg-surface p-1">
@@ -135,76 +118,58 @@ function ModeSwitch() {
   );
 }
 
-const STAGE_TONE: Record<Stage, string> = {
-  upcoming: "bg-surface-2 text-muted",
-  unopened: "bg-surface-2 text-muted",
-  open: "bg-up/15 text-up",
-  closing: "bg-warn/15 text-warn",
-  expired: "bg-warn/15 text-warn",
-  scoring: "bg-warn/15 text-warn",
-  allocating: "bg-warn/15 text-warn",
-  settled: "bg-surface-2 text-ink",
-  voided: "bg-warn/15 text-warn",
-};
-
-function StageChip({ stage }: { stage: Stage }) {
-  return <span className={`inline-flex items-center gap-1.5 rounded-pill px-2 py-0.5 text-[11px] font-medium ${STAGE_TONE[stage]}`}><span className="size-1.5 rounded-full bg-current" />{STAGE_LABEL[stage]}</span>;
+function useHeroRanking(epoch: Epoch, coins: string[], now: number): { rows: Move[]; empty: string | null } {
+  const { estimate } = useLive();
+  const stage = stageOf(epoch, now);
+  const noResult = stage === "upcoming" || stage === "unopened" || refundStage(stage);
+  const opening = useOpeningReferences(noResult ? null : epoch, now);
+  const closing = useMemo(() => {
+    if (epoch.closingReferences.length === 0) return null;
+    return Object.fromEntries(epoch.closingReferences.map((item) => [item.assetId, (Number(BigInt(item.reference)) / 10 ** REFERENCE_DIGITS) * PREVIEW_BASE]));
+  }, [epoch.closingReferences]);
+  const end = closing ?? (stage === "open" ? (estimate?.references ?? null) : null);
+  const rows = moves(coins, opening ?? null, end).filter((row) => row.change !== null);
+  const empty =
+    rows.length > 0
+      ? null
+      : stage === "upcoming"
+        ? `The ranking starts at ${utcTime(epoch.opensAt)} UTC.`
+        : noResult
+          ? "No ranking for this round."
+          : stage === "closing"
+            ? "Waiting for the closing prices."
+            : opening === null
+              ? "Prices from the start of this round are not available."
+              : "Loading the ranking…";
+  return { rows, empty };
 }
 
-function noCloseText(epoch: Epoch): string {
-  const empty = epoch.nextNonce === null || epoch.nextNonce === "0";
-  return `No closing reference was recorded within 24 hours of the close. ${empty ? "This Epoch had no entries." : "Every entry is refundable in full, fee included."}`;
-}
+function RankingCarousel({ epoch, coins, now }: { epoch: Epoch; coins: string[]; now: number }) {
+  const { rows, empty } = useHeroRanking(epoch, coins, now);
+  const track = useRef<HTMLOListElement>(null);
 
-function bannerText(epoch: Epoch, stage: Stage): string {
-  switch (stage) {
-    case "upcoming":
-      return `This Epoch opens at ${utcTime(epoch.opensAt)} UTC. Entries open then.`;
-    case "unopened":
-      return "This Epoch was scheduled but never opened, so it took no entries.";
-    case "expired":
-    case "voided":
-      return noCloseText(epoch);
-    case "open":
-      return `Entries are open until ${utcTime(epoch.closesAt)} UTC. Each entry starts from its execution reference, not from your click.`;
-    case "closing":
-      return `Waiting for the closing reference at ${utcTime(epoch.closesAt)} UTC. A later market price is never substituted.`;
-    case "scoring":
-    case "allocating":
-      return "Scores and payouts are being calculated. Withdrawals open when allocation finishes.";
-    case "settled":
-      return "This Epoch is settled. Any payout or refund is withdrawable from My entries.";
-  }
-}
+  useEffect(() => {
+    track.current?.scrollTo({ left: 0 });
+  }, [epoch.address]);
 
-const HOUR = 3600;
-const DOME_POINTS = (() => {
-  const points: { left: number; top: number; size: number; depth: number }[] = [];
-  const count = 44;
-  for (let index = 0; index < count; index += 1) {
-    const y = 1 - (index / (count - 1)) * 2;
-    const radius = Math.sqrt(1 - y * y);
-    const theta = index * 2.399963;
-    const x = Math.cos(theta) * radius;
-    const z = Math.sin(theta) * radius;
-    if (z < 0.15) continue;
-    const round = (value: number) => Math.round(value * 100) / 100;
-    points.push({ left: round(50 + x * 42), top: round(50 - y * 42), size: Math.round(18 + z * 26), depth: round(z) });
-  }
-  return points.sort((a, b) => a.depth - b.depth);
-})();
-
-function CoinDome({ coins }: { coins: string[] }) {
-  if (coins.length === 0) return null;
   return (
-    <div aria-hidden="true" className="pointer-events-none absolute -bottom-32 right-[-60px] hidden size-[380px] sm:block lg:right-4">
-      <div className="absolute inset-[6%] rounded-full bg-[radial-gradient(circle_at_34%_28%,#3a3a40_0%,#1c1c1f_42%,#0d0d0f_100%)] shadow-[inset_-24px_-34px_70px_rgba(0,0,0,0.65),inset_18px_22px_50px_rgba(242,98,46,0.18),0_0_90px_rgba(242,98,46,0.28)]" />
-      <div className="absolute inset-[6%] rounded-full bg-[radial-gradient(circle_at_78%_82%,rgba(242,98,46,0.45),transparent_55%)]" />
-      {DOME_POINTS.map((point, index) => (
-        <span key={index} className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full shadow-[0_6px_14px_rgba(0,0,0,0.55)] ring-2 ring-white/15" style={{ left: `${point.left}%`, top: `${point.top}%`, opacity: Math.round((0.55 + point.depth * 0.45) * 100) / 100 }}>
-          <CoinIcon id={coins[index % coins.length]!} size={point.size} />
-        </span>
-      ))}
+    <div aria-roledescription="carousel" aria-label="Ranking against $CRYPTO" className="min-w-0 lg:pt-12">
+      {empty ? (
+        <p className="flex h-[116px] items-center justify-center rounded-2xl border border-dashed border-white/10 px-4 text-center text-xs text-muted">{empty}</p>
+      ) : (
+        <ol ref={track} className="flex snap-x snap-mandatory gap-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {rows.map((row, index) => (
+            <li key={row.id} className="flex h-[116px] w-full shrink-0 snap-start flex-col justify-between rounded-xl border border-white/[0.06] bg-bg/60 p-3 sm:w-[calc((100%-1.5rem)/3)]">
+              <span className="num text-xs text-muted">#{index + 1}</span>
+              <span className="flex items-center gap-2">
+                <CoinIcon id={row.id} size={24} />
+                <span className="text-sm font-semibold">{row.id}</span>
+              </span>
+              <span className={`num text-base font-semibold leading-none ${tone(row.change)}`}>{pct(row.change, 2)}</span>
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }
@@ -216,181 +181,117 @@ function heroClock(epoch: Epoch, stage: Stage, now: number): { label: string; va
   return { label: "Closed", value: `${utcTime(epoch.closesAt)} UTC` };
 }
 
-function HeroCard({ epoch, now, decimals, coins, canEnter, onEnter, onExplain }: { epoch: Epoch; now: number; decimals: number; coins: string[]; canEnter: boolean; onEnter: () => void; onExplain: () => void }) {
-  const stage = stageOf(epoch, now);
-  const clock = heroClock(epoch, stage, now);
-  const settled = epoch.settlementPot !== null && (stage === "allocating" || stage === "settled");
-  const pot = settled ? units(epoch.settlementPot!, decimals) : epoch.ledger ? units(epoch.ledger.activeNet, decimals) : null;
-  const queued = epoch.ledger ? units(epoch.ledger.pendingGross, decimals) : null;
-  const entries = epoch.nextNonce !== null ? Number(epoch.nextNonce) : (epoch.lots?.executed ?? null);
-  const day = new Date(epoch.opensAt * 1000).toUTCString().slice(5, 11);
+function rankingEpoch(epochs: readonly Epoch[], now: number): Epoch | null {
+  const open = epochs.find((item) => stageOf(item, now) === "open");
+  if (open) return open;
+  return [...epochs].reverse().find((item) => item.closingReferences.length > 0 && !refundStage(stageOf(item, now))) ?? null;
+}
+
+const ROUND_SECONDS = 4 * 3600;
+
+function heroRound(epochs: readonly Epoch[], now: number): { epoch: Epoch | null; opensAt: number; closesAt: number } {
+  const live = epochs.find((item) => stageOf(item, now) === "open") ?? epochs.find((item) => stageOf(item, now) === "upcoming") ?? null;
+  if (live) return { epoch: live, opensAt: live.opensAt, closesAt: live.closesAt };
+  const opensAt = Math.floor(now / ROUND_SECONDS) * ROUND_SECONDS + ROUND_SECONDS;
+  return { epoch: null, opensAt, closesAt: opensAt + ROUND_SECONDS };
+}
+
+type HeroRound = { epoch: Epoch | null; opensAt: number; closesAt: number };
+
+const SLIDE_MS = 6000;
+
+function RoundSlide({ round, now, decimals, active }: { round: HeroRound; now: number; decimals: number; active: boolean }) {
+  const epoch = round.epoch;
+  const stage: Stage = epoch ? stageOf(epoch, now) : "upcoming";
+  const clock = epoch ? heroClock(epoch, stage, now) : { label: "Opens in", value: countdown(round.opensAt - now) };
+  const settled = epoch !== null && epoch.settlementPot !== null && (stage === "allocating" || stage === "settled");
+  const pot = !epoch ? null : settled ? units(epoch.settlementPot!, decimals) : epoch.ledger ? units(epoch.ledger.activeNet, decimals) : null;
+  const entries = !epoch ? null : epoch.nextNonce !== null ? Number(epoch.nextNonce) : (epoch.lots?.executed ?? null);
+  const day = new Date(round.opensAt * 1000).toUTCString().slice(5, 11);
   const stats = [
     { label: clock.label, value: clock.value },
-    { label: settled ? "Settlement pot" : "Net stake pot", value: pot === null ? "—" : `${formatAmount(pot, 2)} ${COLLATERAL.symbol}` },
+    { label: "Pot", value: pot === null ? "—" : `${formatAmount(pot, 2)} ${COLLATERAL.symbol}` },
     { label: "Entries", value: entries === null ? "—" : String(entries) },
-    { label: "Queued", value: queued === null ? "—" : `${formatAmount(queued, 2)} ${COLLATERAL.symbol}` },
   ];
 
   return (
-    <section className="relative isolate min-h-[260px] overflow-hidden rounded-[28px] border border-white/[0.06] bg-surface p-6 sm:p-9">
-      <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[radial-gradient(60%_90%_at_88%_100%,rgba(242,98,46,0.28),transparent_70%),radial-gradient(50%_80%_at_0%_0%,rgba(255,255,255,0.05),transparent_70%)]" />
-      <CoinDome coins={coins} />
-      <div className="relative flex max-w-xl flex-col gap-4">
-        <span className="inline-flex w-fit items-center gap-1.5 rounded-pill bg-surface-2 px-2.5 py-1 text-[11px] font-medium text-ink">
-          <span className={`size-1.5 rounded-full ${stage === "open" ? "bg-up" : refundStage(stage) ? "bg-warn" : "bg-muted"}`} />
-          {STAGE_LABEL[stage]}
-        </span>
-        <h2 className="text-3xl font-semibold leading-tight tracking-tight text-ink sm:text-4xl">
-          {day} Epoch
-          <span className="mt-1 block text-base font-normal text-muted">{utcTime(epoch.opensAt)}–{utcTime(epoch.closesAt)} UTC</span>
-        </h2>
-        <p className="max-w-md text-sm leading-relaxed text-muted">{bannerText(epoch, stage)}</p>
-        <dl className="flex flex-wrap gap-x-6 gap-y-2">
-          {stats.map((stat) => (
-            <div key={stat.label} className="flex flex-col">
-              <dt className="text-[11px] text-muted">{stat.label}</dt>
-              <dd className="num text-sm font-semibold text-ink">{stat.value}</dd>
-            </div>
-          ))}
-        </dl>
-        <div className="mt-1 flex flex-wrap gap-2">
-          {canEnter && (
-            <button type="button" onClick={onEnter} className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-xl bg-accent px-5 text-sm font-medium text-white shadow-[0_8px_24px_rgba(242,98,46,0.35)] transition-transform duration-150 hover:-translate-y-0.5">
-              <Plus size={15} aria-hidden="true" /> New entry
-            </button>
-          )}
-          <button type="button" onClick={onExplain} aria-haspopup="dialog" className={`inline-flex h-11 cursor-pointer items-center rounded-xl px-5 text-sm font-medium transition-transform duration-150 hover:-translate-y-0.5 ${canEnter ? "bg-surface-2 text-ink hover:bg-white/10" : "bg-accent text-white shadow-[0_8px_24px_rgba(242,98,46,0.35)]"}`}>
-            How payouts work
-          </button>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-const TILE_TONE: Record<Stage, string> = {
-  upcoming: "bg-surface-2 text-ink",
-  unopened: "bg-surface-2 text-muted",
-  open: "bg-accent/15 text-accent",
-  closing: "bg-warn/15 text-warn",
-  expired: "bg-warn/15 text-warn",
-  scoring: "bg-warn/15 text-warn",
-  allocating: "bg-warn/15 text-warn",
-  settled: "bg-ink text-bg",
-  voided: "bg-warn/15 text-warn",
-};
-
-function RoundList({ epochs, selected, now, onSelect }: { epochs: Epoch[]; selected: string; now: number; onSelect: (address: string) => void }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <h3 className="px-1 text-sm font-medium">Rounds</h3>
-      <ul className="flex max-h-[420px] flex-col gap-2 overflow-y-auto pr-1 [scrollbar-width:thin]">
-        {[...epochs].reverse().map((item) => {
-          const stage = stageOf(item, now);
-          const on = item.address === selected;
-          const date = new Date(item.opensAt * 1000);
-          const chipText = stage === "open" ? countdown(item.closesAt - now).slice(0, 5) : stage === "upcoming" ? `opens ${utcTime(item.opensAt)}` : `${utcTime(item.closesAt)}`;
-          return (
-            <li key={item.address}>
-              <button type="button" onClick={() => onSelect(item.address)} aria-pressed={on} className={`flex w-full cursor-pointer items-center gap-4 rounded-2xl p-3 text-left transition-colors duration-150 ${on ? "bg-accent text-white shadow-[0_10px_24px_rgba(242,98,46,0.3)]" : "hover:bg-white/[0.04]"}`}>
-                <span className={`grid h-14 w-12 shrink-0 place-items-center rounded-xl py-1 leading-none shadow-[0_5px_0_rgba(0,0,0,0.28)] ${on ? "bg-white/20 text-white" : TILE_TONE[stage]}`}>
-                  <span className="text-[9px] font-medium uppercase tracking-wide opacity-70">{date.toUTCString().slice(0, 3)}</span>
-                  <span className="num text-xl font-semibold">{date.getUTCDate()}</span>
-                </span>
-                <span className="flex min-w-0 flex-1 flex-col gap-1">
-                  <span className="num truncate text-sm font-medium">{utcTime(item.opensAt)}–{utcTime(item.closesAt)} UTC</span>
-                  <span className={`text-[11px] ${on ? "text-white/75" : "text-muted"}`}>{STAGE_LABEL[stage]}</span>
-                  <span className={`num w-fit rounded-md px-1.5 py-0.5 text-[10px] ${on ? "bg-white text-accent" : "bg-surface-2 text-muted"}`}>{chipText}</span>
-                </span>
-                <ChevronRight size={15} aria-hidden="true" className={on ? "text-white" : "text-muted"} />
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+    <div aria-hidden={!active} inert={!active} className={`flex w-full shrink-0 flex-col gap-4 px-6 motion-safe:transition-opacity motion-safe:duration-700 ${active ? "opacity-100" : "opacity-0"}`}>
+      <span className="inline-flex w-fit items-center gap-1.5 rounded-pill bg-surface-2 px-2.5 py-1 text-[11px] font-medium text-ink">
+        <span className={`size-1.5 rounded-full ${stage === "open" ? "bg-up" : refundStage(stage) ? "bg-warn" : "bg-muted"}`} />
+        {epoch ? STAGE_LABEL[stage] : "Next round"}
+      </span>
+      <h2 className="text-3xl font-semibold leading-tight tracking-tight text-ink sm:text-4xl">
+        {day}
+        <span className="mt-1 block text-base font-normal text-muted">{utcTime(round.opensAt)}–{utcTime(round.closesAt)} UTC</span>
+      </h2>
+      <dl className="flex flex-wrap gap-x-6 gap-y-2">
+        {stats.map((stat) => (
+          <div key={stat.label} className="flex flex-col">
+            <dt className="text-[11px] text-muted">{stat.label}</dt>
+            <dd className="num text-sm font-semibold text-ink">{stat.value}</dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }
 
-const BAR_TONES = [
-  "bg-[linear-gradient(90deg,#f4f4f5,#d4d4d8)] text-[#121214]",
-  "bg-[linear-gradient(90deg,rgba(242,98,46,0.45),#f2622e)] text-white",
-  "bg-[linear-gradient(90deg,#3a3a40,#55555c)] text-ink",
-];
+function HeroCard({ epochs, ranked, rankedCoins, now, decimals, onExplain }: { epochs: Epoch[]; ranked: Epoch | null; rankedCoins: string[]; now: number; decimals: number; onExplain: () => void }) {
+  const last = [...epochs].reverse().find((item) => ["settled", "allocating", "scoring"].includes(stageOf(item, now))) ?? null;
+  const current = heroRound(epochs, now);
+  const rounds: HeroRound[] = [...(last ? [{ epoch: last, opensAt: last.opensAt, closesAt: last.closesAt }] : []), current];
+  const [index, setIndex] = useState(rounds.length - 1);
+  const [paused, setPaused] = useState(false);
+  const shown = Math.min(index, rounds.length - 1);
 
-function EntryTimeline({ epoch, lots, now, decimals, connected }: { epoch: Epoch; lots: EpochLot[]; now: number; decimals: number; connected: boolean }) {
-  const span = epoch.closesAt - epoch.opensAt;
-  const at = (time: number) => Math.min(100, Math.max(0, ((time - epoch.opensAt) / span) * 100));
-  const ticks = Array.from({ length: Math.round(span / HOUR) + 1 }, (_, index) => epoch.opensAt + index * HOUR);
-  const live = now >= epoch.opensAt && now < epoch.closesAt;
-  const nowTick = live ? epoch.opensAt + Math.floor((now - epoch.opensAt) / HOUR) * HOUR : null;
-  const mine = lots.filter((lot) => lot.epochOpensAt === epoch.opensAt).sort((a, b) => (a.execution?.timestamp ?? a.admittedAt) - (b.execution?.timestamp ?? b.admittedAt));
-  const shown = mine.slice(0, 6);
-  const grid = "grid grid-cols-[72px_minmax(0,1fr)] items-center gap-3";
+  useEffect(() => {
+    if (paused || rounds.length < 2) return;
+    const timer = window.setTimeout(() => setIndex((value) => (value + 1) % rounds.length), SLIDE_MS);
+    return () => window.clearTimeout(timer);
+  }, [paused, shown, rounds.length]);
 
   return (
-    <div className="flex min-w-0 flex-col gap-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-2 px-1">
-        <h3 className="text-sm font-medium">Entry timeline</h3>
-        <span className="text-[11px] text-muted">Each entry counts from its execution to the fixed close</span>
-      </div>
-      <div className="overflow-x-auto rounded-2xl bg-bg/60 p-4 [scrollbar-width:thin]">
-        <div className="flex min-w-[520px] flex-col gap-3">
-          <div className={grid}>
-            <span className="text-[11px] text-muted">{new Date(epoch.opensAt * 1000).toUTCString().slice(8, 11)}</span>
-            <div className="relative h-8">
-              {ticks.map((tick, index) => (
-                <span key={tick} className={`absolute top-1/2 -translate-y-1/2 ${index === 0 ? "" : index === ticks.length - 1 ? "-translate-x-full" : "-translate-x-1/2"}`} style={{ left: `${at(tick)}%` }}>
-                  <span className={`num grid h-7 min-w-7 place-items-center rounded-full px-1.5 text-[11px] font-medium ${tick === nowTick ? "bg-accent text-white shadow-[0_0_16px_rgba(242,98,46,0.55)]" : "text-ink/80"}`}>{utcTime(tick)}</span>
-                </span>
+    <section className="relative isolate min-h-[260px] overflow-hidden rounded-[28px] border border-white/[0.06] bg-surface p-6 sm:p-9">
+      <button type="button" onClick={onExplain} aria-haspopup="dialog" className="absolute right-6 top-6 z-10 cursor-pointer text-sm font-medium text-accent underline underline-offset-4 transition-colors duration-150 hover:text-ink sm:right-9 sm:top-9">
+        How Epoch Works
+      </button>
+      <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[radial-gradient(60%_90%_at_88%_100%,rgba(242,98,46,0.28),transparent_70%),radial-gradient(50%_80%_at_0%_0%,rgba(255,255,255,0.05),transparent_70%)]" />
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:items-center">
+        <div
+          aria-roledescription="carousel"
+          aria-label="Rounds"
+          className="relative -mx-6 flex max-w-[calc(36rem+3rem)] flex-col gap-4"
+          onMouseEnter={() => setPaused(true)}
+          onMouseLeave={() => setPaused(false)}
+          onFocus={() => setPaused(true)}
+          onBlur={() => setPaused(false)}
+        >
+          <div className="overflow-hidden [mask-image:linear-gradient(90deg,transparent_0,black_24px,black_calc(100%-64px),transparent_100%)]">
+            <div className="flex motion-safe:transition-transform motion-safe:duration-700 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]" style={{ transform: `translateX(-${shown * 100}%)` }}>
+              {rounds.map((round, slide) => (
+                <RoundSlide key={round.epoch?.address ?? `next-${round.opensAt}`} round={round} now={now} decimals={decimals} active={slide === shown} />
               ))}
             </div>
           </div>
-          <div className="relative flex flex-col gap-3">
-            <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-[84px] right-0">
-              {ticks.map((tick) => <span key={tick} className="absolute inset-y-0 w-px bg-white/[0.06]" style={{ left: `${at(tick)}%` }} />)}
-              {live && <span className="absolute inset-y-[-6px] w-0.5 rounded-full bg-accent shadow-[0_0_10px_rgba(242,98,46,0.7)]" style={{ left: `${at(now)}%` }} />}
+          {rounds.length > 1 && (
+            <div role="tablist" aria-label="Choose round" className="flex gap-1.5 px-6">
+              {rounds.map((round, slide) => (
+                <button
+                  key={round.opensAt}
+                  type="button"
+                  role="tab"
+                  aria-selected={slide === shown}
+                  aria-label={round.epoch && slide === 0 ? "Last round" : "Next round"}
+                  onClick={() => setIndex(slide)}
+                  className={`h-1.5 cursor-pointer rounded-full transition-all duration-300 ${slide === shown ? "w-6 bg-accent" : "w-1.5 bg-white/20 hover:bg-white/40"}`}
+                />
+              ))}
             </div>
-            <div className={grid}>
-              <span className="text-[11px] text-muted">Window</span>
-              <div className="relative h-7">
-                <span className="absolute inset-y-0 left-0 right-0 overflow-hidden rounded-lg bg-white/[0.07]">
-                  <span className={`absolute inset-y-0 left-0 ${gradient}`} style={{ width: `${live ? at(now) : now >= epoch.closesAt ? 100 : 0}%` }} />
-                </span>
-                <span className="absolute inset-0 flex items-center px-3 text-[11px] font-medium text-white">{live ? "Entries open" : now < epoch.opensAt ? "Not open yet" : "Entries closed"}</span>
-              </div>
-            </div>
-            {shown.map((lot, index) => {
-              const start = lot.execution?.timestamp ?? lot.admittedAt;
-              const left = at(start);
-              const width = Math.max(4, 100 - left);
-              return (
-                <div key={lot.address} className={grid}>
-                  <span className="flex items-center gap-1.5 truncate text-[11px] text-muted"><CoinIcon id={lot.backedAsset} size={16} />{lot.backedAsset}</span>
-                  <div className="relative h-7">
-                    <span className={`absolute inset-y-0 flex items-center justify-end overflow-hidden rounded-lg px-2.5 text-[10px] font-medium ${lot.execution ? BAR_TONES[index % BAR_TONES.length] : "border border-dashed border-white/30 text-muted"}`} style={{ left: `${left}%`, width: `${width}%` }}>
-                      <span className="num truncate">{lot.execution ? `${utcTime(start, true)} · ${formatAmount(units(lot.grossStake, decimals), 2)} ${COLLATERAL.symbol}` : "Awaiting execution"}</span>
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-            {shown.length === 0 && (
-              <div className={grid}>
-                <span className="text-[11px] text-muted">Entries</span>
-                <p className="py-1.5 text-[11px] text-muted">{connected ? "You have no entries in this Epoch." : "Connect a wallet to see your entries here."}</p>
-              </div>
-            )}
-            {mine.length > shown.length && <p className="pl-[84px] text-[11px] text-muted">+{mine.length - shown.length} more in My entries</p>}
-          </div>
+          )}
         </div>
+        {ranked ? <RankingCarousel epoch={ranked} coins={rankedCoins} now={now} /> : <p className="flex h-[116px] items-center justify-center rounded-2xl border border-dashed border-white/10 px-4 text-center text-xs text-muted lg:mt-12">No round has a ranking yet.</p>}
       </div>
-      <div className="flex flex-wrap gap-x-6 gap-y-1 px-1 text-[11px] text-muted">
-        <span className="flex items-center gap-1.5"><span className={`size-2 rounded-full ${gradient}`} />Entry window</span>
-        <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-ink" />Your entries</span>
-        <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-accent" />Now</span>
-      </div>
-    </div>
+    </section>
   );
 }
 
@@ -402,11 +303,12 @@ interface Slide {
 }
 
 const PAYOUT_SLIDES: Slide[] = [
-  { kicker: "Step 1", title: "Back a coin", body: "Pick one coin in a basket of 30. Each coin's move runs from your entry's execution to the close, measured against $CRYPTO." },
-  { kicker: "Step 2", title: "Get a score", body: "Your coin's rise as a share of all the basket's rises, your own coin included. Coins that did worse than $CRYPTO count as zero." },
-  { kicker: "Step 3", title: "Weight it", body: "Your score is multiplied by your net stake." },
-  { kicker: "Step 4", title: "Share the pot", body: "The pot is the net stake of every executed entry. Each entry is paid its weight's share of the total weight. A score of zero gets nothing back, unless every entry scores zero: then every stake is refunded in full, fee included." },
-  { kicker: "Example", title: "Two entries, one pot", body: "Two 100 USDC entries, each with a net stake of 99.98 after the fee. Scores of 10% and 30% split the 199.96 pot 25% / 75%. The first coin beat $CRYPTO, yet that entry gets back 49.99 of its 100.", visual: "split" },
+  { kicker: "Step 1", title: "Back one coin", body: "Choose the coin you think will do best against $CRYPTO. Your entry counts from when it executes until the round closes." },
+  { kicker: "Step 2", title: "Build its team of 30", body: "Your coin plays in a team of 30 coins from this round, your coin included. When a round has more than 30 coins, you choose the other 29." },
+  { kicker: "Step 3", title: "Get a score", body: "Your score is your coin's gain over $CRYPTO as a share of the whole team's gains. Teammates behind $CRYPTO count as zero, so a team of laggards raises your share." },
+  { kicker: "Step 4", title: "Share the pot", body: "The pot is every stake after fees, split by stake × score. If your coin is behind $CRYPTO at the close, you get nothing back. If every entry scores zero, everyone is refunded in full, fee included." },
+  { kicker: "Example", title: "Same coin, two teams", body: "SOL ends 4% ahead of $CRYPTO. In a team where three others are also 4% ahead, SOL's score is 4 ÷ 16 = 25%. In a team where every other coin is behind $CRYPTO, its score is 100%." },
+  { kicker: "Example", title: "Two entries, one pot", body: "Two 100 USDC entries, each with 99.98 in the pot after the fee. Scores of 10% and 30% split the 199.96 pot 25% / 75%. Both coins beat $CRYPTO, yet the first entry gets back 49.99 of its 100.", visual: "split" },
 ];
 
 function PayoutModal({ onClose }: { onClose: () => void }) {
@@ -443,7 +345,7 @@ function PayoutModal({ onClose }: { onClose: () => void }) {
         <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-64 bg-[radial-gradient(90%_100%_at_15%_0%,rgba(242,98,46,0.32),transparent_70%),radial-gradient(70%_100%_at_100%_0%,rgba(255,255,255,0.05),transparent_70%)]" />
 
         <header className="flex items-center justify-between px-7 pt-6">
-          <span className="text-[11px] uppercase tracking-[0.2em] text-accent">How payouts work</span>
+          <span className="text-[11px] uppercase tracking-[0.2em] text-accent">How Epoch Works</span>
           <button type="button" onClick={onClose} aria-label="Close" className="grid size-9 cursor-pointer place-items-center rounded-full bg-white/5 text-muted transition-colors duration-150 hover:bg-white/10 hover:text-ink">
             <X size={16} aria-hidden="true" />
           </button>
@@ -451,7 +353,7 @@ function PayoutModal({ onClose }: { onClose: () => void }) {
 
         <div key={index} aria-live="polite" className="flex min-h-[300px] flex-col gap-5 px-7 pb-4 pt-8 motion-safe:animate-[slide-in_200ms_ease-out]">
           <span className={`grid size-12 place-items-center rounded-2xl text-lg font-semibold text-white shadow-[0_8px_30px_rgba(242,98,46,0.35)] ${gradient}`}>
-            {index < 4 ? index + 1 : index === 4 ? "Ex" : "!"}
+            {slide.kicker.startsWith("Step") ? index + 1 : "Ex"}
           </span>
           <div className="flex flex-col gap-3">
             <span className="text-[11px] uppercase tracking-wider text-muted">{slide.kicker}</span>
@@ -504,200 +406,214 @@ function PayoutModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function MovesCard({ epoch, coins, now, backed, canPick, onPick }: { epoch: Epoch; coins: string[]; now: number; backed: string | null; canPick: boolean; onPick: (id: string) => void }) {
-  const { estimate, freshness } = useLive();
+function closingMap(epoch: Epoch): Record<string, number> | null {
+  if (epoch.closingReferences.length === 0) return null;
+  return Object.fromEntries(epoch.closingReferences.map((item) => [item.assetId, (Number(BigInt(item.reference)) / 10 ** REFERENCE_DIGITS) * PREVIEW_BASE]));
+}
+
+function rank(rows: readonly Move[]): string[] {
+  return [...rows].sort((a, b) => (b.change ?? -Infinity) - (a.change ?? -Infinity)).map((row) => row.id);
+}
+
+function useSteadyOrder(rows: Move[], key: string, paused: boolean): Map<string, number> {
+  const latest = useRef(rows);
+  const hold = useRef(paused);
+  const [order, setOrder] = useState<string[]>([]);
+  const ready = rows.some((row) => row.change !== null);
+  useEffect(() => {
+    latest.current = rows;
+    hold.current = paused;
+  });
+  useEffect(() => {
+    if (!ready) return;
+    setOrder(rank(latest.current));
+    const timer = window.setInterval(() => {
+      if (!hold.current) setOrder(rank(latest.current));
+    }, REORDER_MS);
+    return () => window.clearInterval(timer);
+  }, [ready, key]);
+  return useMemo(() => new Map(order.map((id, index) => [id, index])), [order]);
+}
+
+function CoinTile({ row, picked, canPick, onPick }: { row: Move; picked: boolean; canPick: boolean; onPick: () => void }) {
+  const tone = row.change === null || row.change === 0 ? "text-muted" : row.change > 0 ? "text-up" : "text-down";
+  const face = (
+    <>
+      <span className="flex min-w-0 items-center gap-2">
+        <CoinIcon id={row.id} size={20} />
+        <span className="truncate text-sm font-medium">{row.id}</span>
+        {picked && <Check size={14} strokeWidth={3} aria-hidden="true" className="ml-auto shrink-0 text-accent" />}
+      </span>
+      <span className={`num text-sm ${tone}`}>{pct(row.change, 2)}</span>
+    </>
+  );
+  const shape = `flex h-[68px] w-full flex-col justify-between rounded-xl border px-3 py-2.5 text-left motion-safe:animate-[slot-in_300ms_ease-out] ${picked ? "border-accent bg-accent/10" : "border-white/[0.06] bg-bg/60"}`;
+  return (
+    <li>
+      {canPick ? (
+        <button type="button" onClick={onPick} aria-pressed={picked} aria-label={`Back ${row.id}, ${pct(row.change, 2)} against $CRYPTO`} className={`${shape} cursor-pointer transition-colors duration-150 ${picked ? "" : "hover:border-white/20"}`}>
+          {face}
+        </button>
+      ) : (
+        <div className={shape}>{face}</div>
+      )}
+    </li>
+  );
+}
+
+function CoinGroup({ title, rows, backed, canPick, onPick }: { title: string; rows: Move[]; backed: string | null; canPick: boolean; onPick: (id: string) => void }) {
+  return (
+    <div className="flex flex-col gap-2.5">
+      <h3 className="flex items-baseline gap-2 text-sm font-medium">
+        {title}
+        <span className="num text-xs font-normal text-muted">{rows.length}</span>
+      </h3>
+      {rows.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-center text-xs text-muted">None right now</p>
+      ) : (
+        <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-3 2xl:grid-cols-4">
+          {rows.map((row) => (
+            <CoinTile key={row.id} row={row} picked={row.id === backed} canPick={canPick} onPick={() => onPick(row.id)} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function useRoundMoves(epoch: Epoch, coins: string[], now: number): { rows: Move[]; opening: Record<string, number> | null | undefined; end: Record<string, number> | null } {
+  const { estimate } = useLive();
   const stage = stageOf(epoch, now);
   const noResult = stage === "unopened" || refundStage(stage);
   const opening = useOpeningReferences(noResult ? null : epoch, now);
-  const closing = useMemo(() => {
-    if (epoch.closingReferences.length === 0) return null;
-    return Object.fromEntries(epoch.closingReferences.map((item) => [item.assetId, (Number(BigInt(item.reference)) / 10 ** REFERENCE_DIGITS) * PREVIEW_BASE]));
-  }, [epoch.closingReferences]);
+  const closing = useMemo(() => closingMap(epoch), [epoch]);
   const end = closing ?? (stage === "open" ? (estimate?.references ?? null) : null);
-  const rows = moves(coins, opening ?? null, end);
-  const scored = rows.filter((row) => row.change !== null);
-  const largest = Math.max(1e-9, ...scored.map((row) => Math.abs(row.change ?? 0)));
-  const ready = opening != null && end !== null && scored.length > 0;
-  const leader = scored[0] ?? null;
-  const laggard = scored[scored.length - 1] ?? null;
-  const above = scored.filter((row) => (row.change ?? 0) > 0).length;
-  const below = scored.filter((row) => (row.change ?? 0) < 0).length;
-  const focus = (backed ? rows.find((row) => row.id === backed) : null) ?? leader;
+  return { rows: moves(coins, opening ?? null, end), opening, end };
+}
 
-  const basis = closing
-    ? `Closing reference · ${utcTime(epoch.closesAt, true)} UTC`
-    : stage !== "open"
-      ? stage === "closing"
-        ? "Awaiting closing reference"
-        : "No closing reference"
-      : freshness === "live" && estimate
-        ? `Live estimate · ${utcTime(estimate.at, true)} UTC`
-        : estimate
-          ? `Estimate paused · ${utcTime(estimate.at, true)} UTC`
-          : "Estimate unavailable";
-  const liveBadge = stage === "open" && freshness === "live";
+function CoinBoard({ epoch, coins, now, backed, canPick, onPick }: { epoch: Epoch; coins: string[]; now: number; backed: string | null; canPick: boolean; onPick: (id: string) => void }) {
+  const [hover, setHover] = useState(false);
+  const stage = stageOf(epoch, now);
+  const { rows, opening, end } = useRoundMoves(epoch, coins, now);
+  const position = useSteadyOrder(rows, epoch.address, hover);
+  const sorted = [...rows].sort((a, b) => (position.get(a.id) ?? Infinity) - (position.get(b.id) ?? Infinity));
+  const ready = opening != null && end !== null && rows.some((row) => row.change !== null);
+  const ahead = sorted.filter((row) => (row.change ?? 0) > 0);
+  const behind = sorted.filter((row) => (row.change ?? 0) <= 0);
+
   const empty =
     stage === "upcoming"
-      ? { title: "Not open yet", text: `Moves appear once this Epoch opens at ${utcTime(epoch.opensAt)} UTC.`, pending: false }
+      ? { title: "Not open yet", text: `Coins appear here when the round opens at ${utcTime(epoch.opensAt)} UTC.`, pending: false }
       : stage === "unopened"
-        ? { title: "No moves", text: "This Epoch never opened, so it has no moves.", pending: false }
+        ? { title: "No result", text: "This round never opened.", pending: false }
         : refundStage(stage)
-          ? { title: "No result", text: "No closing reference was recorded, so this Epoch has no result.", pending: false }
+          ? { title: "No result", text: "No closing prices were recorded, so every entry is refunded.", pending: false }
           : stage === "closing"
-            ? { title: "Awaiting the close", text: "A later market price is not substituted for the closing reference.", pending: true }
-            : opening === undefined
-              ? { title: "Loading moves", text: "Reading the estimate at the Epoch start.", pending: true }
-              : opening === null
-                ? { title: "No market data", text: "The estimate at the Epoch start is not available.", pending: false }
-                : { title: "Waiting for prices", text: "Awaiting the live estimate.", pending: true };
-
-  const stats = [
-    { label: "Leader", value: leader ? leader.id : "—", change: leader?.change ?? null },
-    { label: "Laggard", value: laggard ? laggard.id : "—", change: laggard?.change ?? null },
-    { label: "Ahead of $CRYPTO", value: ready ? String(above) : "—", change: null },
-    { label: "Behind $CRYPTO", value: ready ? String(below) : "—", change: null },
-  ];
+            ? { title: "Waiting for the close", text: "Results appear once the closing prices are recorded.", pending: true }
+            : opening === null
+              ? { title: "No prices yet", text: "Prices from the start of this round are not available.", pending: false }
+              : { title: "Loading prices", text: "Reading prices since the round opened.", pending: true };
 
   return (
-    <section className={`${card} flex flex-col`}>
-      <div className="flex flex-col gap-5 p-5">
-        <CardHead icon={<BarChart3 size={14} aria-hidden="true" />} title="Relative moves since Epoch start">
-          {stage !== "upcoming" && stage !== "unopened" && <span className={`num rounded-pill px-2.5 py-1 text-[11px] ${closing ? "bg-surface-2 text-ink" : liveBadge ? "bg-surface-2 text-muted" : "bg-warn/15 text-warn"}`}>{basis}</span>}
-        </CardHead>
-
-        {ready && focus && (
-          <div className="flex flex-wrap items-end justify-between gap-5">
-            <div className="flex flex-col gap-3">
-              <span className={`${eyebrow} flex items-center gap-2`}>
-                <CoinIcon id={focus.id} size={18} />
-                {focus.id} · {focus.id === backed ? "selected" : "leading"} · since the {utcTime(epoch.opensAt)} UTC estimate
-              </span>
-              <p className={`num text-[2.5rem] font-semibold leading-none tracking-tight ${tone(focus.change)}`}>{pct(focus.change)}</p>
-            </div>
-            <dl className="flex min-w-0 max-w-xl flex-1 basis-[35rem] divide-x divide-white/[0.06] overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {stats.map((stat) => (
-                <div key={stat.label} className="flex min-w-[8.75rem] flex-1 shrink-0 flex-col gap-1.5 px-3 py-2.5">
-                  <dt className="whitespace-nowrap text-[11px] text-muted">{stat.label}</dt>
-                  <dd className="flex items-center gap-1.5 whitespace-nowrap">
-                    <span className="num text-sm font-medium">{stat.value}</span>
-                    {stat.change !== null && <span className={`num rounded-pill px-1.5 py-0.5 text-[10px] ${chip(stat.change)}`}>{pct(stat.change, 2)}</span>}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-        )}
-        {ready && stage === "open" && (
-          <p className={`${well} flex items-start gap-2 text-xs text-muted`}>
-            <Clock size={14} aria-hidden="true" className="mt-0.5 shrink-0" />
-            These moves started at {utcTime(epoch.opensAt)} UTC. A new entry counts only from its own execution, so moves before then do not count toward it.
-          </p>
-        )}
-      </div>
-
-      {!ready || stage === "upcoming" ? (
+    <section className={`${card} flex flex-col gap-5 p-5`} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      {!ready ? (
         <EmptyMarket title={empty.title} pending={empty.pending}>
           {empty.text}
         </EmptyMarket>
       ) : (
         <>
-          <div className={`grid grid-cols-[28px_minmax(0,1fr)_88px] gap-4 border-t border-white/[0.06] px-5 py-2 sm:grid-cols-[28px_150px_minmax(0,1fr)_88px] ${eyebrow}`}>
-            <span>#</span>
-            <span>Asset</span>
-            <span className="hidden text-center sm:block">vs $CRYPTO</span>
-            <span className="text-right">Move</span>
-          </div>
-          <ul className="max-h-[440px] overflow-y-auto [scrollbar-color:rgba(255,255,255,0.12)_transparent] [scrollbar-width:thin]">
-            {rows.map((row, index) => (
-              <MoveRow key={row.id} rank={index + 1} row={row} largest={largest} backed={row.id === backed} canPick={canPick} onPick={() => onPick(row.id)} />
-            ))}
-          </ul>
+          <CoinGroup title="Ahead of $CRYPTO" rows={ahead} backed={backed} canPick={canPick} onPick={onPick} />
+          <CoinGroup title="Behind $CRYPTO" rows={behind} backed={backed} canPick={canPick} onPick={onPick} />
+          <p className="border-t border-white/[0.06] pt-4 text-xs text-muted">Only coins ahead of $CRYPTO at the close score. The pot is shared by stake and score.</p>
         </>
       )}
     </section>
   );
 }
 
-function MoveRow({ rank, row, largest, backed, canPick, onPick }: { rank: number; row: Move; largest: number; backed: boolean; canPick: boolean; onPick: () => void }) {
-  const width = row.change === null ? 0 : Math.round((Math.abs(row.change) / largest) * 50);
-  const bar = backed ? gradient : row.change !== null && row.change >= 0 ? "bg-[linear-gradient(90deg,rgba(62,207,142,0.25),#3ecf8e)]" : "bg-[linear-gradient(270deg,rgba(240,97,109,0.25),#f0616d)]";
-  const content = (
-    <>
-      <span className="num text-xs text-muted">{rank}</span>
-      <span className="flex min-w-0 items-center gap-2.5">
-        <CoinIcon id={row.id} size={22} />
-        <span className="truncate text-sm font-medium">{row.id}</span>
-        {backed && <span className="rounded-pill bg-accent px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white">Backed</span>}
-      </span>
-      <span className="relative hidden h-1.5 sm:block" aria-hidden="true">
-        <span className="absolute inset-y-[-4px] left-1/2 w-px bg-white/10" />
-        {row.change !== null && <span className={`absolute inset-y-0 rounded-full ${bar}`} style={row.change >= 0 ? { left: "50%", width: `${width}%` } : { right: "50%", width: `${width}%` }} />}
-      </span>
-      <span className={`num text-right text-sm ${tone(row.change)}`}>{pct(row.change)}</span>
-    </>
-  );
-  const grid = `grid w-full grid-cols-[28px_minmax(0,1fr)_88px] items-center gap-4 px-5 py-2.5 text-left sm:grid-cols-[28px_150px_minmax(0,1fr)_88px] ${backed ? "bg-accent/[0.07]" : ""}`;
-  return (
-    <li>
-      {canPick ? (
-        <button type="button" onClick={onPick} className={`${grid} cursor-pointer transition-colors duration-150 hover:bg-white/[0.03]`} aria-label={`Back ${row.id}`}>
-          {content}
-        </button>
-      ) : (
-        <div className={grid}>{content}</div>
-      )}
-    </li>
-  );
-}
+function TeamEditor({ epoch, coins, now, backed, mates, onSave, onClose }: { epoch: Epoch; coins: string[]; now: number; backed: string; mates: string[]; onSave: (mates: string[]) => void; onClose: () => void }) {
+  const [draft, setDraft] = useState<string[]>(mates);
+  const { rows } = useRoundMoves(epoch, coins, now);
+  const change = new Map(rows.map((row) => [row.id, row.change]));
+  const others = coins.filter((id) => id !== backed).sort((a, b) => (change.get(a) ?? Infinity) - (change.get(b) ?? Infinity));
+  const full = draft.length >= TEAMMATES;
+  const toggle = (id: string) => setDraft((current) => (current.includes(id) ? current.filter((item) => item !== id) : current.length >= TEAMMATES ? current : [...current, id]));
 
-function SettlementCard({ epoch, now }: { epoch: Epoch; now: number }) {
-  const stage = stageOf(epoch, now);
-  const step = timelineStep(stage);
-  return (
-    <section className={`${card} flex flex-col gap-4 p-5`}>
-      <CardHead icon={<Activity size={14} aria-hidden="true" />} title="Settlement">
-        <StageChip stage={stage} />
-      </CardHead>
-      {refundStage(stage) ? (
-        <p className="flex items-start gap-2 text-xs text-warn"><CircleAlert size={14} aria-hidden="true" className="mt-0.5 shrink-0" />{noCloseText(epoch)}</p>
-      ) : stage === "unopened" ? (
-        <p className="flex items-start gap-2 text-xs text-muted"><CircleAlert size={14} aria-hidden="true" className="mt-0.5 shrink-0" />This Epoch was scheduled but never opened.</p>
-      ) : (
-        <ol className="flex flex-col">
-          {TIMELINE.map((label, index) => {
-            const done = index < step;
-            const current = index === step;
-            const last = index === TIMELINE.length - 1;
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", key);
+    return () => {
+      document.body.style.overflow = overflow;
+      window.removeEventListener("keydown", key);
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center sm:p-6" onClick={onClose}>
+      <div aria-hidden="true" className="absolute inset-0 bg-black/70" />
+      <section role="dialog" aria-modal="true" aria-labelledby="team-title" onClick={(event) => event.stopPropagation()} className="relative flex max-h-[90vh] w-full max-w-lg flex-col rounded-t-3xl border border-white/[0.08] bg-surface sm:rounded-3xl">
+        <header className="flex items-start justify-between gap-4 px-6 pt-5">
+          <div className="flex flex-col gap-1">
+            <h2 id="team-title" className="text-lg font-semibold">Build {backed}&apos;s team</h2>
+            <p className="text-xs text-muted">{backed} plus {TEAMMATES} others. Teammates behind $CRYPTO at the close count as zero.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="grid size-9 shrink-0 cursor-pointer place-items-center rounded-full text-muted transition-colors duration-150 hover:bg-white/10 hover:text-ink">
+            <X size={16} aria-hidden="true" />
+          </button>
+        </header>
+        <div className="flex items-center justify-between px-6 pt-4 text-xs">
+          <span className={`num ${full ? "text-up" : "text-muted"}`}>{draft.length} / {TEAMMATES} picked</span>
+          <span className="flex gap-3">
+            <button type="button" onClick={() => setDraft(defaultTeam(coins, backed))} className="cursor-pointer text-muted underline-offset-4 hover:text-ink hover:underline">Reset</button>
+            <button type="button" onClick={() => setDraft([])} className="cursor-pointer text-muted underline-offset-4 hover:text-ink hover:underline">Clear</button>
+          </span>
+        </div>
+        <ul className="grid grid-cols-2 gap-2 overflow-y-auto px-6 py-4 sm:grid-cols-3">
+          <li className="flex h-14 items-center gap-2 rounded-xl border border-accent bg-accent/10 px-3">
+            <CoinIcon id={backed} size={20} />
+            <span className="flex min-w-0 flex-col">
+              <span className="truncate text-sm font-medium">{backed}</span>
+              <span className="text-[10px] text-accent">Backed</span>
+            </span>
+          </li>
+          {others.map((id) => {
+            const on = draft.includes(id);
+            const move = change.get(id) ?? null;
             return (
-              <li key={label} className="flex gap-3">
-                <span className="flex flex-col items-center">
-                  <span className={`grid size-6 shrink-0 place-items-center rounded-full ${done ? "bg-accent text-white" : current ? "bg-accent/20" : "bg-surface-2"}`}>
-                    {done && <Check size={13} strokeWidth={3.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" />}
-                    {current && <span className="size-2 rounded-full bg-accent" />}
+              <li key={id}>
+                <button type="button" aria-pressed={on} disabled={!on && full} onClick={() => toggle(id)} className={`flex h-14 w-full cursor-pointer items-center gap-2 rounded-xl border px-3 text-left transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40 ${on ? "border-white/30 bg-white/[0.06]" : "border-white/[0.06] bg-bg/60 hover:border-white/20"}`}>
+                  <CoinIcon id={id} size={20} />
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm font-medium">{id}</span>
+                    <span className={`num text-[10px] ${tone(move)}`}>{pct(move, 2)}</span>
                   </span>
-                  {!last && <span className={`w-px flex-1 ${done ? "bg-accent/60" : "bg-white/10"}`} />}
-                </span>
-                <span className={`flex flex-wrap items-center gap-x-1.5 pb-4 pt-0.5 text-xs ${current ? "font-medium text-ink" : done ? "text-ink/80" : "text-muted"}`}>
-                  {label}
-                  {current && label === "Closing reference" && <span className="num text-muted">· {utcTime(epoch.closesAt, true)} UTC</span>}
-                  {current && label === "Scoring" && epoch.lots && <span className="num text-muted">· {epoch.lots.scored} of {epoch.lots.executed}</span>}
-                  {current && label === "Allocating payouts" && epoch.lots && <span className="num text-muted">· {epoch.lots.allocated} of {epoch.lots.executed}</span>}
-                </span>
+                  {on && <Check size={14} strokeWidth={3} aria-hidden="true" className="shrink-0 text-ink" />}
+                </button>
               </li>
             );
           })}
-        </ol>
-      )}
-    </section>
+        </ul>
+        <footer className="border-t border-white/[0.06] px-6 py-4">
+          <button type="button" disabled={draft.length !== TEAMMATES} onClick={() => onSave(draft)} className={`${primary} ${draft.length === TEAMMATES ? "cursor-pointer" : "cursor-not-allowed opacity-40"}`}>
+            {draft.length === TEAMMATES ? "Use this team" : `Pick ${TEAMMATES - draft.length} more`}
+          </button>
+        </footer>
+      </section>
+    </div>,
+    document.body,
   );
 }
 
-function EntryPanel(props: { epoch: Epoch; basket: string[]; now: number; decimals: number; fee: { bps: number; cap: string }; collaterals: Collateral[]; next: Epoch | null; backed: string | null; anchored?: boolean; onBacked: (id: string) => void; onSelect: (address: string) => void; onSent: () => void; onClose?: () => void }) {
-  const { epoch, basket: coins, now, decimals, fee, backed, collaterals } = props;
+function EntryPanel(props: { epoch: Epoch; basket: string[]; now: number; decimals: number; fee: { bps: number; cap: string }; collaterals: Collateral[]; next: Epoch | null; backed: string | null; mates: string[]; anchored?: boolean; onMates: (mates: string[]) => void; onSelect: (address: string) => void; onSent: () => void; onClose?: () => void }) {
+  const { epoch, basket: coins, now, decimals, fee, backed, mates, collaterals } = props;
   const { owner } = useAccount();
   const [amount, setAmount] = useState("");
-  const [review, setReview] = useState(false);
-  const [showBasket, setShowBasket] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const choosable = coins.length > EPOCH_BASKET_SIZE;
   const [sent, setSent] = useState(0);
   const [pay, setPay] = useState<string | null>(null);
   const chosen = collaterals.find((item) => item.mint === pay) ?? collaterals[0] ?? null;
@@ -707,186 +623,153 @@ function EntryPanel(props: { epoch: Epoch; basket: string[]; now: number; decima
   const open = stage === "open" && epoch.entriesOpen;
   const gross = amount.trim() === "" ? null : parseScaled(amount, decimals);
   const charge = gross !== null && gross > 0n ? feeOf(gross, fee.bps, BigInt(fee.cap)) : null;
-  const net = gross !== null && charge !== null ? gross - charge : null;
-  const basketIssue = basketProblem(coins);
-  const exact = basketIssue === null;
+  const basketIssue = backed ? basketProblem(coins, backed, mates) : null;
   const short = wallet !== null && gross !== null && Number(gross) / 10 ** decimals > wallet;
-  const problem = !backed ? "Choose the asset to back." : gross === null || gross <= 0n ? "Enter a stake above zero." : basketIssue ? basketIssue : short ? `Your wallet has ${formatAmount(wallet ?? 0, 2)} ${symbol}.` : null;
+  const empty = amount.trim() === "";
+  const problem = !backed ? "Pick a coin first." : gross === null || gross <= 0n ? "Enter an amount above zero." : basketIssue ? basketIssue : short ? `Your wallet has ${formatAmount(wallet ?? 0, 2)} ${symbol}.` : null;
   const collateralMint = collaterals.length > 1 && chosen ? chosen.mint : undefined;
-  const intent: Intent | null = open && problem === null && gross !== null && backed !== null ? { operation: "epoch-entry", opensAt: epoch.opensAt, grossStake: gross.toString(), basket: coins, backedAsset: backed, collateralMint } : null;
-  const show = (value: bigint | null) => (value === null ? "—" : `${formatAmount(Number(value) / 10 ** decimals, 2)} ${symbol}`);
-  const cap = `${formatAmount(units(fee.cap, decimals), 2)} ${symbol}`;
+  const intent: Intent | null = open && problem === null && gross !== null && backed !== null ? { operation: "epoch-entry", opensAt: epoch.opensAt, grossStake: gross.toString(), basket: entryBasket(coins, backed, mates), backedAsset: backed, collateralMint } : null;
+  const show = (value: bigint | null) => {
+    if (value === null) return "—";
+    const scale = 10n ** BigInt(decimals);
+    const fraction = (value % scale).toString().padStart(decimals, "0").replace(/0+$/, "").padEnd(2, "0");
+    return `${(value / scale).toLocaleString("en-US")}.${fraction} ${symbol}`;
+  };
   const anchor = props.anchored === false ? undefined : "epoch-entry";
+  const stakeId = props.anchored === false ? "epoch-stake-sheet" : "epoch-stake";
 
   const other = props.next && props.next.address !== epoch.address ? props.next : null;
   const otherOpen = other !== null && stageOf(other, now) === "open" && other.entriesOpen;
-  const nextText = other ? (otherOpen ? `Entries are open in the ${windowText(other)} Epoch.` : `The next Epoch runs ${windowText(other)}.`) : "No other Epoch is open or scheduled right now.";
   const closedReason =
     stage === "upcoming"
-      ? `This Epoch opens at ${utcTime(epoch.opensAt)} UTC. It is shown for information until entries open.`
+      ? `Entries open at ${utcTime(epoch.opensAt)} UTC.`
       : stage === "open"
-        ? "This Epoch is not taking entries right now (for example it is full or paused)."
-        : stage === "unopened"
-          ? `This Epoch never opened. ${nextText}`
-          : `This Epoch has closed. ${nextText}`;
+        ? "This round is not taking entries right now."
+        : other
+          ? otherOpen
+            ? `This round is closed. Entries are open in the ${windowText(other)} round.`
+            : `This round is closed. The next one runs ${windowText(other)}.`
+          : "This round is closed. No other round is open or scheduled.";
 
   const head = (
-    <CardHead icon={<Plus size={14} aria-hidden="true" />} title={review ? "Review entry" : "Create entry"}>
+    <div className="flex min-h-9 items-center justify-between gap-3">
+      <h2 className="text-base font-semibold">Your entry</h2>
       {props.onClose && (
         <button type="button" onClick={props.onClose} aria-label="Close" className="grid size-8 cursor-pointer place-items-center rounded-full text-muted hover:bg-surface-2 hover:text-ink">
           <X size={16} aria-hidden="true" />
         </button>
       )}
-    </CardHead>
+    </div>
   );
 
   if (!open) {
     return (
       <section id={anchor} className={`${card} flex flex-col gap-4 p-5`}>
         {head}
-        <div className={`${well} flex items-start gap-3 text-sm text-muted`}>
+        <p className={`${well} flex items-start gap-2.5 text-sm text-muted`}>
           <Clock size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
           {closedReason}
-        </div>
+        </p>
         {other && stage !== "upcoming" && stage !== "open" && (
           <button type="button" onClick={() => props.onSelect(other.address)} className={quiet}>
-            {otherOpen ? "Go to the open Epoch" : "Show the next Epoch"} <ChevronRight size={14} aria-hidden="true" />
+            {otherOpen ? "Go to the open round" : "Show the next round"} <ChevronRight size={14} aria-hidden="true" />
           </button>
         )}
       </section>
     );
   }
 
-  if (review && intent && gross !== null && charge !== null && net !== null && backed) {
-    return (
-      <section id={anchor} className={`${card} flex flex-col gap-4 p-5`}>
-        {head}
-        <div className={`${well} flex items-center gap-3`}>
-          <CoinIcon id={backed} size={32} />
-          <span className="text-base font-semibold">{backed}</span>
-          <span className="rounded-pill bg-accent px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white">Backed</span>
-          <span className="num ml-auto text-xs text-muted">in a 30-coin basket</span>
-        </div>
-        <dl className="flex flex-col gap-2 text-xs">
-          <div className="flex justify-between gap-4"><dt className="text-muted">Gross stake</dt><dd className="num text-right">{show(gross)}</dd></div>
-          {collaterals.length > 1 && <div className="flex justify-between gap-4"><dt className="text-muted">Pay with</dt><dd className="num text-right">{symbol}</dd></div>}
-          <div className="flex justify-between gap-4"><dt className="text-muted">Entry fee, held</dt><dd className="num text-right">{show(charge)}</dd></div>
-          <div className="flex justify-between gap-4 text-sm font-medium"><dt>Net stake</dt><dd className="num text-right">{show(net)}</dd></div>
-          <div className="flex justify-between gap-4"><dt className="text-muted">Closes</dt><dd className="num text-right">{utcTime(epoch.closesAt)} UTC · in {countdown(epoch.closesAt - now)}</dd></div>
-        </dl>
-        <ul className={`${well} flex flex-col gap-1.5 text-[11px] text-muted`}>
-          <li className="flex gap-2"><Lock size={12} aria-hidden="true" className="mt-0.5 shrink-0" />The backed asset and basket are fixed once submitted. An entry cannot be cancelled or exited early.</li>
-          <li className="flex gap-2"><Clock size={12} aria-hidden="true" className="mt-0.5 shrink-0" />Performance starts from the execution reference, not from this click. If the entry has not executed by the close, it is refunded in full.</li>
-          <li className="flex gap-2"><Coins size={12} aria-hidden="true" className="mt-0.5 shrink-0" />The fee is kept at settlement. It is refunded if the entry never executes, the Epoch is voided or every entry scores zero.</li>
-          <li className="flex gap-2"><CircleAlert size={12} aria-hidden="true" className="mt-0.5 shrink-0" />Positive relative performance does not guarantee a profit.</li>
-        </ul>
-        <div className="flex flex-col gap-2">
-          <SendButton
-            intent={intent}
-            label="Confirm in wallet"
-            connectLabel="Connect wallet"
-            describe={`Your ${backed} entry was submitted. It starts at its execution reference.`}
-            onDone={() => {
-              setAmount("");
-              setReview(false);
-              setSent((count) => count + 1);
-              props.onSent();
-            }}
-            className={`h-11 rounded-pill ${gradient} text-sm font-medium text-white`}
-          />
-          <button type="button" onClick={() => setReview(false)} className={quiet}><ArrowLeft size={14} aria-hidden="true" /> Edit</button>
-        </div>
-      </section>
-    );
-  }
-
   return (
-    <section id={anchor} className={`${card} flex flex-col gap-4 p-5`}>
+    <section id={anchor} className="flex flex-col gap-4 rounded-card border border-line bg-surface p-4 shadow-card">
       {head}
 
-      <div className="flex flex-col gap-1.5">
-        <div className={`${well} flex flex-col gap-3`}>
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-muted">Back</span>
-            <span className="relative">
-              <select aria-label="Backed asset" value={backed ?? ""} onChange={(event) => props.onBacked(event.target.value)} className="h-8 cursor-pointer appearance-none rounded-pill bg-surface-2 pl-3 pr-8 text-xs font-medium">
-                <option value="" disabled>Choose</option>
-                {coins.map((id) => (
-                  <option key={id} value={id}>{id}</option>
-                ))}
-              </select>
-              <ChevronDown size={12} aria-hidden="true" className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted" />
-            </span>
-          </div>
-          <div className="flex items-center gap-3">
-            {backed ? <CoinIcon id={backed} size={30} /> : <span className="grid size-[30px] place-items-center rounded-full border border-dashed border-white/20 text-muted"><Plus size={14} aria-hidden="true" /></span>}
-            <span className="num text-2xl font-semibold">{backed ?? "Pick a coin"}</span>
-          </div>
+      <form className="flex flex-col gap-3" onSubmit={(event) => event.preventDefault()}>
+        <div className="flex items-center gap-3 rounded-control bg-surface-2 p-3">
+          {backed ? <CoinIcon id={backed} size={28} /> : <span className="size-7 rounded-full border border-dashed border-white/20" />}
+          <span className="flex flex-col">
+            <span className="text-sm font-semibold">{backed ? `Back ${backed}` : "No coin yet"}</span>
+            <span className="text-[11px] text-muted">{backed ? `In a team of ${EPOCH_BASKET_SIZE}, against $CRYPTO` : "Tap a coin to back it"}</span>
+          </span>
         </div>
-        <div className={`${well} flex flex-col gap-2`}>
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-muted">Basket</span>
-            <span className="num text-[11px] text-muted">{coins.length} / {BASKET_SIZE}</span>
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-sm">{exact ? `30 coins · 1 backed + 29 comparison` : coins.length > BASKET_SIZE ? `${coins.length} coins offered` : "Asset list not available"}</span>
-            {exact && <button type="button" onClick={() => setShowBasket(!showBasket)} className="cursor-pointer text-xs text-accent underline-offset-4 hover:underline">{showBasket ? "Hide" : "View basket"}</button>}
-          </div>
-          {exact && <p className="text-[11px] text-muted">All 30 eligible coins are included this Epoch. Your score compares your coin's rise with the rises of all 30, including your own.</p>}
-          {showBasket && (
-            <ul className="flex flex-wrap gap-1.5 pt-1">
-              {coins.map((id) => (
-                <li key={id} className={`num rounded-pill px-2 py-0.5 text-[11px] ${id === backed ? "bg-accent/20 text-accent" : "bg-surface-2 text-muted"}`}>{id}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
 
-      <div className={`${well} flex flex-col gap-2`}>
-        <div className="flex items-center justify-between text-[11px] text-muted">
-          <label htmlFor="epoch-stake">Stake</label>
-          {owner && <span className="num">Wallet {wallet === null ? "…" : formatAmount(wallet, 2)} {symbol}</span>}
-        </div>
-        <div className="flex items-center gap-2">
-          <input id={props.anchored === false ? undefined : "epoch-stake"} aria-label="Stake" inputMode="decimal" placeholder="0.00" value={amount} onChange={(event) => setAmount(event.target.value)} className="num min-w-0 flex-1 bg-transparent text-2xl font-semibold text-ink outline-none placeholder:text-muted/50" />
-          <span className="text-xs text-muted">{symbol}</span>
-        </div>
-        {collaterals.length > 1 && (
-          <div role="group" aria-label="Pay with" className="flex flex-wrap items-center gap-1 text-xs">
-            <span className="mr-1 text-muted">Pay with</span>
-            {collaterals.map((item) => (
-              <button key={item.mint} type="button" aria-pressed={item.mint === chosen?.mint} onClick={() => setPay(item.mint)} className={`h-7 cursor-pointer rounded-pill px-3 transition-colors duration-150 ${item.mint === chosen?.mint ? "bg-surface-2 text-ink" : "text-muted hover:text-ink"}`}>
-                {item.symbol}
+        {backed && (
+          <div className="flex items-center justify-between gap-3 rounded-control border border-line px-3 py-2.5">
+            <span className="flex min-w-0 flex-col">
+              <span className="text-xs text-muted">Your team</span>
+              <span className="truncate text-sm">{choosable ? `${backed} + ${mates.length} of ${coins.length - 1} others` : `${backed} + all ${TEAMMATES} others`}</span>
+            </span>
+            {choosable && (
+              <button type="button" onClick={() => setEditing(true)} className="shrink-0 cursor-pointer text-xs font-medium text-accent underline underline-offset-4 hover:text-ink">
+                Edit team
               </button>
-            ))}
+            )}
           </div>
         )}
-      </div>
+        {editing && backed && (
+          <TeamEditor
+            epoch={epoch}
+            coins={coins}
+            now={now}
+            backed={backed}
+            mates={mates}
+            onClose={() => setEditing(false)}
+            onSave={(next) => {
+              props.onMates(next);
+              setEditing(false);
+            }}
+          />
+        )}
 
-      <dl className="flex flex-col gap-1.5 text-xs">
-        <div className="flex justify-between gap-4"><dt className="text-muted">Entry fee ({fee.bps / 100}%, max {cap})</dt><dd className="num">{show(charge)}</dd></div>
-        <div className="flex justify-between gap-4"><dt className="text-muted">Net stake</dt><dd className="num font-medium text-ink">{show(net)}</dd></div>
-        <div className="flex justify-between gap-4"><dt className="text-muted">Closes</dt><dd className="num">{utcTime(epoch.closesAt)} UTC</dd></div>
-      </dl>
-      <p className="-mt-2 text-[11px] text-muted">The fee is held until settlement and then kept. It is refunded if the entry never executes, the Epoch is voided or every entry scores zero.</p>
+        <div>
+          <div className="mb-1 flex items-center justify-between text-xs text-muted">
+            <label htmlFor={stakeId}>You pay ({symbol})</label>
+            {owner && <span className="num">Available {wallet === null ? "…" : formatAmount(wallet, 2)}</span>}
+          </div>
+          <input id={stakeId} inputMode="decimal" placeholder="0" value={amount} onChange={(event) => setAmount(event.target.value)} className="num h-11 w-full rounded-control border border-line bg-bg px-3 text-sm text-ink placeholder:text-muted" />
+          {!empty && (gross === null || gross <= 0n) && <p className="mt-1 text-xs text-down">Enter an amount above zero.</p>}
+          {collaterals.length > 1 && (
+            <div role="group" aria-label="Pay with" className="mt-2 flex flex-wrap items-center gap-1 text-xs">
+              <span className="mr-1 text-muted">Pay with</span>
+              {collaterals.map((item) => (
+                <button key={item.mint} type="button" aria-pressed={item.mint === chosen?.mint} onClick={() => setPay(item.mint)} className={`h-7 cursor-pointer rounded-pill px-3 transition-colors duration-150 ${item.mint === chosen?.mint ? "bg-surface-2 text-ink" : "text-muted hover:text-ink"}`}>
+                  {item.symbol}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
-      <div className="flex flex-col gap-2">
-        <button type="button" disabled={problem !== null} onClick={() => setReview(true)} className={`${primary} ${problem === null ? "cursor-pointer hover:opacity-90" : "cursor-not-allowed opacity-40"}`}>
-          Review entry
-        </button>
-        {amount.trim() !== "" && problem && <p className="text-xs text-muted">{problem}</p>}
-        <p className="text-[11px] text-muted">Each entry is separate. Entering again creates a new entry, not a top-up.</p>
-      </div>
+        <dl className="mt-1 flex flex-col gap-2 border-t border-line pt-3 text-sm">
+          <div className="flex justify-between">
+            <dt className="text-muted">Fee ({fee.bps / 100}%, max {formatAmount(units(fee.cap, decimals), 2)} {symbol})</dt>
+            <dd className="num">{show(charge)}</dd>
+          </div>
+        </dl>
+
+        <SendButton
+          intent={intent}
+          label={!backed ? "Pick a coin" : empty ? "Enter an amount" : `Back ${backed}`}
+          connectLabel="Connect wallet to continue"
+          problem={empty || !backed ? "" : problem}
+          describe={`Back ${backed} with ${amount} ${symbol}`}
+          onDone={() => {
+            setAmount("");
+            setSent((count) => count + 1);
+            props.onSent();
+          }}
+          className="h-11 rounded-pill bg-accent text-sm font-medium text-accent-ink"
+        />
+      </form>
     </section>
   );
 }
 
-const GROUPS: { id: LotGroup; label: string }[] = [
-  { id: "pending", label: "Pending" },
-  { id: "active", label: "Active" },
-  { id: "withdrawable", label: "Withdrawable" },
-  { id: "history", label: "History" },
+const GROUPS: { id: LotGroup | "all"; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "active", label: "Running" },
+  { id: "pending", label: "Waiting" },
+  { id: "withdrawable", label: "To withdraw" },
+  { id: "history", label: "Past" },
 ];
 
 const STATUS_TONE: Record<LotGroup, string> = {
@@ -895,8 +778,6 @@ const STATUS_TONE: Record<LotGroup, string> = {
   active: "bg-up/15 text-up",
   history: "bg-surface-2 text-muted",
 };
-
-const TABLE = "grid min-w-[820px] grid-cols-[minmax(130px,1.1fr)_minmax(150px,1.2fr)_minmax(130px,1fr)_minmax(110px,0.9fr)_minmax(150px,1.3fr)_70px_minmax(120px,1fr)_150px] items-center gap-3 px-5";
 
 function useEntryMoves(lot: EpochLot, epoch: Epoch | null): { rows: Move[]; backed: Move | null; basis: string | null } {
   const { estimate, freshness } = useLive();
@@ -943,14 +824,12 @@ function useEpochVaults(program: string, epochAddress: string | null, refreshKey
   return held && held.key === `${epochAddress}:${refreshKey}` ? held.value : undefined;
 }
 
-function EntryRow({ lot, epoch, now, decimals, program, collaterals, onSent }: { lot: EpochLot; epoch: Epoch | null; now: number; decimals: number; program: string; collaterals: Collateral[]; onSent: () => void }) {
+function EntryCard({ lot, epoch, now, decimals, program, collaterals, onSent }: { lot: EpochLot; epoch: Epoch | null; now: number; decimals: number; program: string; collaterals: Collateral[]; onSent: () => void }) {
   const [open, setOpen] = useState(false);
   const [sent, setSent] = useState(0);
   const view = lotView(lot, epoch, now);
   const since = useEntryMoves(lot, epoch);
   const gross = units(lot.grossStake, decimals);
-  const net = gross - units(lot.fee, decimals);
-  const score = scoreOf(lot, epoch);
   const paid = finalPayout(lot, epoch);
   const payout = paid === null ? null : units(paid, decimals);
   const owed = lot.state === "claimable" && paid !== null && paid > 0n;
@@ -958,91 +837,85 @@ function EntryRow({ lot, epoch, now, decimals, program, collaterals, onSent }: {
   const vaults = useEpochVaults(program, owed && epoch ? epoch.address : null, sent);
   const source = owed && vaults !== undefined && paid !== null ? withdrawSource(collaterals.map((item) => item.mint), vaults, paid) : null;
   const sourceSymbol = source ? (collaterals[source.index]?.symbol ?? COLLATERAL.symbol) : COLLATERAL.symbol;
-  const withdrawLabel = source?.amount
-    ? `Withdraw ${formatAmount(units(source.amount, decimals), 4)} ${sourceSymbol}`
-    : `${view.refund ? "Withdraw refund" : "Withdraw"}${collaterals.length > 1 ? ` · ${sourceSymbol}` : ""}`;
-  const notSettled = view.group === "active" || view.label === "Awaiting execution";
-  const executed = lot.execution ? `Executed ${utcTime(lot.execution.timestamp, true)} UTC` : `Entered ${utcTime(lot.admittedAt, true)} UTC · ${epoch && now >= epoch.closesAt ? "not executed" : "awaiting"}`;
+  const withdrawLabel = source?.amount ? `Withdraw ${formatAmount(units(source.amount, decimals), 2)} ${sourceSymbol}` : view.refund ? "Withdraw refund" : "Withdraw";
+  const change = since.backed?.change ?? null;
+  const line = lot.execution
+    ? change !== null
+      ? `${change > 0 ? "Ahead of" : "Behind"} $CRYPTO by ${pct(Math.abs(change), 2).replace(/^[+−]/, "")} since ${utcTime(lot.execution.timestamp)} UTC${since.basis === "at close" ? " · final" : since.basis ? ` · ${since.basis}` : ""}`
+      : `Counting from ${utcTime(lot.execution.timestamp)} UTC`
+    : epoch && now >= epoch.closesAt
+      ? "Never executed, so it is refunded"
+      : "Waiting to execute";
+  const payoutText =
+    payout !== null
+      ? `${formatAmount(payout, 2)} ${COLLATERAL.symbol}${view.refund ? " refund" : ""}`
+      : lot.state === "withdrawn"
+        ? "Withdrawn"
+        : view.group === "active" || view.label === "Waiting to execute" || lot.state === "pending"
+          ? "After the close"
+          : "Refund due";
 
   return (
-    <li className="border-t border-white/[0.06]">
-      <div className={`${TABLE} py-3 text-xs`}>
-        <span className="flex items-center gap-2">
-          <CoinIcon id={lot.backedAsset} size={26} />
-          <span className="flex flex-col">
-            <span className="text-sm font-medium">{lot.backedAsset}</span>
-            <span className="num text-[10px] text-muted">#{lot.nonce}</span>
+    <li className={`${well} flex flex-col gap-3 p-4`}>
+      <div className="flex items-start justify-between gap-3">
+        <span className="flex min-w-0 items-center gap-2.5">
+          <CoinIcon id={lot.backedAsset} size={28} />
+          <span className="flex min-w-0 flex-col">
+            <span className="text-sm font-semibold">{lot.backedAsset}</span>
+            <span className="num truncate text-[11px] text-muted">{epoch ? windowText(epoch) : `${utcTime(lot.epochOpensAt)} UTC`}</span>
           </span>
         </span>
-        <span className="num text-muted">{epoch ? windowText(epoch) : `${utcTime(lot.epochOpensAt)} UTC`}</span>
-        <span><span className={`inline-flex rounded-pill px-2 py-0.5 text-[11px] ${STATUS_TONE[view.group]}`}>{view.label}</span></span>
-        <span className="num flex flex-col">
-          <span>{formatAmount(gross, 4)}</span>
-          <span className="text-[10px] text-muted">net {formatAmount(net, 4)}</span>
-        </span>
-        <span className="num flex flex-col">
-          <span className="text-muted">{executed}</span>
-          {since.backed && since.backed.change !== null && (
-            <span className="text-[10px]">
-              <span className={tone(since.backed.change)}>{lot.backedAsset} {pct(since.backed.change, 2)}</span>
-              <span className="text-muted"> since execution · {since.basis}</span>
-            </span>
-          )}
-        </span>
-        <span className="num">{score === null ? "—" : `${formatAmount(score * 100, 2)}%`}</span>
-        <span className="num flex flex-col">
-          <span>{payout === null ? (lot.state === "withdrawn" ? "Withdrawn" : notSettled ? "Not settled" : "Refund due") : `${formatAmount(payout, 4)}${view.refund ? " refund" : ""}`}</span>
-          {(result !== null || (payout !== null && lot.state === "withdrawn")) && (
-            <span className="text-[10px]">
-              {result !== null && <span className={tone(result)}>{result >= 0 ? "+" : "−"}{formatAmount(Math.abs(result), 4)}</span>}
-              {payout !== null && lot.state === "withdrawn" && <span className="text-muted">{result !== null ? " · " : ""}withdrawn</span>}
-            </span>
-          )}
-        </span>
-        <span className="flex items-center justify-end gap-2">
-          {owed && epoch && source ? (
-            <SendButton
-              intent={{ operation: "epoch-withdraw", opensAt: epoch.opensAt, nonce: lot.nonce, amount: source.amount, collateralMint: source.mint }}
-              label={withdrawLabel}
-              connectLabel="Connect wallet"
-              onDone={() => {
-                setSent((count) => count + 1);
-                onSent();
-              }}
-              className={`h-8 rounded-pill px-3 text-xs font-medium text-white ${gradient}`}
-            />
-          ) : owed ? (
-            <span className="text-[11px] text-muted">{vaults === undefined ? "Checking…" : "Not withdrawable yet"}</span>
-          ) : null}
-          <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-label="Show basket" className="grid size-8 shrink-0 cursor-pointer place-items-center rounded-full text-muted hover:bg-surface-2 hover:text-ink">
-            <ChevronDown size={14} aria-hidden="true" className={`transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
-          </button>
-        </span>
+        <span className={`shrink-0 rounded-pill px-2 py-0.5 text-[11px] ${STATUS_TONE[view.group]}`}>{view.label}</span>
       </div>
+      <p className={`num text-xs ${change === null ? "text-muted" : change > 0 ? "text-up" : "text-down"}`}>{line}</p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <dl className="flex gap-6 text-xs">
+          <div className="flex flex-col">
+            <dt className="text-[11px] text-muted">Stake</dt>
+            <dd className="num font-medium">{formatAmount(gross, 2)} {COLLATERAL.symbol}</dd>
+          </div>
+          <div className="flex flex-col">
+            <dt className="text-[11px] text-muted">Payout</dt>
+            <dd className="num font-medium">
+              {payoutText}
+              {result !== null && <span className={`ml-1 ${result > 0 ? "text-up" : result < 0 ? "text-down" : "text-muted"}`}>({result >= 0 ? "+" : "−"}{formatAmount(Math.abs(result), 2)})</span>}
+            </dd>
+          </div>
+        </dl>
+        {owed && epoch && source ? (
+          <SendButton
+            intent={{ operation: "epoch-withdraw", opensAt: epoch.opensAt, nonce: lot.nonce, amount: source.amount, collateralMint: source.mint }}
+            label={withdrawLabel}
+            connectLabel="Connect wallet"
+            onDone={() => {
+              setSent((count) => count + 1);
+              onSent();
+            }}
+            className="h-9 rounded-pill bg-accent px-4 text-xs font-medium text-white"
+          />
+        ) : owed ? (
+          <span className="text-[11px] text-muted">{vaults === undefined ? "Checking…" : "Not withdrawable yet"}</span>
+        ) : null}
+      </div>
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-fit cursor-pointer items-center gap-1 text-[11px] text-muted hover:text-ink">
+        {open ? "Hide team" : "Show team"}
+        <ChevronDown size={12} aria-hidden="true" className={`transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
+      </button>
       {open && (
-        <div className="flex flex-col gap-2 px-5 pb-3">
-          <p className="text-[11px] text-muted">
-            {since.rows.length > 0 && lot.execution
-              ? `Basket moves against $CRYPTO since your execution at ${utcTime(lot.execution.timestamp, true)} UTC · ${since.basis}`
-              : lot.execution
-                ? "Basket. Moves since your execution appear when an estimate or the closing reference is available."
-                : "Basket. Moves start once this entry executes."}
-          </p>
-          <ul className="flex flex-wrap gap-1.5">
-            {(since.rows.length > 0 ? since.rows : lot.basket.map((id) => ({ id, change: null }))).map((row) => (
-              <li key={row.id} className={`num inline-flex gap-1.5 rounded-pill px-2 py-0.5 text-[11px] ${row.id === lot.backedAsset ? "bg-accent/20 text-accent" : "bg-surface-2 text-muted"}`}>
-                {row.id}
-                {row.change !== null && <span className={row.id === lot.backedAsset ? "" : tone(row.change)}>{pct(row.change, 2)}</span>}
-              </li>
-            ))}
-          </ul>
-        </div>
+        <ul className="flex flex-wrap gap-1.5">
+          {(since.rows.length > 0 ? since.rows : lot.basket.map((id) => ({ id, change: null }))).map((row) => (
+            <li key={row.id} className={`num inline-flex gap-1.5 rounded-pill px-2 py-0.5 text-[11px] ${row.id === lot.backedAsset ? "bg-accent/20 text-accent" : "bg-surface-2 text-muted"}`}>
+              {row.id}
+              {row.change !== null && <span className={row.id === lot.backedAsset ? "" : row.change > 0 ? "text-up" : row.change < 0 ? "text-down" : ""}>{pct(row.change, 2)}</span>}
+            </li>
+          ))}
+        </ul>
       )}
     </li>
   );
 }
 
-function MyEntries({ epochs, lots, now, decimals, configuration, collaterals, onSent }: { epochs: Epoch[]; lots: EpochLot[]; now: number; decimals: number; configuration: EpochConfiguration; collaterals: Collateral[]; onSent: () => void }) {
+function YourEntries({ epochs, lots, now, decimals, configuration, collaterals, onSent }: { epochs: Epoch[]; lots: EpochLot[]; now: number; decimals: number; configuration: EpochConfiguration; collaterals: Collateral[]; onSent: () => void }) {
   const { owner } = useAccount();
   const [filter, setFilter] = useState<LotGroup | "all">("all");
   const byOpen = new Map(epochs.map((epoch) => [epoch.opensAt, epoch]));
@@ -1051,45 +924,34 @@ function MyEntries({ epochs, lots, now, decimals, configuration, collaterals, on
     .map((item) => ({ ...item, view: lotView(item.lot, item.epoch, now) }))
     .sort((a, b) => b.lot.epochOpensAt - a.lot.epochOpensAt || Number(b.lot.nonce) - Number(a.lot.nonce));
   const shown = views.filter((item) => filter === "all" || item.view.group === filter);
-  const tabs: { id: LotGroup | "all"; label: string }[] = [{ id: "all", label: "All" }, ...GROUPS];
 
   return (
-    <section className={`${card} flex flex-col`}>
-      <div className="flex flex-col gap-3 p-5 pb-3 sm:flex-row sm:items-center sm:justify-between">
-        <CardHead icon={<LayoutList size={14} aria-hidden="true" />} title="My entries" />
-        <div role="tablist" aria-label="Filter entries" className="flex gap-1 overflow-x-auto [scrollbar-width:none]">
-          {tabs.map((item) => {
-            const on = filter === item.id;
-            return (
-              <button key={item.id} type="button" role="tab" aria-selected={on} onClick={() => setFilter(item.id)} className={`h-8 shrink-0 cursor-pointer rounded-xl px-3 text-xs font-medium transition-colors duration-150 ${on ? "bg-surface-2 text-ink" : "text-muted hover:text-ink"}`}>
-                {item.label}
-              </button>
-            );
-          })}
-        </div>
+    <section className={`${card} flex flex-col gap-4 p-5`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="text-base font-semibold">Your entries</h2>
+        {lots.length > 0 && (
+          <div role="tablist" aria-label="Filter entries" className="flex gap-1 overflow-x-auto [scrollbar-width:none]">
+            {GROUPS.map((item) => {
+              const on = filter === item.id;
+              return (
+                <button key={item.id} type="button" role="tab" aria-selected={on} onClick={() => setFilter(item.id)} className={`h-8 shrink-0 cursor-pointer rounded-pill px-3 text-xs font-medium transition-colors duration-150 ${on ? "bg-surface-2 text-ink" : "text-muted hover:text-ink"}`}>
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
       {!owner ? (
-        <p className="border-t border-white/[0.06] px-5 py-8 text-center text-sm text-muted">Connect a wallet to see your entries.</p>
+        <p className="py-6 text-center text-sm text-muted">Connect a wallet to see your entries.</p>
       ) : shown.length === 0 ? (
-        <p className="border-t border-white/[0.06] px-5 py-8 text-center text-sm text-muted">{lots.length === 0 ? "No entries yet. Create one while an Epoch is open." : "No entries in this group."}</p>
+        <p className="py-6 text-center text-sm text-muted">{lots.length === 0 ? "No entries yet." : "Nothing here."}</p>
       ) : (
-        <div className="overflow-x-auto pb-2">
-          <div className={`${TABLE} py-2 ${eyebrow}`}>
-            <span>Asset</span>
-            <span>Epoch</span>
-            <span>Status</span>
-            <span>Stake</span>
-            <span>Basis</span>
-            <span>Score</span>
-            <span>Payout</span>
-            <span />
-          </div>
-          <ul>
-            {shown.map((item) => (
-              <EntryRow key={item.lot.address} lot={item.lot} epoch={item.epoch} now={now} decimals={decimals} program={configuration.program} collaterals={collaterals} onSent={onSent} />
-            ))}
-          </ul>
-        </div>
+        <ul className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
+          {shown.map((item) => (
+            <EntryCard key={item.lot.address} lot={item.lot} epoch={item.epoch} now={now} decimals={decimals} program={configuration.program} collaterals={collaterals} onSent={onSent} />
+          ))}
+        </ul>
       )}
     </section>
   );
@@ -1102,13 +964,22 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
   const epochs = useMemo(() => [...overview.epochs].sort((a, b) => a.opensAt - b.opensAt), [overview.epochs]);
   const [selected, setSelected] = useState<string | null>(() => pickDefault(epochs, serverNow));
   const [backed, setBacked] = useState<string | null>(null);
+  const [chosenMates, setChosenMates] = useState<string[] | null>(null);
   const [lots, setLots] = useState<EpochLot[]>([]);
   const [sheet, setSheet] = useState(false);
   const [explain, setExplain] = useState(false);
   const closeExplain = useCallback(() => setExplain(false), []);
   const epoch = epochs.find((item) => item.address === selected) ?? epochs[0] ?? null;
   const basket = epoch ? epochBasket(epoch) : [];
+  const mates = chosenMates ?? (backed ? defaultTeam(basket, backed) : []);
+  const pick = (id: string) => {
+    setBacked(id === backed ? null : id);
+    setChosenMates(null);
+  };
   const coins = basket.length > 0 ? basket : [...roster];
+  const ranked = rankingEpoch(epochs, now);
+  const rankedBasket = ranked ? epochBasket(ranked) : [];
+  const rankedCoins = rankedBasket.length > 0 ? rankedBasket : [...roster];
   const stage: Stage | null = epoch ? stageOf(epoch, now) : null;
   const open = stage === "open" && Boolean(epoch?.entriesOpen);
   const next = epochs.find((item) => stageOf(item, now) === "open" && item.entriesOpen) ?? epochs.find((item) => stageOf(item, now) === "upcoming") ?? null;
@@ -1154,59 +1025,43 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
     collaterals,
     next,
     backed,
-    onBacked: setBacked,
-    onSelect: (address: string) => setSelected(address),
+    mates,
+    onMates: setChosenMates,
+    onSelect: (address: string) => {
+      setSelected(address);
+      setBacked(null);
+      setChosenMates(null);
+    },
     onSent: () => void loadLots(),
-  };
-
-  const enter = () => {
-    if (window.matchMedia("(min-width: 1280px)").matches) {
-      document.getElementById("epoch-entry")?.scrollIntoView({ behavior: "smooth", block: "center" });
-      document.getElementById("epoch-stake")?.focus({ preventScroll: true });
-    } else {
-      setSheet(true);
-    }
   };
 
   return (
     <div className={`relative isolate flex flex-col gap-5 ${open ? "pb-24 xl:pb-0" : ""}`}>
       {header}
-      <HeroCard epoch={epoch} now={now} decimals={decimals} coins={coins} canEnter={open} onEnter={enter} onExplain={() => setExplain(true)} />
+      <HeroCard epochs={epochs} ranked={ranked} rankedCoins={rankedCoins} now={now} decimals={decimals} onExplain={() => setExplain(true)} />
 
-      <section className={`${card} grid gap-6 p-5 lg:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]`}>
-        <RoundList epochs={epochs} selected={epoch.address} now={now} onSelect={(address) => setSelected(address)} />
-        <EntryTimeline epoch={epoch} lots={lots} now={now} decimals={decimals} connected={Boolean(owner)} />
-      </section>
-      {!open && (
-        <div className="xl:hidden">
-          <EntryPanel {...entryProps} anchored={false} />
+      <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-12">
+        <div id="epoch-board" className="min-w-0 xl:col-span-8">
+          <CoinBoard epoch={epoch} coins={coins} now={now} backed={backed} canPick={open} onPick={pick} />
         </div>
-      )}
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-        <div className="flex min-w-0 flex-col gap-4 xl:col-span-8">
-          <MovesCard epoch={epoch} coins={coins} now={now} backed={backed} canPick={open} onPick={(id) => setBacked(id)} />
-          <MyEntries epochs={epochs} lots={lots} now={now} decimals={decimals} configuration={overview.configuration} collaterals={collaterals} onSent={() => void loadLots()} />
-        </div>
-        <div className="flex min-w-0 flex-col gap-4 xl:col-span-4">
-          <div className="hidden xl:block">
-            <EntryPanel {...entryProps} />
-          </div>
-          <SettlementCard epoch={epoch} now={now} />
+        <div className={`min-w-0 xl:sticky xl:top-6 xl:col-span-4 ${open ? "hidden xl:block" : ""}`}>
+          <EntryPanel {...entryProps} />
         </div>
       </div>
 
+      <YourEntries epochs={epochs} lots={lots} now={now} decimals={decimals} configuration={overview.configuration} collaterals={collaterals} onSent={() => void loadLots()} />
+
       {open && !sheet && (
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/[0.06] bg-bg/95 p-3 backdrop-blur xl:hidden">
-          <button type="button" onClick={() => setSheet(true)} className={`${primary} cursor-pointer`}>
-            <Plus size={16} aria-hidden="true" /> New entry{backed ? ` · ${backed}` : ""}
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/[0.06] bg-bg/95 p-3 xl:hidden">
+          <button type="button" disabled={!backed} onClick={() => setSheet(true)} className={`${primary} ${backed ? "cursor-pointer" : "cursor-not-allowed opacity-40"}`}>
+            {backed ? <>Back {backed} <ChevronRight size={16} aria-hidden="true" /></> : "Tap a coin to back it"}
           </button>
         </div>
       )}
       {sheet && (
         <div className="fixed inset-0 z-50 flex flex-col gap-4 overflow-y-auto bg-bg p-4 xl:hidden">
           <EntryPanel {...entryProps} anchored={false} onClose={() => setSheet(false)} />
-          <button type="button" onClick={() => setExplain(true)} className="mx-auto cursor-pointer text-xs text-accent underline-offset-4 hover:underline">How payouts work</button>
+          <button type="button" onClick={() => setExplain(true)} className="mx-auto cursor-pointer text-xs text-accent underline-offset-4 hover:underline">How Epoch Works</button>
         </div>
       )}
       {explain && <PayoutModal onClose={closeExplain} />}

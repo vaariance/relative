@@ -134,41 +134,46 @@ the backed coin's rise against $CRYPTO as a share of all the basket's rises
 entry's net stake, shared by score times net stake. If every entry scores
 zero, every stake is refunded in full, fee included.
 
-The layout follows Peter's Epoch design brief (2026-10-23):
+The layout:
 
-- **Top:** a Basic / Epoch switch (Basic goes to Markets) and a clock card with
-  the date, exact UTC window, status, countdown and local closing time. Arrows
-  browse the previous and next Epochs. At zero the status reads Closing, not
-  Settled. Past the 24-hour closing window with no closing reference it reads
-  Not closed, and a draft that missed its opening reads Not opened.
-- **Relative moves since Epoch start:** every asset ranked by its move against
-  $CRYPTO, starting from the live estimate at the Epoch's opening (an Epoch has
-  no on-chain opening reference). The end is labelled "Live estimate · as of
-  …" or "Estimate paused" while open, and "Closing reference" once final. It
-  ranks assets, not entries or payouts; there are no odds or live payout
-  estimates. During an open Epoch a row can be picked as the backed asset.
-- **Create entry:** the backed asset, the basket ("30 coins · 1 backed + 29
-  comparison"), the stake with the wallet balance of the chosen collateral
-  (USDC or rlUSD, sent as `collateralMint`), the fee with its cap, the net
-  stake and when the fee is refunded, then Review entry. The review notes that
-  an entry cannot be cancelled and that an unexecuted entry is refunded in
-  full. Entries use the API's `entriesOpen` gate. When no round is open, the
-  panel says whether another Epoch is open or scheduled; below 1280px it shows
-  under the top cards.
-- **Pot and timeline:** Net stake pot (active net stake; the settlement pot
-  once allocating), queued unexecuted stake and entries, and the timeline Open
-  → Closing reference → Scoring → Allocating payouts → Withdrawable, with the
-  API's scored and allocated counts.
-- **How payouts work:** a carousel with the four steps and Peter's worked
-  example.
-- **My entries:** one row per entry with All / Pending / Active /
-  Withdrawable / History filters. Each shows gross and net stake, its execution
-  time, score, payout and gain or loss (payout minus gross stake), and the
-  basket. The program keeps a score only while an entry is scored and drops the
-  payout once it is withdrawn, so `finalScore` and `finalPayout` in
-  `src/lib/epoch.ts` recompute both from on-chain values (execution and closing
+- **Top:** a Basic / Epoch switch (Basic goes to Markets) and the hero card.
+  Its left side is a carousel of two rounds, the last settled round and the
+  open round (or the next one), switching every 6 seconds through a faded edge
+  and pausing on hover or focus. Each slide shows the status, date, UTC window,
+  a countdown or closing time, Pot (current net stake while open, the
+  settlement pot once allocating) and Entries. When no round is scheduled yet,
+  the next slide counts down to the next four-hour UTC boundary and shows "—"
+  for pot and entries. The right side ranks the coins of the open round, or
+  else the last finished round, by their move against $CRYPTO: three cards at a
+  time on wide screens, one on phones, scrolled sideways. "How Epoch Works"
+  opens the explainer: back one coin, build its team of 30, the score, the pot,
+  and two worked examples.
+- **Coin board:** the shown round's coins in two groups, Ahead of $CRYPTO and
+  Behind $CRYPTO, each as a fixed-size tile. Moves start from the live estimate
+  at the round's opening (an Epoch has no on-chain opening reference) and end
+  at the live estimate or the closing reference. Numbers update live; the order
+  changes at most once a minute and not while the pointer is over the board.
+  During an open round a tile picks the backed coin.
+- **Your entry:** follows the Buy form. The backed coin, its team, You pay with
+  the wallet balance of the chosen collateral (USDC or rlUSD, sent as
+  `collateralMint`), the exact fee with its rate and cap, then one button that
+  goes to the wallet. The team is the 30-coin basket the contract scores
+  against, the backed coin included. In a round of exactly 30 coins it is every
+  coin. In a larger round it starts as the other coins in the round's own
+  order (`defaultTeam` in `src/lib/epoch.ts`), and Edit team opens a picker
+  that lists the other coins by their move against $CRYPTO, behind first, and
+  only accepts exactly 29. Entries use the API's `entriesOpen` gate and cannot be
+  sold or cancelled, so there is no Sell side. When no round is open, the panel
+  says whether another one is open or scheduled. Below 1280px a bottom button
+  ("Back SOL") opens the panel as a sheet once a coin is picked.
+- **Your entries:** one card per entry with All / Running / Waiting / To
+  withdraw / Past filters. Each shows the status, the backed coin's move against
+  $CRYPTO since its execution, the stake, the payout and gain or loss, and its
+  team. The program keeps a score only while an entry is
+  scored and drops the payout once it is withdrawn, so `finalPayout` in
+  `src/lib/epoch.ts` recomputes it from on-chain values (execution and closing
   references, net stake, pot and total weight) with the contract's integer
-  arithmetic. They reproduce the 23 Oct 08:00 payouts exactly
+  arithmetic. It reproduces the 23 Oct 08:00 payouts exactly
   (`test/fixtures/epoch-2026-10-23-0800.json`). Withdraw reads both Epoch vaults
   and takes the payout from one that holds it all, or part of it when neither
   does.
