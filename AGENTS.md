@@ -1896,3 +1896,11 @@ another agent needs to know.
 - **Rules for agents:** Do not deploy the earlier unmarked-footer artifacts or treat arbitrary padding as lifecycle data. Drain accepted work before atomic pause+archive, with its stage guard and final inventory recheck. New ownership/activity requires Peter's review. Preserve Alchemy billing records uncommitted. Do not skip ahead to section 2 or send another readiness handoff while section 1 remains open.
 - **Open:** Cloud archival/history-object verification is blocked by expired GCP project-account authentication; the hashed local inventory is saved. Peter was asked to reauthenticate. Section 1 is not closed, Pause A has not been reached, and new source fixes require scoped commit approval later.
 - **Refs:** `packages/cox/deploy/README.md` fresh-generation reset boundary; `packages/cox-client/README.md`; `packages/cox/fixtures/generation/legacy-pool-dirty-padding.json`; private `.cox/fresh-generation-inventory/latest.json`, `.cox/fresh-generation-preparation.json`.
+
+
+### 2026-10-25 · Peter (Codex) · Section-one archive verified after reauthentication
+
+- **Area:** Old-generation inventory and immutable cloud evidence; resolves the cloud blocker in “Section-one revalidation and legacy lifecycle storage fix”.
+- **What:** Uploaded the 81-account inventory and identities/checksums for 37 existing publication objects (sequences 0–36) as one create-only archive. Downloaded bytes match SHA-256 `11445caa20c6091620ce433adefcdf5ae2f9dd861e4f8a1fa3166734a9e52d9b`. The inventory contains only the three approved test owners. No account, collateral, publication or historical object was changed or deleted. New Basic pool 3/Epoch config 3 remain uncreated.
+- **Rules for agents:** Section 1’s pre-cutover preparation is verified; repeat the inventory/activity check at actual cutover. Unexpected ownership/activity still requires Peter’s review. Do not interpret archival evidence as on-chain archival or permission to skip Pause A/B.
+- **Refs:** `packages/cox/deploy/README.md`; private `.cox/section-one-verification.json`; cloud `generation-archives/legacy-basic-2-epoch-2/11445caa20c6091620ce433adefcdf5ae2f9dd861e4f8a1fa3166734a9e52d9b.json` in the existing publication archive bucket.
