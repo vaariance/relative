@@ -87,6 +87,7 @@ All fixed-point quantities are decimal integer strings. Prices use USD × 10⁸;
 | `POST /v1/transactions/epoch-refund` | Build with `{ owner, opensAt, nonce, collateralMint? }` for a lot whose `refund` is set: one transaction refunds the lot and withdraws the whole stake |
 | `POST /v1/transactions/epoch-prepare` | Build with `{ owner }`: the next bounded transaction preparing the current registry-bound round, and how many steps remain |
 | `POST /v1/transactions/epoch-finalize-empty` | Build with `{ owner, opensAt }`: the permissionless empty finalization of an ended round |
+| `POST /v1/transactions/epoch-void` | Build with `{ owner, opensAt }`: the permissionless void of a round still open after its closing deadline, so its stakes can be refunded |
 
 Omitting the publication cursor starts from sequence 0. An empty page preserves the cursor. SSE events contain the publication and its sequence; the server sends a heartbeat every 15 seconds. Transaction request bodies are limited to 8 KiB.
 
