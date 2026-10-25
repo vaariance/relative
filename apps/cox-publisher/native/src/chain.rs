@@ -16,10 +16,9 @@ use sha2::{Digest, Sha256};
 use solana_address::Address;
 use solana_instruction::Instruction;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::PathBuf,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -69,6 +68,7 @@ pub struct ChainReader {
 const LOT_PAGE: u64 = 16;
 const MAX_LOT_PAGES: usize = 4;
 const MAX_EPOCH_SCAN: usize = 8;
+const MAX_TRACKED_EPOCHS: usize = 64;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct LotCursor {
     phase: u8,
@@ -81,6 +81,10 @@ struct DiscoveryState {
     config: String,
     first_epoch: u64,
     next_epoch: u64,
+    #[serde(default)]
+    scan_epoch: u64,
+    #[serde(default)]
+    tracked_epochs: BTreeSet<u64>,
     cursors: BTreeMap<u64, LotCursor>,
 }
 pub struct Discovery {
@@ -98,11 +102,13 @@ impl Discovery {
         }
         Ok(Self {
             state: DiscoveryState {
-                schema: 1,
+                schema: 2,
                 program: program.to_string(),
                 config: config.to_string(),
                 first_epoch,
                 next_epoch: first_epoch,
+                scan_epoch: first_epoch,
+                tracked_epochs: BTreeSet::new(),
                 cursors: BTreeMap::new(),
             },
             path: None,
@@ -117,22 +123,47 @@ impl Discovery {
     ) -> Result<Self, Error> {
         let mut value = Self::new(program, config, first_epoch)?;
         let path = path.into();
-        if let Some(saved) =
+        if let Some(mut saved) =
             crate::journal::read::<DiscoveryState>(&path).map_err(|_| Error::Storage)?
         {
-            if saved.schema != 1
+            if saved.schema == 1 {
+                if saved.scan_epoch != 0
+                    || !saved.tracked_epochs.is_empty()
+                    || saved.cursors.len() > 2
+                {
+                    return Err(Error::Storage);
+                }
+                saved.schema = 2;
+                saved.scan_epoch = saved.next_epoch;
+                saved.tracked_epochs.extend(saved.cursors.keys().copied());
+            }
+            let valid_opening =
+                |opens: u64| opens >= first_epoch && opens % cox_epoch::EPOCH_SECONDS == 0;
+            if saved.schema != 2
                 || saved.program != value.state.program
                 || saved.config != value.state.config
                 || saved.first_epoch != first_epoch
-                || saved.next_epoch < first_epoch
-                || saved.next_epoch % cox_epoch::EPOCH_SECONDS != 0
-                || saved.cursors.len() > 2
+                || !valid_opening(saved.next_epoch)
+                || !valid_opening(saved.scan_epoch)
+                || saved.next_epoch > saved.scan_epoch
+                || saved.tracked_epochs.len() > MAX_TRACKED_EPOCHS
+                || saved
+                    .tracked_epochs
+                    .iter()
+                    .any(|opens| !valid_opening(*opens) || *opens < saved.next_epoch)
                 || saved.cursors.iter().any(|(opens, cursor)| {
-                    *opens < first_epoch
-                        || *opens % cox_epoch::EPOCH_SECONDS != 0
+                    !saved.tracked_epochs.contains(opens)
                         || cursor.phase > 4
                         || cursor.next > u64::from(cox_epoch::MAX_LOTS)
                 })
+                || saved.next_epoch
+                    != saved
+                        .tracked_epochs
+                        .iter()
+                        .next()
+                        .copied()
+                        .unwrap_or(saved.scan_epoch)
+                        .min(saved.scan_epoch)
             {
                 return Err(Error::Storage);
             }
@@ -147,7 +178,58 @@ impl Discovery {
         }
         Ok(())
     }
+    fn openings(&self, current: u64) -> Result<(BTreeSet<u64>, u64), Error> {
+        if current < self.state.scan_epoch && current >= self.state.first_epoch {
+            return Err(Error::UnstableRead);
+        }
+        let mut openings = self.state.tracked_epochs.clone();
+        let mut scan = self.state.scan_epoch;
+        for _ in 0..MAX_EPOCH_SCAN {
+            if scan >= current {
+                break;
+            }
+            openings.insert(scan);
+            scan = scan
+                .checked_add(cox_epoch::EPOCH_SECONDS)
+                .ok_or(Error::Overflow)?;
+        }
+        if current >= self.state.first_epoch {
+            openings.insert(current);
+        }
+        Ok((openings, scan))
+    }
+    fn record_epoch(&mut self, opens: u64, finalized_done: bool) -> Result<(), Error> {
+        if finalized_done {
+            self.state.tracked_epochs.remove(&opens);
+            self.state.cursors.remove(&opens);
+        } else {
+            if !self.state.tracked_epochs.contains(&opens)
+                && self.state.tracked_epochs.len() >= MAX_TRACKED_EPOCHS
+            {
+                return Err(Error::Limit);
+            }
+            self.state.tracked_epochs.insert(opens);
+        }
+        self.refresh_next_epoch();
+        Ok(())
+    }
+    fn refresh_next_epoch(&mut self) {
+        self.state.next_epoch = self
+            .state
+            .tracked_epochs
+            .iter()
+            .next()
+            .copied()
+            .unwrap_or(self.state.scan_epoch)
+            .min(self.state.scan_epoch);
+    }
+    fn finish_scan(&mut self, scan: u64, current: u64) {
+        self.state.scan_epoch = scan;
+        self.refresh_next_epoch();
+        self.incomplete |= scan < current;
+    }
     fn cursor(&mut self, opens: u64, phase: Phase, nonce: u64) -> Result<u64, Error> {
+        self.record_epoch(opens, false)?;
         let cursor = self.state.cursors.entry(opens).or_insert(LotCursor {
             phase: phase as u8,
             next: 0,
@@ -187,6 +269,19 @@ fn completed(epoch: &EpochAccount, now: u64) -> bool {
                 && state.ledger().held_fees == 0
                 && matches!(state.phase(), Phase::Settled | Phase::Voided)
         })
+}
+fn finalized_epoch_done(
+    confirmed: Option<&EpochAccount>,
+    finalized: Option<&EpochAccount>,
+    now: u64,
+) -> bool {
+    match (confirmed, finalized) {
+        (None, None) => true,
+        (Some(confirmed), Some(finalized)) => {
+            completed(confirmed, now) && completed(finalized, now)
+        }
+        _ => false,
+    }
 }
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Raw {
@@ -341,6 +436,21 @@ impl ChainReader {
         &self,
         discovery: &mut Discovery,
     ) -> Result<ChainState, Error> {
+        let mut candidate = Discovery {
+            state: discovery.state.clone(),
+            path: None,
+            incomplete: false,
+        };
+        let state = self.read_discovery_snapshot(&mut candidate).await?;
+        candidate.path = discovery.path.clone();
+        candidate.save()?;
+        *discovery = candidate;
+        Ok(state)
+    }
+    async fn read_discovery_snapshot(
+        &self,
+        discovery: &mut Discovery,
+    ) -> Result<ChainState, Error> {
         if self.basic_pool_id == 1 {
             return Err(Error::RetiredPool);
         }
@@ -349,9 +459,14 @@ impl ChainReader {
             self.basic_program,
             &[b"pool", &self.basic_pool_id.to_le_bytes()],
         );
-        let (mut slot, roots) = self
-            .multiple(&[registry_key, pool_key, self.epoch_config], 0)
+        let clock_key = "SysvarC1ock11111111111111111111111111111111"
+            .parse()
+            .map_err(|_| Error::InvalidAccount)?;
+        let (mut slot, mut roots) = self
+            .multiple(&[registry_key, pool_key, self.epoch_config, clock_key], 0)
             .await?;
+        let initial_timestamp_ms = clock_timestamp_ms(&roots[3])?;
+        roots.pop();
         let registry: Registry = decode(&roots[0], self.basic_program)?;
         let pool: Pool = decode(&roots[1], self.basic_program)?;
         let epoch_config: PoolConfig = decode(&roots[2], self.epoch_program)?;
@@ -485,58 +600,11 @@ impl ChainReader {
             }
             observed.extend(rows);
         }
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| Error::InvalidResponse)?
-            .as_secs();
+        let now = initial_timestamp_ms / 1000;
         let current = now / cox_epoch::EPOCH_SECONDS * cox_epoch::EPOCH_SECONDS;
         discovery.incomplete = false;
         let mut epochs = Vec::new();
-        let mut examined = 0;
-        while discovery.state.next_epoch < current && examined < MAX_EPOCH_SCAN {
-            let opens = discovery.state.next_epoch;
-            let key = EpochAccounts::derive(self.epoch_program, self.epoch_config, opens)
-                .map_err(|_| Error::InvalidAccount)?
-                .epoch;
-            let (s, rows) = self.optional_accounts(&[key], slot, "confirmed").await?;
-            slot = s;
-            let done = if let Some(row) = &rows[0] {
-                completed(&decode::<EpochAccount>(row, self.epoch_program)?, now)
-            } else {
-                true
-            };
-            if !done {
-                break;
-            }
-            let (_, final_rows) = self.optional_accounts(&[key], 0, "finalized").await?;
-            let final_done = match (&rows[0], &final_rows[0]) {
-                (None, None) => true,
-                (Some(_), Some(row)) => {
-                    completed(&decode::<EpochAccount>(row, self.epoch_program)?, now)
-                }
-                _ => false,
-            };
-            if !final_done {
-                break;
-            }
-            discovery.state.next_epoch = opens
-                .checked_add(cox_epoch::EPOCH_SECONDS)
-                .ok_or(Error::Overflow)?;
-            discovery.state.cursors.remove(&opens);
-            discovery.save()?;
-            examined += 1;
-        }
-        if examined == MAX_EPOCH_SCAN && discovery.state.next_epoch < current {
-            discovery.incomplete = true;
-        }
-        let mut openings = vec![discovery.state.next_epoch];
-        if current >= discovery.state.first_epoch && current != discovery.state.next_epoch {
-            openings.push(current);
-        }
-        discovery
-            .state
-            .cursors
-            .retain(|opens, _| openings.contains(opens));
+        let (openings, scan_end) = discovery.openings(current)?;
         for opens in openings {
             if opens > current {
                 continue;
@@ -547,18 +615,48 @@ impl ChainReader {
                 .optional_accounts(&[accounts.epoch], slot, "confirmed")
                 .await?;
             slot = s;
-            let Some(row) = rows.into_iter().next().flatten() else {
+            let row = rows.into_iter().next().flatten();
+            let epoch = row
+                .as_ref()
+                .map(|row| decode::<EpochAccount>(row, self.epoch_program))
+                .transpose()?;
+            if let Some(epoch) = &epoch {
+                if epoch.opens_at != opens
+                    || address(epoch.config) != self.epoch_config
+                    || address(epoch.vault) != accounts.vault
+                    || address(epoch.test_vault) != accounts.test_vault
+                {
+                    return Err(Error::WrongAddress);
+                }
+            }
+            let done = epoch.as_ref().is_none_or(|epoch| completed(epoch, now));
+            if done && opens < current {
+                let (_, finalized) = self
+                    .optional_accounts(&[accounts.epoch], 0, "finalized")
+                    .await?;
+                let final_epoch = finalized[0]
+                    .as_ref()
+                    .map(|row| decode::<EpochAccount>(row, self.epoch_program))
+                    .transpose()?;
+                if let Some(final_epoch) = &final_epoch {
+                    if final_epoch.opens_at != opens
+                        || address(final_epoch.config) != self.epoch_config
+                        || address(final_epoch.vault) != accounts.vault
+                        || address(final_epoch.test_vault) != accounts.test_vault
+                    {
+                        return Err(Error::WrongAddress);
+                    }
+                }
+                let finalized_done =
+                    finalized_epoch_done(epoch.as_ref(), final_epoch.as_ref(), now);
+                discovery.record_epoch(opens, finalized_done)?;
+            } else if epoch.is_some() {
+                discovery.record_epoch(opens, false)?;
+            }
+            let (Some(row), Some(epoch)) = (row, epoch) else {
                 continue;
             };
-            let epoch: EpochAccount = decode(&row, self.epoch_program)?;
-            if epoch.opens_at != opens
-                || address(epoch.config) != self.epoch_config
-                || address(epoch.vault) != accounts.vault
-                || address(epoch.test_vault) != accounts.test_vault
-            {
-                return Err(Error::WrongAddress);
-            }
-            if completed(&epoch, now) {
+            if done {
                 continue;
             }
             let (s, vault_rows) = self
@@ -641,7 +739,6 @@ impl ChainReader {
                         .get_mut(&opens)
                         .ok_or(Error::InvalidAccount)?
                         .next = prefix;
-                    discovery.save()?;
                 }
                 let has_action = page
                     .iter()
@@ -668,9 +765,7 @@ impl ChainReader {
                 lots,
             });
         }
-        let clock_key = "SysvarC1ock11111111111111111111111111111111"
-            .parse()
-            .map_err(|_| Error::InvalidAccount)?;
+        discovery.finish_scan(scan_end, current);
         let (s, verified) = self
             .multiple(
                 &[registry_key, pool_key, self.epoch_config, clock_key],
@@ -679,6 +774,12 @@ impl ChainReader {
             .await?;
         slot = s;
         let confirmed_timestamp_ms = clock_timestamp_ms(&verified[3])?;
+        if confirmed_timestamp_ms < initial_timestamp_ms
+            || confirmed_timestamp_ms / 1000 / cox_epoch::EPOCH_SECONDS
+                != current / cox_epoch::EPOCH_SECONDS
+        {
+            return Err(Error::UnstableRead);
+        }
         let fresh_registry: Registry = decode(&verified[0], self.basic_program)?;
         let fresh_pool: Pool = decode(&verified[1], self.basic_program)?;
         let fresh_config: PoolConfig = decode(&verified[2], self.epoch_program)?;
@@ -692,7 +793,6 @@ impl ChainReader {
         {
             return Err(Error::UnstableRead);
         }
-        discovery.save()?;
         observed.sort_by_key(|row| row.address.to_bytes());
         let mut hash = Sha256::new();
         for row in observed {
@@ -1940,6 +2040,170 @@ pub(crate) mod tests {
                 .process_lot(0, EpochLotOperation::Refund)]
         );
     }
+    #[test]
+    fn discovery_tracks_every_unfinished_round_across_boundaries() {
+        let step = cox_epoch::EPOCH_SECONDS;
+        let mut discovery = Discovery::new(key(1), key(2), step).unwrap();
+        for current in [step, 2 * step, 3 * step, 4 * step] {
+            let (openings, scan) = discovery.openings(current).unwrap();
+            for opens in openings {
+                discovery.record_epoch(opens, false).unwrap();
+            }
+            discovery.finish_scan(scan, current);
+        }
+        assert_eq!(discovery.state.next_epoch, step);
+        assert_eq!(discovery.state.scan_epoch, 4 * step);
+        assert_eq!(
+            discovery.state.tracked_epochs,
+            BTreeSet::from([step, 2 * step, 3 * step, 4 * step])
+        );
+        discovery.record_epoch(2 * step, true).unwrap();
+        discovery.finish_scan(4 * step, 4 * step);
+        assert_eq!(discovery.state.next_epoch, step);
+        discovery.record_epoch(step, true).unwrap();
+        discovery.finish_scan(4 * step, 4 * step);
+        assert_eq!(discovery.state.next_epoch, 3 * step);
+    }
+
+    #[test]
+    fn discovery_inspects_missed_history_in_bounded_pages_without_losing_current() {
+        let step = cox_epoch::EPOCH_SECONDS;
+        let mut discovery = Discovery::new(key(1), key(2), step).unwrap();
+        let current = 30 * step;
+        let mut inspected = BTreeSet::new();
+        while discovery.state.scan_epoch < current {
+            let (openings, scan) = discovery.openings(current).unwrap();
+            assert!(scan - discovery.state.scan_epoch <= MAX_EPOCH_SCAN as u64 * step);
+            assert!(openings.contains(&current));
+            for opens in openings {
+                inspected.insert(opens);
+                discovery
+                    .record_epoch(opens, opens != 5 * step && opens != current)
+                    .unwrap();
+            }
+            discovery.finish_scan(scan, current);
+        }
+        assert_eq!(inspected, (1..=30).map(|n| n * step).collect());
+        assert_eq!(discovery.state.next_epoch, 5 * step);
+        assert_eq!(
+            discovery.state.tracked_epochs,
+            BTreeSet::from([5 * step, current])
+        );
+        assert!(!discovery.incomplete || discovery.state.scan_epoch == current);
+    }
+
+    #[test]
+    fn discovery_restart_migrates_legacy_and_rejects_corrupt_state() {
+        let step = cox_epoch::EPOCH_SECONDS;
+        let path = std::env::temp_dir().join(format!(
+            "relative-discovery-migration-{}.json",
+            std::process::id()
+        ));
+        let mut original = Discovery::new(key(1), key(2), step).unwrap();
+        original.state.schema = 1;
+        original.state.scan_epoch = 0;
+        original
+            .state
+            .cursors
+            .insert(3 * step, LotCursor { phase: 0, next: 4 });
+        crate::journal::atomic_write(&path, &original.state).unwrap();
+        let mut migrated = Discovery::load(&path, key(1), key(2), step).unwrap();
+        assert_eq!(migrated.state.schema, 2);
+        assert_eq!(migrated.state.scan_epoch, step);
+        assert!(migrated.state.tracked_epochs.contains(&(3 * step)));
+        migrated.path = Some(path.clone());
+        migrated.save().unwrap();
+        assert_eq!(
+            Discovery::load(&path, key(1), key(2), step).unwrap().state,
+            migrated.state
+        );
+        migrated.state.next_epoch = 2 * step;
+        migrated.save().unwrap();
+        assert!(matches!(
+            Discovery::load(&path, key(1), key(2), step),
+            Err(Error::Storage)
+        ));
+        std::fs::write(&path, b"{broken").unwrap();
+        assert!(matches!(
+            Discovery::load(&path, key(1), key(2), step),
+            Err(Error::Storage)
+        ));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn discovery_finalized_confirmation_is_required_before_forgetting_rounds() {
+        let step = cox_epoch::EPOCH_SECONDS;
+        let mut discovery = Discovery::new(key(1), key(2), step).unwrap();
+        discovery.record_epoch(step, false).unwrap();
+        discovery.finish_scan(3 * step, 3 * step);
+        assert_eq!(discovery.state.next_epoch, step);
+        discovery.record_epoch(step, false).unwrap();
+        assert!(discovery.state.tracked_epochs.contains(&step));
+        discovery.record_epoch(step, true).unwrap();
+        discovery.finish_scan(3 * step, 3 * step);
+        assert_eq!(discovery.state.next_epoch, 3 * step);
+        assert!(discovery.state.tracked_epochs.is_empty());
+    }
+
+    #[test]
+    fn discovery_can_restart_after_removing_oldest_before_finishing_scan() {
+        let step = cox_epoch::EPOCH_SECONDS;
+        let path = std::env::temp_dir().join(format!(
+            "relative-discovery-prefix-{}.json",
+            std::process::id()
+        ));
+        let mut discovery = Discovery::new(key(1), key(2), step).unwrap();
+        discovery.path = Some(path.clone());
+        discovery.record_epoch(step, false).unwrap();
+        discovery.record_epoch(2 * step, false).unwrap();
+        discovery.finish_scan(3 * step, 3 * step);
+        discovery.record_epoch(step, true).unwrap();
+        assert_eq!(discovery.state.next_epoch, 2 * step);
+        discovery.save().unwrap();
+        let restarted = Discovery::load(&path, key(1), key(2), step).unwrap();
+        assert_eq!(restarted.state, discovery.state);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn discovery_terminal_proof_rejects_confirmation_lag_and_forked_presence() {
+        let mut active = epoch(false).epoch;
+        let mut terminal = active.clone();
+        terminal.empty_finalized = true;
+        assert!(finalized_epoch_done(None, None, 28_800));
+        assert!(!finalized_epoch_done(Some(&terminal), None, 28_800));
+        assert!(!finalized_epoch_done(None, Some(&terminal), 28_800));
+        assert!(!finalized_epoch_done(
+            Some(&terminal),
+            Some(&active),
+            28_800
+        ));
+        assert!(finalized_epoch_done(
+            Some(&terminal),
+            Some(&terminal),
+            28_800
+        ));
+        active.empty_finalized = true;
+        assert!(finalized_epoch_done(Some(&active), Some(&terminal), 28_800));
+    }
+
+    #[test]
+    fn discovery_capacity_fails_closed_and_clock_regression_is_rejected() {
+        let step = cox_epoch::EPOCH_SECONDS;
+        let mut discovery = Discovery::new(key(1), key(2), step).unwrap();
+        for n in 1..=MAX_TRACKED_EPOCHS as u64 {
+            discovery.record_epoch(n * step, false).unwrap();
+        }
+        assert_eq!(
+            discovery.record_epoch((MAX_TRACKED_EPOCHS as u64 + 1) * step, false),
+            Err(Error::Limit)
+        );
+        assert_eq!(discovery.state.tracked_epochs.len(), MAX_TRACKED_EPOCHS);
+        discovery.finish_scan(3 * step, 3 * step);
+        assert_eq!(discovery.openings(2 * step), Err(Error::UnstableRead));
+    }
+
     #[test]
     fn nonce_pages_cross_hundreds_of_accounts_and_resume_without_skipping_pending() {
         let path =

@@ -69,7 +69,7 @@ pub async fn plan(
     reader: &ChainReader,
     state: &ChainState,
     directory: &Path,
-    now_ms: u64,
+    first_epoch: u64,
 ) -> Result<Vec<Instruction>, worker::Error> {
     let config = &state.epoch_config;
     if config.lifecycle_version != 1
@@ -78,8 +78,8 @@ pub async fn plan(
     {
         return Ok(vec![]);
     }
-    let opens = now_ms / 1000 / cox_epoch::EPOCH_SECONDS * cox_epoch::EPOCH_SECONDS;
-    if opens < state.basic.pool.trading_opens_at {
+    let opens = current_opening(state.confirmed_timestamp_ms)?;
+    if opens < first_epoch || opens < state.basic.pool.origin {
         return Ok(vec![]);
     }
     let epoch_accounts = EpochAccounts::derive(reader.epoch_program, reader.epoch_config, opens)
@@ -168,6 +168,11 @@ pub async fn plan(
     )])
 }
 
+fn current_opening(confirmed_timestamp_ms: u64) -> Result<u64, worker::Error> {
+    if confirmed_timestamp_ms == 0 { return Err(worker::Error::Clock); }
+    Ok(confirmed_timestamp_ms / 1000 / cox_epoch::EPOCH_SECONDS * cox_epoch::EPOCH_SECONDS)
+}
+
 fn draft_operation(allocated: usize, copied: usize, total: usize) -> (&'static str, Vec<u8>) {
     if allocated < relative_epoch::EPOCH_SPACE {
         (
@@ -191,6 +196,15 @@ fn draft_operation(allocated: usize, copied: usize, total: usize) -> (&'static s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn round_identity_uses_the_confirmed_chain_boundary() {
+        assert_eq!(current_opening(14_399_999), Ok(0));
+        assert_eq!(current_opening(14_400_000), Ok(14_400));
+        assert_eq!(current_opening(28_799_999), Ok(14_400));
+        assert_eq!(current_opening(28_800_000), Ok(28_800));
+        assert_eq!(current_opening(0), Err(worker::Error::Clock));
+    }
 
     #[test]
     fn preparation_resumes_with_contract_bounded_growth_and_roster_pages() {
