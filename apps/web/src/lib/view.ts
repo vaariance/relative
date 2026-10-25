@@ -9,18 +9,18 @@ export function unitDigits(decimals: number): number {
   return SCALE_DIGITS + decimals;
 }
 export const CRYPTO_CLASS = "CRYPTO";
-export const CRYPTO_NAME = "$CRYPTO";
+export const CRYPTO_NAME = "Benchmark";
 
 export function nameOf(classId: string): string {
   return classId === CRYPTO_CLASS ? CRYPTO_NAME : classId;
 }
 
 export function positionName(classId: string): string {
-  return classId === CRYPTO_CLASS ? `${CRYPTO_NAME} index position` : `${classId} performance position`;
+  return classId === CRYPTO_CLASS ? "Benchmark position" : `${classId} performance position`;
 }
 
 export function positionNote(classId: string): string {
-  return classId === CRYPTO_CLASS ? "Tracks the $CRYPTO index: every listed coin, weighted equally." : `Tracks how ${classId} performs against $CRYPTO. You do not own ${classId}.`;
+  return classId === CRYPTO_CLASS ? "Tracks the benchmark index: every listed coin, weighted equally." : `Tracks how ${classId} performs against the benchmark. You do not own ${classId}.`;
 }
 const DEFAULT_DECIMALS = 0;
 const BATCH_SECONDS = 60;

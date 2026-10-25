@@ -192,7 +192,7 @@ export function StandingNote({ id, committed }: { id: string; committed: number 
   const ratio = standingOf("reference", value);
   if (ratio === null) return null;
   const way = direction(ratio);
-  return <>{way === "up" ? "ahead of $CRYPTO" : way === "down" ? "behind $CRYPTO" : "level with $CRYPTO"}</>;
+  return <>{way === "up" ? "ahead of the benchmark" : way === "down" ? "behind the benchmark" : "level with the benchmark"}</>;
 }
 
 function settledText(cutoff: number, now: number | null): string {

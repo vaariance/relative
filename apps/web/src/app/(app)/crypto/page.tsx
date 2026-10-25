@@ -25,14 +25,14 @@ export default async function CryptoPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="font-display text-title font-semibold tracking-tight">$CRYPTO</h1>
+      <h1 className="font-display text-title font-semibold tracking-tight">Benchmark</h1>
 
       {!current && <FirstPublication />}
 
       <div className="grid gap-3 md:grid-cols-3">
         <StatCard
           icon={Activity}
-          title="$CRYPTO level"
+          title="Benchmark level"
           aside="starts at 100"
           value={<LiveFigure kind="level" committed={current ? levelNow : null} />}
           badge={<LiveChange kind="level" pill committed={current && levelNow !== null ? levelNow / 100 - 1 : null} />}
@@ -59,7 +59,7 @@ export default async function CryptoPage() {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="min-w-0">
           {current ? (
-            <AssetChart series={[{ id: "level", label: "$CRYPTO level", points: level, digits: 4, baseline: 100, live: { kind: "level" } }]} />
+            <AssetChart series={[{ id: "level", label: "Benchmark level", points: level, digits: 4, baseline: 100, live: { kind: "level" } }]} />
           ) : (
             <section className="flex h-80 items-center justify-center rounded-card border border-line bg-surface p-4 text-sm text-muted shadow-card">
               The chart starts with the first price update.

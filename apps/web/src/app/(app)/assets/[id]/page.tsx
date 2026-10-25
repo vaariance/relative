@@ -90,7 +90,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               series={[
                 { id: "reference", label: "Relative reference", points: reference, digits: 4, baseline: 100, live: { kind: "reference", id: asset.assetId } },
                 { id: "price", label: "Price", points: price, digits: priceDigits(priceNow), live: { kind: "price", id: asset.assetId } },
-                { id: "crypto", label: "$CRYPTO", points: level, digits: 4, baseline: 100, live: { kind: "level" } },
+                { id: "crypto", label: "Benchmark", points: level, digits: 4, baseline: 100, live: { kind: "level" } },
               ]}
             />
           ) : (

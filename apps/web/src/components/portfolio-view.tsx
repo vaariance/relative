@@ -116,7 +116,7 @@ export function PortfolioView({ classes, status, decimals }: { classes: ClassVie
                 <tr key={row.classId} onClick={(event) => !(event.target as HTMLElement).closest("button, a, [role=status]") && router.push(`/portfolio/${row.classId}`)} className="cursor-pointer border-b border-line transition-colors duration-150 last:border-b-0 hover:bg-surface-2">
                   <th scope="row" className="px-4 py-3 text-left font-medium">
                     <Link href={`/portfolio/${row.classId}`} className="underline-offset-4 hover:underline">{positionName(row.classId)}</Link>
-                    <span className="mt-0.5 block text-xs font-normal text-muted">{row.classId === CRYPTO_CLASS ? "Tracks the index" : `${row.classId} vs $CRYPTO`}</span>
+                    <span className="mt-0.5 block text-xs font-normal text-muted">{row.classId === CRYPTO_CLASS ? "Tracks the index" : `${row.classId} vs the benchmark`}</span>
                   </th>
                   <td className="num px-4 py-3 text-right">{formatAmount(row.units, 4)}</td>
                   <td className="num px-4 py-3 text-right">{formatAmount(row.locked, 4)}</td>

@@ -31,7 +31,7 @@ export function LeaderCards({ contenders }: { contenders: Contender[] }) {
       title={title}
       value={item ? <><CoinIcon id={item.id} size={28} />{item.id}</> : "—"}
       badge={item ? <span className={dim}><ChangePill ratio={item.standing} /></span> : null}
-      caption="vs $CRYPTO"
+      caption="vs the benchmark"
       chart={item ? <LiveSparkline kind="reference" id={item.id} card fallback={item.points} /> : null}
     />
   );

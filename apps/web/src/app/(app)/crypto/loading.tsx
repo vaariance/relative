@@ -2,7 +2,7 @@ import { Shimmer, ShimmerCard } from "@/components/shimmer";
 
 export default function CryptoLoading() {
   return (
-    <div className="flex flex-col gap-6" role="status" aria-label="Loading $CRYPTO">
+    <div className="flex flex-col gap-6" role="status" aria-label="Loading the benchmark">
       <Shimmer className="h-8 w-36" />
 
       <div className="grid gap-3 md:grid-cols-3">
