@@ -10,7 +10,7 @@ import { createPortal } from "react-dom";
 import { walletEpochLots } from "@/app/actions";
 import { parseScaled } from "@/lib/amounts";
 import { COLLATERAL } from "@/lib/config";
-import { type LotGroup, type Move, type Stage, STAGE_LABEL, TEAMMATES, type VaultBalances, basketProblem, defaultTeam, entryBasket, countdown, epochBasket, executionReferences, feeOf, finalPayout, lotView, moves, refundStage, stageOf, units, utcTime, windowText, withdrawSource } from "@/lib/epoch";
+import { type LotGroup, type Move, type Stage, STAGE_LABEL, TEAMMATES, type VaultBalances, basketProblem, byMove, defaultTeam, entryBasket, leaveOutCount, countdown, epochBasket, executionReferences, feeOf, finalPayout, lotView, moves, refundStage, stageOf, units, utcTime, windowText, withdrawSource } from "@/lib/epoch";
 import { historyEstimates } from "@/lib/estimate";
 import { formatAmount } from "@/lib/format";
 import { type Collateral, collateralsOf } from "@/lib/market";
@@ -299,16 +299,13 @@ interface Slide {
   kicker: string;
   title: string;
   body: string;
-  visual?: "split";
 }
 
 const PAYOUT_SLIDES: Slide[] = [
   { kicker: "Step 1", title: "Back one coin", body: "Choose the coin you think will do best against $CRYPTO. Your entry counts from when it executes until the round closes." },
-  { kicker: "Step 2", title: "Build its team of 30", body: "Your coin plays in a team of 30 coins from this round, your coin included. When a round has more than 30 coins, you choose the other 29." },
-  { kicker: "Step 3", title: "Get a score", body: "Your score is your coin's gain over $CRYPTO as a share of the whole team's gains. Teammates behind $CRYPTO count as zero, so a team of laggards raises your share." },
+  { kicker: "Step 2", title: "Add to basket", body: "Every entry has a basket that holds your backed coin and 29 others. Coins in your basket that trail $CRYPTO score zero, which raises your coin's share of the score. The basket fills itself; use Edit basket to choose which coins to leave out." },
+  { kicker: "Step 3", title: "Get a score", body: "Your score is your coin's gain over $CRYPTO as a share of the gains of every coin in your basket. Coins behind $CRYPTO count as zero." },
   { kicker: "Step 4", title: "Share the pot", body: "The pot is every stake after fees, split by stake × score. If your coin is behind $CRYPTO at the close, you get nothing back. If every entry scores zero, everyone is refunded in full, fee included." },
-  { kicker: "Example", title: "Same coin, two teams", body: "SOL ends 4% ahead of $CRYPTO. In a team where three others are also 4% ahead, SOL's score is 4 ÷ 16 = 25%. In a team where every other coin is behind $CRYPTO, its score is 100%." },
-  { kicker: "Example", title: "Two entries, one pot", body: "Two 100 USDC entries, each with 99.98 in the pot after the fee. Scores of 10% and 30% split the 199.96 pot 25% / 75%. Both coins beat $CRYPTO, yet the first entry gets back 49.99 of its 100.", visual: "split" },
 ];
 
 function PayoutModal({ onClose }: { onClose: () => void }) {
@@ -360,15 +357,6 @@ function PayoutModal({ onClose }: { onClose: () => void }) {
             <h2 id="payout-title" className="text-2xl font-semibold tracking-tight">{slide.title}</h2>
             <p className="text-sm leading-relaxed text-muted">{slide.body}</p>
           </div>
-          {slide.visual === "split" && (
-            <div className="mt-auto flex flex-col gap-2">
-              <div className="flex h-10 overflow-hidden rounded-xl text-xs font-medium">
-                <span className="flex w-1/4 items-center justify-center bg-surface-2 text-muted">49.99</span>
-                <span className={`flex w-3/4 items-center justify-center text-white ${gradient}`}>149.97</span>
-              </div>
-              <div className="flex justify-between text-[11px] text-muted"><span>Score 10%</span><span>Score 30%</span></div>
-            </div>
-          )}
         </div>
 
         <footer className="flex items-center justify-between gap-4 px-7 pb-7 pt-4">
@@ -535,9 +523,19 @@ function TeamEditor({ epoch, coins, now, backed, mates, onSave, onClose }: { epo
   const [draft, setDraft] = useState<string[]>(mates);
   const { rows } = useRoundMoves(epoch, coins, now);
   const change = new Map(rows.map((row) => [row.id, row.change]));
-  const others = coins.filter((id) => id !== backed).sort((a, b) => (change.get(a) ?? Infinity) - (change.get(b) ?? Infinity));
-  const full = draft.length >= TEAMMATES;
-  const toggle = (id: string) => setDraft((current) => (current.includes(id) ? current.filter((item) => item !== id) : current.length >= TEAMMATES ? current : [...current, id]));
+  const others = coins.filter((id) => id !== backed).sort((a, b) => byMove(change.get(a) ?? null, change.get(b) ?? null));
+  const leave = leaveOutCount(coins);
+  const excluding = leave <= TEAMMATES;
+  const out = others.filter((id) => !draft.includes(id));
+  const done = draft.length === TEAMMATES;
+  const toggle = (id: string) =>
+    setDraft((current) => {
+      if (current.includes(id)) return excluding && others.length - current.length >= leave ? current : current.filter((item) => item !== id);
+      return current.length >= TEAMMATES ? current : [...current, id];
+    });
+  const locked = (on: boolean) => (excluding ? on && out.length >= leave : !on && draft.length >= TEAMMATES);
+  const count = excluding ? `${out.length} / ${leave} left out` : `${draft.length} / ${TEAMMATES} picked`;
+  const remaining = excluding ? leave - out.length : TEAMMATES - draft.length;
 
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
@@ -558,18 +556,17 @@ function TeamEditor({ epoch, coins, now, backed, mates, onSave, onClose }: { epo
       <section role="dialog" aria-modal="true" aria-labelledby="team-title" onClick={(event) => event.stopPropagation()} className="relative flex max-h-[90vh] w-full max-w-lg flex-col rounded-t-3xl border border-white/[0.08] bg-surface sm:rounded-3xl">
         <header className="flex items-start justify-between gap-4 px-6 pt-5">
           <div className="flex flex-col gap-1">
-            <h2 id="team-title" className="text-lg font-semibold">Build {backed}&apos;s team</h2>
-            <p className="text-xs text-muted">{backed} plus {TEAMMATES} others. Teammates behind $CRYPTO at the close count as zero.</p>
+            <h2 id="team-title" className="text-lg font-semibold">{excluding ? `Leave out ${leave} ${leave === 1 ? "coin" : "coins"}` : `Pick ${TEAMMATES} teammates`}</h2>
+            <p className="text-xs text-muted">Teammates behind $CRYPTO score zero, so they raise {backed}&apos;s share.</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close" className="grid size-9 shrink-0 cursor-pointer place-items-center rounded-full text-muted transition-colors duration-150 hover:bg-white/10 hover:text-ink">
             <X size={16} aria-hidden="true" />
           </button>
         </header>
         <div className="flex items-center justify-between px-6 pt-4 text-xs">
-          <span className={`num ${full ? "text-up" : "text-muted"}`}>{draft.length} / {TEAMMATES} picked</span>
+          <span className={`num ${remaining === 0 ? "text-up" : "text-muted"}`}>{count}</span>
           <span className="flex gap-3">
             <button type="button" onClick={() => setDraft(defaultTeam(coins, backed))} className="cursor-pointer text-muted underline-offset-4 hover:text-ink hover:underline">Reset</button>
-            <button type="button" onClick={() => setDraft([])} className="cursor-pointer text-muted underline-offset-4 hover:text-ink hover:underline">Clear</button>
           </span>
         </div>
         <ul className="grid grid-cols-2 gap-2 overflow-y-auto px-6 py-4 sm:grid-cols-3">
@@ -585,21 +582,21 @@ function TeamEditor({ epoch, coins, now, backed, mates, onSave, onClose }: { epo
             const move = change.get(id) ?? null;
             return (
               <li key={id}>
-                <button type="button" aria-pressed={on} disabled={!on && full} onClick={() => toggle(id)} className={`flex h-14 w-full cursor-pointer items-center gap-2 rounded-xl border px-3 text-left transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40 ${on ? "border-white/30 bg-white/[0.06]" : "border-white/[0.06] bg-bg/60 hover:border-white/20"}`}>
+                <button type="button" aria-pressed={on} disabled={locked(on)} onClick={() => toggle(id)} className={`flex h-14 w-full cursor-pointer items-center gap-2 rounded-xl border px-3 text-left transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40 ${on ? "border-white/20 bg-white/[0.05]" : "border-dashed border-white/15 bg-transparent opacity-60 hover:opacity-100"}`}>
                   <CoinIcon id={id} size={20} />
                   <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate text-sm font-medium">{id}</span>
+                    <span className={`truncate text-sm font-medium ${on ? "" : "line-through"}`}>{id}</span>
                     <span className={`num text-[10px] ${tone(move)}`}>{pct(move, 2)}</span>
                   </span>
-                  {on && <Check size={14} strokeWidth={3} aria-hidden="true" className="shrink-0 text-ink" />}
+                  {on ? <Check size={14} strokeWidth={3} aria-hidden="true" className="shrink-0 text-ink" /> : <span className="shrink-0 text-[10px] text-muted">Out</span>}
                 </button>
               </li>
             );
           })}
         </ul>
         <footer className="border-t border-white/[0.06] px-6 py-4">
-          <button type="button" disabled={draft.length !== TEAMMATES} onClick={() => onSave(draft)} className={`${primary} ${draft.length === TEAMMATES ? "cursor-pointer" : "cursor-not-allowed opacity-40"}`}>
-            {draft.length === TEAMMATES ? "Use this team" : `Pick ${TEAMMATES - draft.length} more`}
+          <button type="button" disabled={!done} onClick={() => onSave(draft)} className={`${primary} ${done ? "cursor-pointer" : "cursor-not-allowed opacity-40"}`}>
+            {done ? "Use this team" : excluding ? `Leave out ${remaining} more` : `Pick ${remaining} more`}
           </button>
         </footer>
       </section>
@@ -614,6 +611,7 @@ function EntryPanel(props: { epoch: Epoch; basket: string[]; now: number; decima
   const [amount, setAmount] = useState("");
   const [editing, setEditing] = useState(false);
   const choosable = coins.length > EPOCH_BASKET_SIZE;
+  const out = backed && leaveOutCount(coins) <= TEAMMATES ? coins.filter((id) => id !== backed && !mates.includes(id)) : [];
   const [sent, setSent] = useState(0);
   const [pay, setPay] = useState<string | null>(null);
   const chosen = collaterals.find((item) => item.mint === pay) ?? collaterals[0] ?? null;
@@ -693,15 +691,26 @@ function EntryPanel(props: { epoch: Epoch; basket: string[]; now: number; decima
         </div>
 
         {backed && (
-          <div className="flex items-center justify-between gap-3 rounded-control border border-line px-3 py-2.5">
-            <span className="flex min-w-0 flex-col">
-              <span className="text-xs text-muted">Your team</span>
-              <span className="truncate text-sm">{choosable ? `${backed} + ${mates.length} of ${coins.length - 1} others` : `${backed} + all ${TEAMMATES} others`}</span>
-            </span>
-            {choosable && (
-              <button type="button" onClick={() => setEditing(true)} className="shrink-0 cursor-pointer text-xs font-medium text-accent underline underline-offset-4 hover:text-ink">
-                Edit team
-              </button>
+          <div className="flex flex-col gap-1.5 rounded-control border border-line px-3 py-2.5">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-muted">Your basket</span>
+              {choosable && (
+                <button type="button" onClick={() => setEditing(true)} className="shrink-0 cursor-pointer text-xs font-medium text-accent underline underline-offset-4 hover:text-ink">
+                  Edit basket
+                </button>
+              )}
+            </div>
+            <span className="text-sm">{choosable ? `${backed} + ${mates.length} others` : `${backed} + all ${TEAMMATES} others`}</span>
+            {out.length > 0 && (
+              <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted">
+                Left out
+                {out.map((id) => (
+                  <span key={id} className="inline-flex items-center gap-1 rounded-pill bg-surface-2 px-2 py-0.5 text-ink">
+                    <CoinIcon id={id} size={12} />
+                    {id}
+                  </span>
+                ))}
+              </span>
             )}
           </div>
         )}

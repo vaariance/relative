@@ -146,30 +146,31 @@ The layout:
   for pot and entries. The right side ranks the coins of the open round, or
   else the last finished round, by their move against $CRYPTO: three cards at a
   time on wide screens, one on phones, scrolled sideways. "How Epoch Works"
-  opens the explainer: back one coin, build its team of 30, the score, the pot,
-  and two worked examples.
+  opens the explainer: back one coin, add to basket, get a score, share the
+  pot.
 - **Coin board:** the shown round's coins in two groups, Ahead of $CRYPTO and
   Behind $CRYPTO, each as a fixed-size tile. Moves start from the live estimate
   at the round's opening (an Epoch has no on-chain opening reference) and end
   at the live estimate or the closing reference. Numbers update live; the order
   changes at most once a minute and not while the pointer is over the board.
   During an open round a tile picks the backed coin.
-- **Your entry:** follows the Buy form. The backed coin, its team, You pay with
+- **Your entry:** follows the Buy form. The backed coin, its basket, You pay with
   the wallet balance of the chosen collateral (USDC or rlUSD, sent as
   `collateralMint`), the exact fee with its rate and cap, then one button that
-  goes to the wallet. The team is the 30-coin basket the contract scores
-  against, the backed coin included. In a round of exactly 30 coins it is every
-  coin. In a larger round it starts as the other coins in the round's own
-  order (`defaultTeam` in `src/lib/epoch.ts`), and Edit team opens a picker
-  that lists the other coins by their move against $CRYPTO, behind first, and
-  only accepts exactly 29. Entries use the API's `entriesOpen` gate and cannot be
+  goes to the wallet. The basket is the 30 coins the contract scores against,
+  the backed coin included, and must be exactly 30. It fills itself: every coin
+  in a 30-coin round, and in a larger round the other coins in the round's own
+  order (`defaultTeam` in `src/lib/epoch.ts`). Edit basket opens a picker that
+  lists the other coins by their move against $CRYPTO, behind first. With up to
+  58 coins it asks which coins to leave out (`leaveOutCount`); with more it asks
+  for 29 to include. Entries use the API's `entriesOpen` gate and cannot be
   sold or cancelled, so there is no Sell side. When no round is open, the panel
   says whether another one is open or scheduled. Below 1280px a bottom button
   ("Back SOL") opens the panel as a sheet once a coin is picked.
 - **Your entries:** one card per entry with All / Running / Waiting / To
   withdraw / Past filters. Each shows the status, the backed coin's move against
   $CRYPTO since its execution, the stake, the payout and gain or loss, and its
-  team. The program keeps a score only while an entry is
+  basket. The program keeps a score only while an entry is
   scored and drops the payout once it is withdrawn, so `finalPayout` in
   `src/lib/epoch.ts` recomputes it from on-chain values (execution and closing
   references, net stake, pot and total weight) with the contract's integer

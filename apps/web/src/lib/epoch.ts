@@ -29,6 +29,17 @@ export function defaultTeam(universe: readonly string[], backed: string): string
   return universe.filter((id) => id !== backed).slice(0, TEAMMATES);
 }
 
+export function byMove(a: number | null, b: number | null): number {
+  if (a === b) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return a - b;
+}
+
+export function leaveOutCount(universe: readonly string[]): number {
+  return Math.max(0, universe.length - EPOCH_BASKET_SIZE);
+}
+
 export function entryBasket(universe: readonly string[], backed: string, mates: readonly string[]): string[] {
   return universe.filter((id) => id === backed || mates.includes(id));
 }
