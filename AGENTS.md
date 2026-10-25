@@ -2000,3 +2000,11 @@ another agent needs to know.
 - **Blockers:** Actual fixture reproduction shows `EpochSource.invalidate()` does not refresh its once-loaded configuration: Active → Archived still reports Active. Separately, a freshly read Archived configuration can report `entriesOpen: true` for an otherwise Open round because that field ignores lifecycle. Source tests passing do not clear these runtime transition failures. Joel was emailed the exact reproduction and requested to refresh configuration through the shared confirmed event path, gate entry status on lifecycle, add transition tests and redeploy both instances.
 - **Rules for agents:** Pause A remains closed; do not perform live protocol cutover. Do not add continuous/per-request HTTP polling to resolve lifecycle caching. Keep refunds/withdrawals available. No protocol transaction was submitted; only unsigned preparation was requested. Preserve uncommitted Alchemy records.
 - **Refs:** `apps/app-api/src/cox/epoch-source.ts`; private `.cox/pause-a-interfaces-audit.mts`, `.cox/pause-a-20261025/verification.json`; Joel email thread `1a171a909685571a`.
+
+### 2026-10-25 · Peter (Codex) · Fresh genesis archive starts at its real sequence
+
+- **Area:** `apps/cox-publisher/native/src/publications.rs`, publisher README.
+- **What:** Actual direct 31-asset local genesis publishes sequence 1, batch 0; no sequence-0 publication exists. Added a strict schema-4 genesis exception requiring zero predecessor, empty economic state, initial benchmark/references 100 and the approved initial fee policy. Legacy predecessor checks, intermediate-gap rejection and create-only records remain unchanged. Eleven archive tests pass, including linked continuation and restart.
+- **Rules for agents:** Never fabricate publication 0. Joel must support the verified generation starting sequence through API backfill, history and segment offsets; this is an additional Pause A consumer requirement. The exact requirement was emailed to Joel alone without credentials.
+- **Open:** Source remains uncommitted pending approval. No live upgrade or archive mutation occurred.
+- **Refs:** `apps/cox-publisher/README.md`; private `.cox/local-rehearsal/archive-report.json`; Joel email thread `1a171a909685571a`.
