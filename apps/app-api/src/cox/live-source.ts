@@ -34,6 +34,7 @@ const ADAPTIVE_POOL_SCHEMA = 4;
 const DYNAMIC_POOL_SCHEMA = 5;
 const DYNAMIC_REQUEST_SCHEMA = 3;
 const DYNAMIC_NO_CLASS = 65535;
+const FRESH_GENESIS_SEQUENCE = 1;
 export const adaptivePool = (pool: Pool): boolean => pool.schemaVersion === ADAPTIVE_POOL_SCHEMA || pool.schemaVersion === DYNAMIC_POOL_SCHEMA;
 import { PublicationHistory, type SegmentStore } from "./publication-history.js";
 import type { CoxSource } from "./source.js";
@@ -168,7 +169,7 @@ export class LiveCoxSource implements CoxSource {
     const generation = marketGeneration(pool, reader.pdas.pool(options.poolId), options.epochConfig ?? null);
     const mint = await options.connection.getAccountInfo(pool.collateralMint, "finalized");
     if (!mint || mint.data.length <= MINT_DECIMALS_OFFSET) throw new Error("CollateralMintMissing");
-    const log = await PublicationHistory.open({ ...options.history, identity: { program: options.program.programId.toBase58(), pool: reader.pdas.pool(options.poolId).toBase58() } });
+    const log = await PublicationHistory.open({ ...options.history, firstSequence: generation ? FRESH_GENESIS_SEQUENCE : 0, identity: { program: options.program.programId.toBase58(), pool: reader.pdas.pool(options.poolId).toBase58() } });
     const adaptive = adaptivePool(pool);
     if (adaptive !== (manifest.mode === "adaptive")) throw new Error("PoolManifestMismatch");
     const opensAt = adaptive ? Number(pool.tradingOpensAt.toString()) : null;
@@ -339,6 +340,7 @@ export class LiveCoxSource implements CoxSource {
       predecessorBatch: previous?.identity.batch ?? null,
       finalization: { transaction: null, slot, finalized },
     });
+    if (!previous && this.market.generation && value.identity.batch !== 0) throw new Error("PublicationGenesisMismatch");
     await this.log.append(value);
     for (const listener of this.listeners) listener(value);
   }

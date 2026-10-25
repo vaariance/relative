@@ -40,6 +40,7 @@ export interface PublicationHistoryOptions {
   path: string;
   store: SegmentStore;
   identity: Identity;
+  firstSequence?: number;
   segmentSize?: number;
   cacheSegments?: number;
 }
@@ -59,9 +60,9 @@ function parseName(name: string): SegmentName | null {
   return { name, start: Number(start), end: Number(end), firstPredecessorBatch: predecessor === "x" ? null : Number(predecessor), lastBatch: Number(last) };
 }
 
-function follows(publication: Publication, previous: { sequence: number; batch: number } | null): void {
+function follows(publication: Publication, previous: { sequence: number; batch: number } | null, first: number): void {
   const { sequence, predecessorBatch } = publication.identity;
-  const expected = previous ? previous.sequence + 1 : 0;
+  const expected = previous ? previous.sequence + 1 : first;
   if (sequence !== expected) throw new Error(`publication ${sequence} is out of order; expected ${expected}`);
   if ((previous?.batch ?? null) !== predecessorBatch) throw new Error(`publication ${sequence} does not follow batch ${previous?.batch ?? "none"}`);
 }
@@ -141,6 +142,7 @@ export function gcsSegments(url: string, accessToken: () => Promise<string>, req
 export class PublicationHistory {
   private readonly segmentSize: number;
   private readonly cacheSegments: number;
+  private readonly first: number;
   private readonly segments: SegmentName[] = [];
   private readonly cache = new Map<number, Publication[]>();
   private tail: Publication[] = [];
@@ -149,6 +151,8 @@ export class PublicationHistory {
   private constructor(private readonly options: PublicationHistoryOptions) {
     this.segmentSize = options.segmentSize ?? 360;
     this.cacheSegments = options.cacheSegments ?? 8;
+    this.first = options.firstSequence ?? 0;
+    if (!Number.isSafeInteger(this.first) || this.first < 0) throw new Error("firstSequence must be a non-negative integer");
     if (!Number.isSafeInteger(this.segmentSize) || this.segmentSize < 1) throw new Error("segmentSize must be a positive integer");
   }
 
@@ -159,7 +163,7 @@ export class PublicationHistory {
   }
 
   get nextSequence(): number {
-    return this.last ? this.last.identity.sequence + 1 : 0;
+    return this.last ? this.last.identity.sequence + 1 : this.first;
   }
 
   latest(): Publication | null {
@@ -167,25 +171,25 @@ export class PublicationHistory {
   }
 
   async get(sequence: number): Promise<Publication | null> {
-    if (!Number.isSafeInteger(sequence) || sequence < 0 || sequence >= this.nextSequence) return null;
+    if (!Number.isSafeInteger(sequence) || sequence < this.first || sequence >= this.nextSequence) return null;
     const tailStart = this.tailStart;
     if (sequence >= tailStart) return this.tail[sequence - tailStart] ?? null;
-    const segment = await this.segment(Math.floor(sequence / this.segmentSize));
-    return segment[sequence % this.segmentSize] ?? null;
+    const segment = await this.segment(Math.floor((sequence - this.first) / this.segmentSize));
+    return segment[(sequence - this.first) % this.segmentSize] ?? null;
   }
 
   async page(after: number | null, limit: number): Promise<Publication[]> {
     const out: Publication[] = [];
-    let sequence = after === null ? 0 : after + 1;
+    let sequence = after === null ? this.first : Math.max(after + 1, this.first);
     while (out.length < limit && sequence < this.nextSequence) {
       const tailStart = this.tailStart;
       if (sequence >= tailStart) {
         out.push(...this.tail.slice(sequence - tailStart, sequence - tailStart + limit - out.length));
         break;
       }
-      const index = Math.floor(sequence / this.segmentSize);
+      const index = Math.floor((sequence - this.first) / this.segmentSize);
       const segment = await this.segment(index);
-      const from = sequence - index * this.segmentSize;
+      const from = sequence - this.first - index * this.segmentSize;
       const taken = segment.slice(from, from + limit - out.length);
       out.push(...taken);
       sequence += taken.length;
@@ -194,7 +198,7 @@ export class PublicationHistory {
   }
 
   async append(publication: Publication): Promise<void> {
-    follows(publication, this.last ? { sequence: this.last.identity.sequence, batch: this.last.identity.batch } : null);
+    follows(publication, this.last ? { sequence: this.last.identity.sequence, batch: this.last.identity.batch } : null, this.first);
     this.tail.push(publication);
     this.last = publication;
     this.appendLine(`${JSON.stringify(publication)}\n`);
@@ -202,14 +206,14 @@ export class PublicationHistory {
   }
 
   private get tailStart(): number {
-    return this.segments.length * this.segmentSize;
+    return this.first + this.segments.length * this.segmentSize;
   }
 
   private async load(): Promise<void> {
     const listed = (await this.options.store.list()).map(parseName).filter((s): s is SegmentName => s !== null).sort((a, b) => a.start - b.start);
     let previous: SegmentName | null = null;
     for (const segment of listed) {
-      if (segment.start !== this.segments.length * this.segmentSize || segment.end !== segment.start + this.segmentSize - 1) break;
+      if (segment.start !== this.tailStart || segment.end !== segment.start + this.segmentSize - 1) break;
       if ((previous?.lastBatch ?? null) !== segment.firstPredecessorBatch) throw new Error(`history segment ${segment.name} does not follow ${previous?.name ?? "the origin"}`);
       this.segments.push(segment);
       previous = segment;
@@ -240,7 +244,7 @@ export class PublicationHistory {
     }
     this.tail = [];
     for (const publication of kept) {
-      follows(publication, this.last ? { sequence: this.last.identity.sequence, batch: this.last.identity.batch } : null);
+      follows(publication, this.last ? { sequence: this.last.identity.sequence, batch: this.last.identity.batch } : null, this.first);
       this.tail.push(publication);
       this.last = publication;
     }

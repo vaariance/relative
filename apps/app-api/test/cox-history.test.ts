@@ -108,6 +108,33 @@ describe("publication history in immutable segments", () => {
     await expect(open(directorySegments(join(dir, "segments")), join(dir, "third.jsonl"))).rejects.toThrow("does not follow");
   });
 
+  it("starts a fresh generation at its genesis publication 1 and never asks for publication 0", async () => {
+    const fresh = (sequence: number) => {
+      const value = publication(sequence, sequence - 1, sequence === 1 ? null : sequence - 2);
+      return { ...value, identity: { ...value.identity, predecessorSequence: sequence === 1 ? null : sequence - 1 } };
+    };
+    const at = (path: string) => PublicationHistory.open({ path: join(dir, path), store: directorySegments(join(dir, "segments")), identity, firstSequence: 1, segmentSize: 3, cacheSegments: 2 });
+    const history = await at("tail.jsonl");
+    expect(history.nextSequence).toBe(1);
+    await expect(history.append(publication(0))).rejects.toThrow("expected 1");
+    await expect(history.append(fresh(2))).rejects.toThrow("expected 1");
+    for (let i = 1; i <= 8; i += 1) await history.append(fresh(i));
+    expect(readdirSync(join(dir, "segments")).sort()).toEqual(["seg-000000000001-000000000003-x-2.json", "seg-000000000004-000000000006-2-5.json"]);
+    expect(await history.get(0)).toBeNull();
+    expect((await history.get(1))!.identity).toMatchObject({ sequence: 1, batch: 0, predecessorBatch: null });
+    expect((await history.get(5))!.identity.batch).toBe(4);
+    expect((await history.page(null, 100)).map((p) => p.identity.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect((await history.page(0, 2)).map((p) => p.identity.sequence)).toEqual([1, 2]);
+    expect((await history.page(3, 4)).map((p) => p.identity.sequence)).toEqual([4, 5, 6, 7]);
+    const reopened = await at("other.jsonl");
+    expect(reopened.nextSequence).toBe(7);
+    expect((await reopened.get(2))!.identity.sequence).toBe(2);
+    rmSync(join(dir, "segments", "seg-000000000001-000000000003-x-2.json"));
+    const gap = await at("gap.jsonl");
+    expect(gap.nextSequence).toBe(1);
+    expect(gap.latest()).toBeNull();
+  });
+
   it("keeps at most the configured number of segments in memory", async () => {
     const reads: string[] = [];
     const inner = directorySegments(join(dir, "segments"));
