@@ -434,7 +434,7 @@ export interface CoxApiErrorBody {
   error: { code: CoxErrorCode; message: string };
 }
 
-export type TransactionOperation = "deposit" | "switch" | "redeem" | "cancel" | "refund" | "withdraw" | "epoch-entry" | "epoch-withdraw" | "epoch-refund" | "prepare-position";
+export type TransactionOperation = "deposit" | "switch" | "redeem" | "cancel" | "refund" | "withdraw" | "epoch-entry" | "epoch-withdraw" | "epoch-refund" | "epoch-prepare" | "epoch-finalize-empty" | "prepare-position";
 
 export interface DepositInput {
   owner: string;
@@ -658,6 +658,21 @@ export interface EpochEntryInput {
   basket: string[];
   backedAsset: string;
   collateralMint?: string;
+}
+
+export interface EpochPrepareInput {
+  owner: string;
+}
+
+export interface EpochPreparation {
+  opensAt: UnixSeconds;
+  remainingInstructions: number;
+  transaction: UnsignedTransaction;
+}
+
+export interface EpochFinalizeEmptyInput {
+  owner: string;
+  opensAt: UnixSeconds;
 }
 
 export interface EpochRefundInput {

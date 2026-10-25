@@ -1,12 +1,15 @@
 import anchor, { type Program } from "@coral-xyz/anchor";
-import { discriminator, EPOCH_FEE_BPS, EPOCH_FEE_CAP, EpochInstructions, epochAddresses, marketLifecycle, type EpochSelection, type LifecycleValue } from "@cox/client";
-import { PublicKey, type AccountInfo, type Connection } from "@solana/web3.js";
+import { addresses, currentEpochWindow, decodeAccount, discriminator, EPOCH_FEE_BPS, EPOCH_FEE_CAP, EpochInstructions, epochAddresses, marketLifecycle, readDynamicManifest, type EpochPreparationProgress, type EpochRegistryBinding as ChainRegistryBinding, type EpochSelection, type LifecycleValue } from "@cox/client";
+import { PublicKey, TransactionInstruction, TransactionMessage, VersionedTransaction, type AccountInfo, type Connection } from "@solana/web3.js";
 import {
   EPOCH_BASKET_SIZE,
   EPOCH_SECONDS,
   type Epoch,
   type EpochConfiguration,
   type EpochEntryInput,
+  type EpochFinalizeEmptyInput,
+  type EpochPreparation,
+  type EpochPrepareInput,
   type EpochLedger,
   type EpochLot,
   type EpochLotState,
@@ -19,7 +22,7 @@ import {
   type UnsignedTransaction,
 } from "@eox/app-api";
 import { PROTOCOL_ASSET_IDS } from "./chain.js";
-import { TradingClosedError, TransactionInputError, associatedTokenAddress, createTokenAccountIdempotent, integer, owner, unsignedTransaction } from "./transactions.js";
+import { NothingToDoError, TradingClosedError, TransactionInputError, associatedTokenAddress, createTokenAccountIdempotent, integer, owner, unsignedTransaction } from "./transactions.js";
 
 const U64_MAX = (1n << 64n) - 1n;
 const TOKEN_AMOUNT_OFFSET = 64;
@@ -32,6 +35,8 @@ const FUTURE_EPOCHS = 6;
 const LOT_OWNER_OFFSET = 98;
 const CACHE_LIMIT = 1_000;
 const REFERENCE_SCALE = "1000000000000";
+const PACKET_BYTES = 1_232;
+const REGISTRY_HISTORY_LIMIT = 16;
 const DEFAULT_ASSET_IDS: ReadonlyMap<number, string> = new Map(PROTOCOL_ASSET_IDS.map((id, index) => [index, id]));
 const PHASES: Record<string, EpochPhase> = { open: "open", scoring: "scoring", allocating: "allocating", settled: "settled", voided: "voided" };
 const LOT_STATES: Record<string, EpochLotState> = { pending: "pending", executed: "executed", scored: "scored", claimable: "claimable", withdrawn: "withdrawn" };
@@ -113,6 +118,7 @@ export interface EpochSourceOptions {
   connection: Connection;
   program: Program;
   config: PublicKey;
+  basic?: Program | null;
   assetIds?: ReadonlyMap<number, string>;
   now?: () => number;
 }
@@ -135,6 +141,11 @@ function variant<T extends string>(value: Variant, names: Record<string, T>): { 
   const name = keys.length === 1 ? names[keys[0]!] : undefined;
   if (!name) throw new Error("EpochVariantInvalid");
   return { name, fields: value[keys[0]!] ?? {} };
+}
+
+function fits(payer: PublicKey, instructions: TransactionInstruction[]): boolean {
+  const message = new TransactionMessage({ payerKey: payer, recentBlockhash: PublicKey.default.toBase58(), instructions }).compileToV0Message();
+  return new VersionedTransaction(message).serialize().length <= PACKET_BYTES;
 }
 
 function tokenAmount(info: AccountInfo<Buffer> | null, mint: PublicKey): bigint {
@@ -483,5 +494,61 @@ export class EpochSource {
       ],
       details: { requestId: lot.toBase58(), nonce: nonce.toString(), amount: value.grossStake },
     });
+  }
+
+  async prepare(input: EpochPrepareInput): Promise<EpochPreparation> {
+    const payer = owner(input.owner);
+    const basic = this.options.basic;
+    if (this.account.assetRegistry.equals(PublicKey.default) || !basic) throw new TradingClosedError("rounds of this Epoch configuration are prepared by its operator");
+    if (marketLifecycle(this.account) !== "active") throw new TradingClosedError("this Epoch market is not active");
+    const { opensAt } = currentEpochWindow(BigInt(this.now()));
+    const selection: EpochSelection = { config: this.options.config, opensAt };
+    const address = this.pdas.epoch(selection);
+    const [registryInfo, epochInfo] = await this.options.connection.getMultipleAccountsInfo([this.account.assetRegistry, address], "confirmed");
+    if (!registryInfo) throw new Error("EpochAssetRegistryMissing");
+    const registry = decodeAccount(basic, "assetRegistry", registryInfo);
+    const pending = BigInt(registry.pendingActivation.toString());
+    if (pending !== 0n && opensAt >= pending) throw new TradingClosedError("an asset change due before this round is not resolved yet");
+    const version = await this.registryVersionAt(basic, opensAt, registry.activeVersion);
+    const methodologyInfo = await this.options.connection.getAccountInfo(version.methodology, "confirmed");
+    if (!methodologyInfo) throw new Error("EpochRegistryMethodologyMissing");
+    const assetCount = readDynamicManifest(decodeAccount(basic, "methodology", methodologyInfo)).instruments.length;
+    let progress: EpochPreparationProgress = { accountBytes: null, copiedAssets: 0, assetCount, sealed: false };
+    if (epochInfo) {
+      const account = this.decodeEpoch(epochInfo, address, Number(opensAt));
+      progress = { accountBytes: epochInfo.data.length, copiedAssets: account.universe.length, assetCount, sealed: account.state !== null || account.emptyFinalized };
+    }
+    if (progress.sealed) throw new NothingToDoError("the current Epoch round is already prepared");
+    const all = this.instructions.prepareCurrentEpoch(payer, this.account.mint, selection, version, progress, this.account.testMint ?? this.account.mint);
+    let count = 1;
+    while (count < all.length && fits(payer, all.slice(0, count + 1))) count += 1;
+    const transaction = await unsignedTransaction(this.options.connection, { operation: "epoch-prepare", owner: payer, instructions: all.slice(0, count), details: { requestId: address.toBase58() } });
+    return { opensAt: Number(opensAt), remainingInstructions: all.length - count, transaction };
+  }
+
+  private async registryVersionAt(basic: Program, opensAt: bigint, active: PublicKey): Promise<ChainRegistryBinding> {
+    const versions = addresses(basic.programId);
+    let key = active;
+    for (let step = 0; step < REGISTRY_HISTORY_LIMIT; step += 1) {
+      const info = await this.options.connection.getAccountInfo(key, "confirmed");
+      if (!info) throw new Error("EpochRegistryVersionMissing");
+      const version = decodeAccount(basic, "assetRegistryVersion", info);
+      if (!version.registry.equals(this.account.assetRegistry) || !version.sealed) throw new Error("EpochRegistryVersionInvalid");
+      const from = BigInt(version.effectiveFrom.toString());
+      const until = BigInt(version.effectiveUntil.toString());
+      if (from <= opensAt && (until === 0n || opensAt < until)) return { assetRegistry: this.account.assetRegistry, registryVersion: key, methodology: version.methodology };
+      if (version.predecessor.every((byte: number) => byte === 0)) break;
+      key = versions.assetRegistryVersion(this.account.assetRegistry, Uint8Array.from(version.predecessor));
+    }
+    throw new TradingClosedError("no registry version covers the current round");
+  }
+
+  async finalizeEmpty(input: EpochFinalizeEmptyInput): Promise<UnsignedTransaction> {
+    const payer = owner(input.owner);
+    const selection = this.selection(input.opensAt);
+    if (this.now() < input.opensAt + EPOCH_SECONDS) throw new TransactionInputError("this Epoch has not ended yet");
+    const { address, account } = await this.state(selection);
+    if (account.emptyFinalized) throw new NothingToDoError("this Epoch is already finalized as empty");
+    return unsignedTransaction(this.options.connection, { operation: "epoch-finalize-empty", owner: payer, instructions: [this.instructions.finalizeEmpty(selection)], details: { requestId: address.toBase58() } });
   }
 }

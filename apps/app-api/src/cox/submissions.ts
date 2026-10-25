@@ -27,6 +27,11 @@ const EPOCH_INSTRUCTIONS: readonly { operation: TransactionOperation; name: stri
   { operation: "epoch-withdraw", name: "withdraw" },
   { operation: "epoch-withdraw", name: "withdraw_partial" },
   { operation: "epoch-refund", name: "refund" },
+  { operation: "epoch-prepare", name: "initialize_current_epoch" },
+  { operation: "epoch-prepare", name: "grow_current_epoch" },
+  { operation: "epoch-prepare", name: "copy_registry_assets" },
+  { operation: "epoch-prepare", name: "seal_current_epoch" },
+  { operation: "epoch-finalize-empty", name: "finalize_empty" },
 ];
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 const SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
@@ -99,7 +104,7 @@ export class CoxSubmissions {
       } else if (this.options.epochProgramId && program.equals(this.options.epochProgramId)) {
         const data = Buffer.from(instruction.data);
         const kind = this.epochKinds.find((k) => data.subarray(0, 8).equals(k.prefix));
-        if (!kind) throw new TransactionInputError("only wallet Epoch entry and withdrawal instructions are accepted");
+        if (!kind) throw new TransactionInputError("only wallet Epoch entry, withdrawal, refund and round preparation instructions are accepted");
         operations.add(kind.operation);
       } else if (!program.equals(ASSOCIATED_TOKEN_PROGRAM) && !program.equals(ComputeBudgetProgram.programId)) {
         throw new TransactionInputError("transaction calls a program outside COX");

@@ -19,7 +19,7 @@ const ASSET_PATTERN = /^[A-Z0-9]{2,12}$/;
 const OWNER_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const MAX_BODY_BYTES = 8192;
 const BUILDERS = ["deposit", "switch", "redeem", "cancel", "refund", "withdraw"] as const;
-const EPOCH_BUILDERS = { "epoch-entry": "entry", "epoch-withdraw": "withdraw", "epoch-refund": "refund" } as const;
+const EPOCH_BUILDERS = { "epoch-entry": "entry", "epoch-withdraw": "withdraw", "epoch-refund": "refund", "epoch-prepare": "prepare", "epoch-finalize-empty": "finalizeEmpty" } as const;
 const OPENS_AT_PATTERN = /^[1-9][0-9]{0,12}$/;
 const QUOTES = { deposit: "quoteDeposit", switch: "quoteSwitch", redeem: "quoteRedeem" } as const;
 

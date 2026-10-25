@@ -1,16 +1,16 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import anchor from "@coral-xyz/anchor";
-import { discriminator, epochAddresses } from "@cox/client";
+import { decodeAccount, discriminator, epochAddresses } from "@cox/client";
 import { Keypair, PublicKey, VersionedTransaction, type AccountInfo, type Connection } from "@solana/web3.js";
 import { describe, expect, it } from "vitest";
 import { loadProgram } from "../src/cox/chain.js";
 import { EpochSource } from "../src/cox/epoch-source.js";
 import { FileSubmissionStore } from "../src/cox/submission-store.js";
 import { CoxSubmissions } from "../src/cox/submissions.js";
-import { TradingClosedError, TransactionInputError, associatedTokenAddress } from "../src/cox/transactions.js";
+import { NothingToDoError, TradingClosedError, TransactionInputError, associatedTokenAddress } from "../src/cox/transactions.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const idlPath = join(root, "packages", "cox-epoch", "idl", "epoch.json");
@@ -304,5 +304,94 @@ describe("fresh-generation Epochs", () => {
     });
     await t.encodeEpoch(t.sealed, OPEN, t.state);
     expect((await source.epoch(OPEN))!.registry).toBeNull();
+  });
+});
+
+describe("permissionless Epoch round preparation", () => {
+  const BASIC = new PublicKey("G6iQGoupNSfduw1QJxQ9vcVi9FnCC6cbippXsi4QQzJF");
+  const generation = JSON.parse(readFileSync(join(root, "packages", "cox", "fixtures", "generation", "active.json"), "utf8")) as { accounts: { address: string; dataHex: string; name: string }[] };
+  const fixed = (name: string) => generation.accounts.find((a) => a.name === name)!;
+  const REGISTRY = new PublicKey(fixed("assetRegistry").address);
+  const name = (data: Uint8Array) => ["initialize_current_epoch", "grow_current_epoch", "copy_registry_assets", "seal_current_epoch"].find((n) => Buffer.from(data).subarray(0, 8).equals(discriminator("global", n)));
+
+  async function prepared(now: number, registryPatch?: (data: Buffer) => Promise<Buffer>) {
+    const t = await setup(now, { lifecycleVersion: 1, lifecycle: { active: {} }, assetRegistry: REGISTRY });
+    for (const n of ["assetRegistry", "assetRegistryVersion", "methodology"]) {
+      const data = Buffer.from(fixed(n).dataHex, "hex");
+      t.connection.set(new PublicKey(fixed(n).address), n === "assetRegistry" && registryPatch ? await registryPatch(data) : data, BASIC);
+    }
+    const basic = loadProgram(t.connection as unknown as Connection, join(root, "packages", "cox", "idl", "cox.json"));
+    const source = await EpochSource.open({ connection: t.connection as unknown as Connection, program: t.program, config, basic, now: () => t.now });
+    return { t, source, basic };
+  }
+
+  it("builds the next bounded transaction for the current round and resumes from observed progress", async () => {
+    const { t, source } = await prepared(OPEN + 60);
+    const payer = Keypair.generate().publicKey;
+    const first = await source.prepare({ owner: payer.toBase58() });
+    expect(first).toMatchObject({ opensAt: OPEN, transaction: { operation: "epoch-prepare", owner: payer.toBase58(), requestId: t.sealed.toBase58() } });
+    const tx = VersionedTransaction.deserialize(Buffer.from(first.transaction.transaction, "base64"));
+    expect(tx.serialize().length).toBeLessThanOrEqual(1_232);
+    expect(tx.message.staticAccountKeys[0]!.equals(payer)).toBe(true);
+    const names = tx.message.compiledInstructions.map((i) => name(i.data));
+    expect(names[0]).toBe("initialize_current_epoch");
+    expect(first.remainingInstructions).toBe(1 + 8 + 4 + 1 - names.length);
+    const partial = Buffer.alloc(2_048 + 8_192);
+    encodeLarge(t.coder, "epochAccount", {
+      config, opensAt: bn(OPEN), vault: pdas.vault(t.sealed), testVault: pdas.testVault(t.sealed), bump: 250, universe: t.universe.slice(0, 8), state: null,
+      bindingVersion: 1, registryVersion: new PublicKey(fixed("assetRegistryVersion").address), registryOriginBenchmarks: [], universeDigest: Array(32).fill(0), emptyFinalized: false,
+    }).copy(partial);
+    t.connection.set(t.sealed, partial);
+    const resumed = await source.prepare({ owner: payer.toBase58() });
+    const resumedNames = VersionedTransaction.deserialize(Buffer.from(resumed.transaction.transaction, "base64")).message.compiledInstructions.map((i) => name(i.data));
+    expect(resumedNames[0]).toBe("grow_current_epoch");
+    expect(resumed.remainingInstructions).toBe(7 + 3 + 1 - resumedNames.length);
+    await t.encodeEpoch(t.sealed, OPEN, t.state);
+    await expect(source.prepare({ owner: payer.toBase58() })).rejects.toBeInstanceOf(NothingToDoError);
+  });
+
+  it("relays a signed preparation transaction from any payer", async () => {
+    const { t, source } = await prepared(OPEN + 60);
+    const payer = Keypair.generate();
+    const built = await source.prepare({ owner: payer.publicKey.toBase58() });
+    const tx = VersionedTransaction.deserialize(Buffer.from(built.transaction.transaction, "base64"));
+    tx.sign([payer]);
+    const dir = mkdtempSync(join(tmpdir(), "cox-epoch-"));
+    try {
+      const relay = { sendRawTransaction: async () => anchor.utils.bytes.bs58.encode(tx.signatures[0]!) };
+      const submissions = new CoxSubmissions({ connection: relay as unknown as Connection, programId: BASIC, epochProgramId: PROGRAM, feeVersion: async () => 0n, now: () => t.now, store: new FileSubmissionStore(join(dir, "s.json")) });
+      expect(await submissions.submit(Buffer.from(tx.serialize()).toString("base64"))).toMatchObject({ operation: "epoch-prepare", owner: payer.publicKey.toBase58() });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses while an asset change due before the round is unresolved, and for operator-prepared configurations", async () => {
+    const { source } = await prepared(OPEN + 60, async (data) => {
+      const basic = loadProgram(null as unknown as Connection, join(root, "packages", "cox", "idl", "cox.json"));
+      const registry = decodeAccount(basic, "assetRegistry", { data, owner: BASIC, executable: false, lamports: 1 });
+      const patched = Buffer.from(await basic.coder.accounts.encode("assetRegistry", { ...registry, pendingActivation: bn(OPEN) }));
+      const full = Buffer.alloc(Math.max(data.length, patched.length));
+      patched.copy(full);
+      return full;
+    });
+    await expect(source.prepare({ owner: Keypair.generate().publicKey.toBase58() })).rejects.toThrow("asset change");
+    const legacy = await setup(OPEN + 60);
+    const operated = await EpochSource.open({ connection: legacy.connection as unknown as Connection, program: legacy.program, config, now: () => legacy.now });
+    await expect(operated.prepare({ owner: Keypair.generate().publicKey.toBase58() })).rejects.toThrow("operator");
+  });
+
+  it("builds a permissionless empty finalization only after the round ends", async () => {
+    const t = await setup(OPEN + 60);
+    await t.encodeEpoch(t.sealed, OPEN, t.state);
+    const source = await EpochSource.open({ connection: t.connection as unknown as Connection, program: t.program, config, now: () => t.now });
+    const payer = Keypair.generate().publicKey;
+    await expect(source.finalizeEmpty({ owner: payer.toBase58(), opensAt: OPEN })).rejects.toThrow("not ended");
+    t.now = OPEN + 14_400;
+    const built = await source.finalizeEmpty({ owner: payer.toBase58(), opensAt: OPEN });
+    const tx = VersionedTransaction.deserialize(Buffer.from(built.transaction, "base64"));
+    expect(Buffer.from(tx.message.compiledInstructions[0]!.data).subarray(0, 8).equals(discriminator("global", "finalize_empty"))).toBe(true);
+    await t.encodeEpoch(t.sealed, OPEN, t.state, { emptyFinalized: true });
+    await expect(source.finalizeEmpty({ owner: payer.toBase58(), opensAt: OPEN })).rejects.toBeInstanceOf(NothingToDoError);
   });
 });
