@@ -2008,3 +2008,12 @@ another agent needs to know.
 - **Rules for agents:** Never fabricate publication 0. Joel must support the verified generation starting sequence through API backfill, history and segment offsets; this is an additional Pause A consumer requirement. The exact requirement was emailed to Joel alone without credentials.
 - **Open:** Source remains uncommitted pending approval. No live upgrade or archive mutation occurred.
 - **Refs:** `apps/cox-publisher/README.md`; private `.cox/local-rehearsal/archive-report.json`; Joel email thread `1a171a909685571a`.
+
+### 2026-10-25 · Peter (Codex) · Missing closing data yields publisher scheduling turns
+
+- **Area:** `apps/cox-publisher/native/src/worker.rs`, worker integration tests.
+- **What:** The actual local delayed-close rehearsal exposed scheduling starvation: missing exact closing data repeatedly selected the predecessor while preventing successor preparation. Persisting the scheduling fairness turn before snapshot selection lets bounded maintenance and other Basic/Epoch entries progress while the predecessor keeps waiting. Twelve worker tests pass, including restart-persisted multi-step maintenance and entry fairness.
+- **Rules for agents:** Preserve the exact closing timestamp; never substitute a later price. Waiting for a closing snapshot must not block current-round preparation or unrelated entries. This changes scheduling only, not oracle verification, fees or payouts.
+- **Verification:** Actual local publisher automatically prepared and sealed the midnight successor and executed its entry while the executed predecessor remained nonterminal with no closing snapshot. No admin round creation was used.
+- **Open:** Source remains uncommitted pending approval; no live deployment.
+- **Refs:** `apps/cox-publisher/README.md`; private `.cox/local-rehearsal/epoch-successor-admission.json`.
