@@ -10,7 +10,7 @@ import { createPortal } from "react-dom";
 import { walletEpochLots } from "@/app/actions";
 import { parseScaled } from "@/lib/amounts";
 import { COLLATERAL } from "@/lib/config";
-import { type LotGroup, type Move, type Stage, STAGE_LABEL, TEAMMATES, type VaultBalances, type EpochsSnapshot, basketProblem, latestEpochs, leavesOut, mateLocked, toggleMate, byMove, defaultTeam, entryBasket, leaveOutCount, countdown, epochBasket, executionReferences, feeOf, finalPayout, lotView, moves, refundStage, stageOf, units, utcTime, windowText, withdrawSource } from "@/lib/epoch";
+import { type LotGroup, type Move, type Stage, STAGE_LABEL, TEAMMATES, type VaultBalances, type EpochsSnapshot, basketProblem, heroRounds, latestEpochs, leavesOut, mateLocked, toggleMate, byMove, defaultTeam, entryBasket, leaveOutCount, countdown, epochBasket, executionReferences, feeOf, finalPayout, lotView, moves, refundStage, stageOf, units, utcTime, windowText, withdrawSource } from "@/lib/epoch";
 import { historyEstimates } from "@/lib/estimate";
 import { formatAmount } from "@/lib/format";
 import { type Collateral, collateralsOf } from "@/lib/market";
@@ -187,27 +187,15 @@ function rankingEpoch(epochs: readonly Epoch[], now: number): Epoch | null {
   return [...epochs].reverse().find((item) => item.closingReferences.length > 0 && !refundStage(stageOf(item, now))) ?? null;
 }
 
-const ROUND_SECONDS = 4 * 3600;
-
-function heroRound(epochs: readonly Epoch[], now: number): { epoch: Epoch | null; opensAt: number; closesAt: number } {
-  const live = epochs.find((item) => stageOf(item, now) === "open") ?? epochs.find((item) => stageOf(item, now) === "upcoming") ?? null;
-  if (live) return { epoch: live, opensAt: live.opensAt, closesAt: live.closesAt };
-  const opensAt = Math.floor(now / ROUND_SECONDS) * ROUND_SECONDS + ROUND_SECONDS;
-  return { epoch: null, opensAt, closesAt: opensAt + ROUND_SECONDS };
-}
-
-type HeroRound = { epoch: Epoch | null; opensAt: number; closesAt: number };
-
 const SLIDE_MS = 6000;
 
-function RoundSlide({ round, now, decimals, active }: { round: HeroRound; now: number; decimals: number; active: boolean }) {
-  const epoch = round.epoch;
-  const stage: Stage = epoch ? stageOf(epoch, now) : "upcoming";
-  const clock = epoch ? heroClock(epoch, stage, now) : { label: "Opens in", value: countdown(round.opensAt - now) };
-  const settled = epoch !== null && epoch.settlementPot !== null && (stage === "allocating" || stage === "settled");
-  const pot = !epoch ? null : settled ? units(epoch.settlementPot!, decimals) : epoch.ledger ? units(epoch.ledger.activeNet, decimals) : null;
-  const entries = !epoch ? null : epoch.nextNonce !== null ? Number(epoch.nextNonce) : (epoch.lots?.executed ?? null);
-  const day = new Date(round.opensAt * 1000).toUTCString().slice(5, 11);
+function RoundSlide({ epoch, now, decimals, active }: { epoch: Epoch; now: number; decimals: number; active: boolean }) {
+  const stage = stageOf(epoch, now);
+  const clock = heroClock(epoch, stage, now);
+  const settled = epoch.settlementPot !== null && (stage === "allocating" || stage === "settled");
+  const pot = settled ? units(epoch.settlementPot!, decimals) : epoch.ledger ? units(epoch.ledger.activeNet, decimals) : null;
+  const entries = epoch.nextNonce !== null ? Number(epoch.nextNonce) : (epoch.lots?.executed ?? null);
+  const day = new Date(epoch.opensAt * 1000).toUTCString().slice(5, 11);
   const stats = [
     { label: clock.label, value: clock.value },
     { label: "Pot", value: pot === null ? "—" : `${formatAmount(pot, 2)} ${COLLATERAL.symbol}` },
@@ -218,11 +206,11 @@ function RoundSlide({ round, now, decimals, active }: { round: HeroRound; now: n
     <div aria-hidden={!active} inert={!active} className={`flex w-full shrink-0 flex-col gap-4 px-6 motion-safe:transition-opacity motion-safe:duration-700 ${active ? "opacity-100" : "opacity-0"}`}>
       <span className="inline-flex w-fit items-center gap-1.5 rounded-pill bg-surface-2 px-2.5 py-1 text-[11px] font-medium text-ink">
         <span className={`size-1.5 rounded-full ${stage === "open" ? "bg-up" : refundStage(stage) ? "bg-warn" : "bg-muted"}`} />
-        {epoch ? STAGE_LABEL[stage] : "Next round"}
+        {STAGE_LABEL[stage]}
       </span>
       <h2 className="text-3xl font-semibold leading-tight tracking-tight text-ink sm:text-4xl">
         {day}
-        <span className="mt-1 block text-base font-normal text-muted">{utcTime(round.opensAt)}–{utcTime(round.closesAt)} UTC</span>
+        <span className="mt-1 block text-base font-normal text-muted">{utcTime(epoch.opensAt)}–{utcTime(epoch.closesAt)} UTC</span>
       </h2>
       <dl className="flex flex-wrap gap-x-6 gap-y-2">
         {stats.map((stat) => (
@@ -237,12 +225,10 @@ function RoundSlide({ round, now, decimals, active }: { round: HeroRound; now: n
 }
 
 function HeroCard({ epochs, ranked, rankedCoins, now, decimals, onExplain }: { epochs: Epoch[]; ranked: Epoch | null; rankedCoins: string[]; now: number; decimals: number; onExplain: () => void }) {
-  const last = [...epochs].reverse().find((item) => ["settled", "allocating", "scoring"].includes(stageOf(item, now))) ?? null;
-  const current = heroRound(epochs, now);
-  const rounds: HeroRound[] = [...(last ? [{ epoch: last, opensAt: last.opensAt, closesAt: last.closesAt }] : []), current];
-  const [index, setIndex] = useState(rounds.length - 1);
+  const rounds = heroRounds(epochs, now);
+  const [index, setIndex] = useState(Math.max(0, rounds.length - 1));
   const [paused, setPaused] = useState(false);
-  const shown = Math.min(index, rounds.length - 1);
+  const shown = Math.max(0, Math.min(index, rounds.length - 1));
 
   useEffect(() => {
     if (paused || rounds.length < 2) return;
@@ -269,19 +255,25 @@ function HeroCard({ epochs, ranked, rankedCoins, now, decimals, onExplain }: { e
           <div className="overflow-hidden [mask-image:linear-gradient(90deg,transparent_0,black_24px,black_calc(100%-64px),transparent_100%)]">
             <div className="flex motion-safe:transition-transform motion-safe:duration-700 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]" style={{ transform: `translateX(-${shown * 100}%)` }}>
               {rounds.map((round, slide) => (
-                <RoundSlide key={round.epoch?.address ?? `next-${round.opensAt}`} round={round} now={now} decimals={decimals} active={slide === shown} />
+                <RoundSlide key={round.address} epoch={round} now={now} decimals={decimals} active={slide === shown} />
               ))}
+              {rounds.length === 0 && (
+                <div className="flex w-full shrink-0 flex-col gap-2 px-6">
+                  <h2 className="text-3xl font-semibold leading-tight tracking-tight text-ink sm:text-4xl">No round scheduled</h2>
+                  <p className="text-sm text-muted">The next round shows here once it is scheduled.</p>
+                </div>
+              )}
             </div>
           </div>
           {rounds.length > 1 && (
             <div role="tablist" aria-label="Choose round" className="flex gap-1.5 px-6">
               {rounds.map((round, slide) => (
                 <button
-                  key={round.opensAt}
+                  key={round.address}
                   type="button"
                   role="tab"
                   aria-selected={slide === shown}
-                  aria-label={round.epoch && slide === 0 ? "Last round" : "Next round"}
+                  aria-label={`${STAGE_LABEL[stageOf(round, now)]} round, ${windowText(round)}`}
                   onClick={() => setIndex(slide)}
                   className={`h-1.5 cursor-pointer rounded-full transition-all duration-300 ${slide === shown ? "w-6 bg-accent" : "w-1.5 bg-white/20 hover:bg-white/40"}`}
                 />

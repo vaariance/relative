@@ -90,6 +90,12 @@ export function basketProblem(universe: readonly string[], backed: string, mates
   return null;
 }
 
+export function heroRounds(epochs: readonly Epoch[], now: number): Epoch[] {
+  const last = [...epochs].reverse().find((item) => ["settled", "allocating", "scoring"].includes(stageOf(item, now))) ?? null;
+  const live = epochs.find((item) => stageOf(item, now) === "open") ?? epochs.find((item) => stageOf(item, now) === "upcoming") ?? null;
+  return [last, live].filter((item): item is Epoch => item !== null);
+}
+
 export function refundStage(stage: Stage): boolean {
   return stage === "voided" || stage === "expired";
 }

@@ -1,7 +1,7 @@
 import type { Epoch, EpochLot } from "@eox/app-api";
 import { describe, expect, it } from "vitest";
 import settled from "../../test/fixtures/epoch-2026-10-23-0800.json";
-import { CLOSING_GRACE_SECONDS, basketProblem, basketScore, byMove, defaultTeam, entryBasket, leaveOutCount, latestEpochs, leavesOut, mateLocked, toggleMate, epochBasket, countdown, executionReferences, feeOf, finalPayout, finalScore, lotView, moves, stageOf, timelineStep, withdrawSource } from "./epoch";
+import { CLOSING_GRACE_SECONDS, basketProblem, basketScore, byMove, defaultTeam, entryBasket, heroRounds, leaveOutCount, latestEpochs, leavesOut, mateLocked, toggleMate, epochBasket, countdown, executionReferences, feeOf, finalPayout, finalScore, lotView, moves, stageOf, timelineStep, withdrawSource } from "./epoch";
 
 const epoch = (phase: Epoch["phase"], extra: Partial<Epoch> = {}): Epoch => ({ address: "x", opensAt: 1000, closesAt: 2000, phase, sealed: true, entriesOpen: false, universe: [], nextNonce: null, lots: null, totalWeight: null, settlementPot: null, allZero: null, closingReferences: [], closingDeadline: 88_400, voidable: false, terminal: false, ledger: null, registry: null, ...extra });
 const lot = (extra: Partial<EpochLot>): EpochLot => ({ address: "l", epochOpensAt: 1000, nonce: "0", owner: "o", grossStake: "100000000", fee: "20000", admittedAt: 1100, basket: [], backedAsset: "ETH", execution: { timestamp: 1101, references: [] }, state: "executed", score: null, weight: null, claimable: null, refund: null, ...extra });
@@ -305,5 +305,26 @@ describe("keeping the last rounds when a refresh fails", () => {
 
   it("has nothing to show only when nothing was ever read", () => {
     expect(latestEpochs(null, null)).toEqual({ shown: null, staleSince: null });
+  });
+});
+
+describe("hero rounds", () => {
+  const settledRound = epoch("settled", { address: "s", opensAt: 0, closesAt: 900 });
+  const openRound = epoch("open", { address: "o" });
+  const nextRound = epoch("open", { address: "n", opensAt: 3000, closesAt: 4000 });
+
+  it("shows only rounds that exist, never a made-up next round", () => {
+    expect(heroRounds([settledRound], 1500).map((item) => item.address)).toEqual(["s"]);
+    expect(heroRounds([], 1500)).toEqual([]);
+  });
+
+  it("pairs the last finished round with the open or scheduled one", () => {
+    expect(heroRounds([settledRound, openRound], 1500).map((item) => item.address)).toEqual(["s", "o"]);
+    expect(heroRounds([settledRound, nextRound], 1500).map((item) => item.address)).toEqual(["s", "n"]);
+    expect(heroRounds([openRound], 1500).map((item) => item.address)).toEqual(["o"]);
+  });
+
+  it("does not offer a round that missed its close as the next one", () => {
+    expect(heroRounds([settledRound, epoch("open", { address: "x", opensAt: 0, closesAt: 900 })], 1500).map((item) => item.address)).toEqual(["s"]);
   });
 });
