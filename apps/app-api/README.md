@@ -89,7 +89,7 @@ All fixed-point quantities are decimal integer strings. Prices use USD × 10⁸;
 | `POST /v1/transactions/epoch-finalize-empty` | Build with `{ owner, opensAt }`: the permissionless empty finalization of an ended round |
 | `POST /v1/transactions/epoch-void` | Build with `{ owner, opensAt }`: the permissionless void of a round still open after its closing deadline, so its stakes can be refunded |
 
-Omitting the publication cursor starts from sequence 0. An empty page preserves the cursor. SSE events contain the publication and its sequence; the server sends a heartbeat every 15 seconds. Transaction request bodies are limited to 8 KiB.
+Omitting the publication cursor starts from the pool's first publication: sequence 0 on legacy pools, and the genesis publication 1 on fresh generations, which have no publication 0. History never skips a missing publication. An empty page preserves the cursor. SSE events contain the publication and its sequence; the server sends a heartbeat every 15 seconds. Transaction request bodies are limited to 8 KiB.
 
 Errors include `NO_PUBLICATION`, `PUBLICATION_NOT_FOUND`, `UNKNOWN_ASSET`, `UNKNOWN_CLASS`, `UNKNOWN_WALLET`, `INVALID_REQUEST`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `INTERNAL_ERROR`, `NOT_LIVE`, `TRANSACTION_REJECTED`, `TRANSACTION_NOT_FOUND`, `RATE_LIMITED`, `FEE_CHANGED`, `TRADING_CLOSED`, `UNKNOWN_EPOCH` and `NOT_CONFIGURED`. A trade, quote or Epoch entry while trading is closed returns HTTP 409 `TRADING_CLOSED` with the reason. Builders and quotes on the fixture return HTTP 409 `NOT_LIVE`; a rejected simulation returns HTTP 422 `TRANSACTION_REJECTED`; a fee version that no longer matches the pool returns HTTP 409 `FEE_CHANGED`.
 
