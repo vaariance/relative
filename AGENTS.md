@@ -2057,3 +2057,10 @@ another agent needs to know.
 - **What:** The actual contract rejected the first post-inclusion publication because 33 classes require 16 KiB batch/publication accounts while their previous allocation was 8 KiB. Added bounded growth maintenance before new price work. Expanded-account sizes join the existing confirmed methodology batch read; no polling timer or additional RPC request is introduced. Both allocations enter the final signing guard. Growth uses the generated ABI’s writable permissions and is resumable, bounded to 8 KiB per account step, and forbidden during accepted Basic work.
 - **Verification:** Actual local growth of both accounts succeeded, followed by publication and older frozen-Epoch settlement. Unit coverage includes partial completion/restart, complete allocations, malformed oversizing, accepted-stage protection and maximum-class page bounds. No contract source, economic arithmetic or ABI changed.
 - **Refs:** `apps/cox-publisher/README.md`; private `.cox/local-rehearsal/publisher-frozen-close-final.log`.
+
+### 2026-10-25 · Peter (Codex) · Disabled signer template supports bound registry registration
+
+- **Area:** `apps/signer/config/dev-dynamic.json`, generation linkage tests.
+- **What:** Local policy signing correctly rejected missing `register_asset_registry_version` permission. Added that already-validated instruction to the disabled release template with operator, registry/pool/system bindings and exact writable indices. Existing protocol-linkage validation still checks the canonical methodology, registry generation and approved successor schedule. The program remains disabled; no live signer configuration changed and no admin instruction was added.
+- **Verification:** All 92 signer tests and type check pass. New compiled-fixture policy test accepts only the bound operator and rejects archived generations. Actual local registry registration passed the same policy/linkage functions.
+- **Refs:** `apps/signer/test/generation-linkage.test.ts`; private `.cox/local-rehearsal/registry-policy-tests.log`.
