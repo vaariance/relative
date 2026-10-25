@@ -203,7 +203,7 @@ describe("Epoch transactions", () => {
     t.now = OPEN + 14_400 + 86_401;
     expect((await source.epoch(OPEN))!.voidable).toBe(true);
     await t.encodeEpoch(t.sealed, OPEN, { ...t.state, phase: { voided: {} } });
-    source.invalidate();
+    await source.invalidate();
     expect((await source.lots(OPEN, wallet.toBase58())).map((lot) => lot.refund)).toEqual(["not-executed", "voided"]);
     expect((await source.epoch(OPEN))!.voidable).toBe(false);
   });

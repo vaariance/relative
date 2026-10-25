@@ -164,7 +164,7 @@ export class EpochSource {
 
   private constructor(
     private readonly options: EpochSourceOptions,
-    private readonly account: ConfigAccount,
+    private account: ConfigAccount,
   ) {
     this.pdas = epochAddresses(options.program.programId);
     this.instructions = new EpochInstructions(options.program);
@@ -178,12 +178,16 @@ export class EpochSource {
   }
 
   static async open(options: EpochSourceOptions): Promise<EpochSource> {
+    return new EpochSource(options, await EpochSource.loadConfig(options));
+  }
+
+  private static async loadConfig(options: EpochSourceOptions): Promise<ConfigAccount> {
     const info = await options.connection.getAccountInfo(options.config, "finalized");
     if (!info) throw new Error("EpochConfigNotFound");
     if (!info.owner.equals(options.program.programId)) throw new Error("EpochConfigOwnerMismatch");
     const account = decodeEpochAccount(options.program, "poolConfig", info) as unknown as ConfigAccount;
     if (!epochAddresses(options.program.programId).config(account.admin, BigInt(text(account.configId))).equals(options.config)) throw new Error("EpochConfigIdentityMismatch");
-    return new EpochSource(options, account);
+    return account;
   }
 
   get programId(): PublicKey {
@@ -240,7 +244,9 @@ export class EpochSource {
     this.caching = true;
   }
 
-  invalidate(): void {
+  async invalidate(): Promise<void> {
+    this.cache.clear();
+    this.account = await EpochSource.loadConfig(this.options);
     this.cache.clear();
   }
 
@@ -302,7 +308,7 @@ export class EpochSource {
       closesAt,
       phase,
       sealed: true,
-      entriesOpen: phase === "open" && now >= opensAt && now < closesAt && nextNonce < BigInt(this.account.maxLots),
+      entriesOpen: marketLifecycle(this.account) === "active" && phase === "open" && now >= opensAt && now < closesAt && nextNonce < BigInt(this.account.maxLots),
       universe,
       nextNonce: nextNonce.toString(),
       lots: { executed: state.executedLots, scored: state.scoredLots, allocated: state.allocatedLots },

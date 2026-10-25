@@ -163,7 +163,7 @@ async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transaction
       const source = await LiveCoxSource.open(options);
       const epochAssets = new Map(source.manifest.assets.flatMap((asset) => (asset.epochId === null ? [] : [[asset.epochId, asset.assetId] as const])));
       if (epochAssets.size > 0) epochs?.nameAssets(epochAssets);
-      source.onChainRefresh?.(() => epochs?.invalidate());
+      source.onChainRefresh?.(() => epochs?.invalidate().catch((error: unknown) => console.error("cox epoch configuration refresh failed", error)));
       source.start();
       changes?.start();
       const transactions = new CoxTransactions({

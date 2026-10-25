@@ -10,6 +10,7 @@ import { TradingClosedError } from "../src/cox/transactions.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const WALLET = "AfXvGQpYcZwc7MWBPw9HW7TRsMXx4bL6sqbU6huxQYsN";
 const PAYER = "HgC4Jn7XMLzNsDjVdsr1x7BDuGBb2SBvx5TFLSUYaEyU";
 
 interface Fixture {
@@ -49,10 +50,23 @@ function token(mint: PublicKey, amount: bigint): Buffer {
   return data;
 }
 
-async function load(name: string) {
-  const fixture = JSON.parse(readFileSync(join(root, "packages", "cox-epoch", "fixtures", "generation", `${name}.json`), "utf8")) as Fixture;
+function read(name: string): Fixture {
+  return JSON.parse(readFileSync(join(root, "packages", "cox-epoch", "fixtures", "generation", `${name}.json`), "utf8")) as Fixture;
+}
+
+function configBytes(name: string): { address: string; owner: PublicKey; data: Buffer } {
+  const account = read(name).accounts.find((a) => a.name === "config")!;
+  return { address: account.address, owner: new PublicKey(account.owner), data: Buffer.from(account.dataHex, "hex") };
+}
+
+async function load(name: string, configFrom?: string) {
+  const fixture = read(name);
   const connection = new FixtureConnection();
   for (const account of fixture.accounts) connection.set(account.address, new PublicKey(account.owner), Buffer.from(account.dataHex, "hex"));
+  if (configFrom) {
+    const replaced = configBytes(configFrom);
+    connection.set(replaced.address, replaced.owner, replaced.data);
+  }
   const program = loadProgram(connection as unknown as Connection, join(root, "packages", "cox-epoch", "idl", "epoch.json"));
   const basic = loadProgram(connection as unknown as Connection, join(root, "packages", "cox", "idl", "cox.json"));
   const config = new PublicKey(fixture.accounts.find((a) => a.name === "config")!.address);
@@ -69,7 +83,7 @@ async function load(name: string) {
   const source = await EpochSource.open({ connection: connection as unknown as Connection, program, config, basic, now: () => fixture.unixTimestamp });
   source.nameAssets(new Map(Array.from({ length: 256 }, (_, id) => [id, `A${id}`] as const)));
   const opensAt = (key: string) => Number(rounds.get(key)!.opensAt.toString());
-  return { fixture, source, rounds, opensAt, expected: fixture.expected };
+  return { fixture, connection, source, rounds, opensAt, expected: fixture.expected };
 }
 
 describe("Epoch generation fixtures", () => {
@@ -146,5 +160,27 @@ describe("Epoch generation fixtures", () => {
     expect(expected.bindingVersion).toBe(0);
     expect(epoch.universe).toHaveLength(expected.frozenAssets as number);
     expect(epoch).toMatchObject({ sealed: true, registry: null });
+  });
+  it("lifecycle change: an invalidation reloads the configuration and closes admission", async () => {
+    const { source, connection, opensAt } = await load("active");
+    expect(source.configuration().lifecycle).toBe("active");
+    expect((await source.epoch(opensAt("epoch")))!.entriesOpen).toBe(true);
+    for (const [name, lifecycle] of [["archived", "archived"], ["preparing", "preparing"]] as const) {
+      const replaced = configBytes(name);
+      connection.set(replaced.address, replaced.owner, replaced.data);
+      await source.invalidate();
+      expect(source.configuration().lifecycle).toBe(lifecycle);
+      expect((await source.epoch(opensAt("epoch")))!).toMatchObject({ phase: "open", entriesOpen: false });
+    }
+  });
+
+  it("archived configuration: an otherwise open round takes no entries", async () => {
+    const { source, opensAt, rounds } = await load("active", "archived");
+    expect(source.configuration().lifecycle).toBe("archived");
+    const epoch = (await source.epoch(opensAt("epoch")))!;
+    expect(epoch).toMatchObject({ phase: "open", entriesOpen: false, terminal: false });
+    const basket = epoch.universe.slice(0, 30).map((asset) => asset.assetId);
+    expect(rounds.get("epoch")!.state).not.toBeNull();
+    await expect(source.entry({ owner: WALLET, opensAt: opensAt("epoch"), basket, backedAsset: basket[0]!, grossStake: "1000000" })).rejects.toBeInstanceOf(TradingClosedError);
   });
 });
