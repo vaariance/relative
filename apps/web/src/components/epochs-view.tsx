@@ -511,6 +511,63 @@ function CoinBoard({ epoch, coins, now, backed, canPick, onPick }: { epoch: Epoc
   );
 }
 
+function BackPicker({ epoch, coins, now, backed, onPick, onClose }: { epoch: Epoch; coins: string[]; now: number; backed: string | null; onPick: (id: string) => void; onClose: () => void }) {
+  const [query, setQuery] = useState("");
+  const { rows } = useRoundMoves(epoch, coins, now);
+  const term = query.trim().toUpperCase();
+  const shown = rows.filter((row) => row.id.toUpperCase().includes(term));
+
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", key);
+    return () => {
+      document.body.style.overflow = overflow;
+      window.removeEventListener("keydown", key);
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center sm:p-6" onClick={onClose}>
+      <div aria-hidden="true" className="absolute inset-0 bg-black/70" />
+      <section role="dialog" aria-modal="true" aria-labelledby="back-title" onClick={(event) => event.stopPropagation()} className="relative flex max-h-[90vh] w-full max-w-md flex-col rounded-t-3xl border border-white/[0.08] bg-surface sm:rounded-3xl">
+        <header className="flex items-start justify-between gap-4 px-6 pt-5">
+          <div className="flex flex-col gap-1">
+            <h2 id="back-title" className="text-lg font-semibold">Choose a coin to back</h2>
+            <p className="text-xs text-muted">Moves against $CRYPTO since this round opened.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="grid size-9 shrink-0 cursor-pointer place-items-center rounded-full text-muted transition-colors duration-150 hover:bg-white/10 hover:text-ink">
+            <X size={16} aria-hidden="true" />
+          </button>
+        </header>
+        <div className="px-6 pt-4">
+          <input type="search" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search coins" aria-label="Search coins" className="h-10 w-full rounded-control border border-line bg-bg px-3 text-sm text-ink placeholder:text-muted" />
+        </div>
+        <ul className="flex flex-col gap-1 overflow-y-auto px-4 py-3">
+          {shown.length === 0 && <li className="px-2 py-6 text-center text-sm text-muted">No coin matches “{query.trim()}”.</li>}
+          {shown.map((row) => {
+            const on = row.id === backed;
+            return (
+              <li key={row.id}>
+                <button type="button" aria-pressed={on} onClick={() => onPick(row.id)} className={`flex h-12 w-full cursor-pointer items-center gap-3 rounded-xl px-3 text-left transition-colors duration-150 ${on ? "bg-accent/10" : "hover:bg-white/[0.05]"}`}>
+                  <CoinIcon id={row.id} size={22} />
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{row.id}</span>
+                  <span className={`num text-xs ${tone(row.change)}`}>{pct(row.change, 2)}</span>
+                  {on ? <Check size={14} strokeWidth={3} aria-hidden="true" className="shrink-0 text-accent" /> : <span className="w-3.5 shrink-0" />}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 function TeamEditor({ epoch, coins, now, backed, mates, onSave, onClose }: { epoch: Epoch; coins: string[]; now: number; backed: string; mates: string[]; onSave: (mates: string[]) => void; onClose: () => void }) {
   const [draft, setDraft] = useState<string[]>(mates);
   const { rows } = useRoundMoves(epoch, coins, now);
@@ -593,11 +650,12 @@ function TeamEditor({ epoch, coins, now, backed, mates, onSave, onClose }: { epo
   );
 }
 
-function EntryPanel(props: { epoch: Epoch; basket: string[]; now: number; decimals: number; fee: { bps: number; cap: string }; collaterals: Collateral[]; next: Epoch | null; backed: string | null; mates: string[]; anchored?: boolean; onMates: (mates: string[]) => void; onSelect: (address: string) => void; onSent: () => void; onClose?: () => void }) {
+function EntryPanel(props: { epoch: Epoch; basket: string[]; now: number; decimals: number; fee: { bps: number; cap: string }; collaterals: Collateral[]; next: Epoch | null; backed: string | null; mates: string[]; anchored?: boolean; onBack: (id: string) => void; onMates: (mates: string[]) => void; onSelect: (address: string) => void; onSent: () => void; onClose?: () => void }) {
   const { epoch, basket: coins, now, decimals, fee, backed, mates, collaterals } = props;
   const { owner } = useAccount();
   const [amount, setAmount] = useState("");
   const [editing, setEditing] = useState(false);
+  const [choosing, setChoosing] = useState(false);
   const choosable = coins.length > EPOCH_BASKET_SIZE;
   const out = backed && leavesOut(coins) ? coins.filter((id) => id !== backed && !mates.includes(id)) : [];
   const [sent, setSent] = useState(0);
@@ -612,7 +670,7 @@ function EntryPanel(props: { epoch: Epoch; basket: string[]; now: number; decima
   const basketIssue = backed ? basketProblem(coins, backed, mates) : null;
   const short = wallet !== null && gross !== null && Number(gross) / 10 ** decimals > wallet;
   const empty = amount.trim() === "";
-  const problem = !backed ? "Pick a coin first." : gross === null || gross <= 0n ? "Enter an amount above zero." : basketIssue ? basketIssue : short ? `Your wallet has ${formatAmount(wallet ?? 0, 2)} ${symbol}.` : null;
+  const problem = !backed ? "Choose a coin first." : gross === null || gross <= 0n ? "Enter an amount above zero." : basketIssue ? basketIssue : short ? `Your wallet has ${formatAmount(wallet ?? 0, 2)} ${symbol}.` : null;
   const collateralMint = collaterals.length > 1 && chosen ? chosen.mint : undefined;
   const intent: Intent | null = open && problem === null && gross !== null && backed !== null ? { operation: "epoch-entry", opensAt: epoch.opensAt, grossStake: gross.toString(), basket: entryBasket(coins, backed, mates), backedAsset: backed, collateralMint } : null;
   const show = (value: bigint | null) => {
@@ -670,13 +728,30 @@ function EntryPanel(props: { epoch: Epoch; basket: string[]; now: number; decima
       {head}
 
       <form className="flex flex-col gap-3" onSubmit={(event) => event.preventDefault()}>
-        <div className="flex items-center gap-3 rounded-control bg-surface-2 p-3">
-          {backed ? <CoinIcon id={backed} size={28} /> : <span className="size-7 rounded-full border border-dashed border-white/20" />}
-          <span className="flex flex-col">
-            <span className="text-sm font-semibold">{backed ? `Back ${backed}` : "No coin yet"}</span>
-            <span className="text-[11px] text-muted">{backed ? `In a team of ${EPOCH_BASKET_SIZE}, against $CRYPTO` : "Tap a coin to back it"}</span>
+        <button type="button" onClick={() => setChoosing(true)} aria-haspopup="dialog" className="flex cursor-pointer items-center gap-3 rounded-control bg-surface-2 p-3 text-left transition-colors duration-150 hover:bg-white/10">
+          {backed ? <CoinIcon id={backed} size={28} /> : <span className="size-7 shrink-0 rounded-full border border-dashed border-white/20" />}
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="text-sm font-semibold">{backed ? `Back ${backed}` : "Choose a coin"}</span>
+            <span className="text-[11px] text-muted">{backed ? `In a team of ${EPOCH_BASKET_SIZE}, against $CRYPTO` : "The coin you think will lead this round"}</span>
           </span>
-        </div>
+          <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-accent">
+            {backed ? "Change" : "Choose"}
+            <ChevronDown size={14} aria-hidden="true" />
+          </span>
+        </button>
+        {choosing && (
+          <BackPicker
+            epoch={epoch}
+            coins={coins}
+            now={now}
+            backed={backed}
+            onClose={() => setChoosing(false)}
+            onPick={(id) => {
+              props.onBack(id);
+              setChoosing(false);
+            }}
+          />
+        )}
 
         {backed && (
           <div className="flex flex-col gap-1.5 rounded-control border border-line px-3 py-2.5">
@@ -745,7 +820,7 @@ function EntryPanel(props: { epoch: Epoch; basket: string[]; now: number; decima
 
         <SendButton
           intent={intent}
-          label={!backed ? "Pick a coin" : empty ? "Enter an amount" : `Back ${backed}`}
+          label={!backed ? "Choose a coin" : empty ? "Enter an amount" : `Back ${backed}`}
           connectLabel="Connect wallet to continue"
           problem={empty || !backed ? "" : problem}
           describe={`Back ${backed} with ${amount} ${symbol}`}
@@ -1051,6 +1126,10 @@ export function EpochsView({ overview, roster, serverNow, staleSince = null }: {
     next,
     backed,
     mates,
+    onBack: (id: string) => {
+      setBacked(id);
+      if (id !== backed) setChosenMates(null);
+    },
     onMates: setChosenMates,
     onSelect: (address: string) => {
       setSelected(address);
@@ -1079,8 +1158,8 @@ export function EpochsView({ overview, roster, serverNow, staleSince = null }: {
 
       {open && !sheet && (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/[0.06] bg-bg/95 p-3 xl:hidden">
-          <button type="button" disabled={!backed} onClick={() => setSheet(true)} className={`${primary} ${backed ? "cursor-pointer" : "cursor-not-allowed opacity-40"}`}>
-            {backed ? <>Back {backed} <ChevronRight size={16} aria-hidden="true" /></> : "Tap a coin to back it"}
+          <button type="button" onClick={() => setSheet(true)} className={`${primary} cursor-pointer`}>
+            {backed ? `Back ${backed}` : "Choose a coin to back"} <ChevronRight size={16} aria-hidden="true" />
           </button>
         </div>
       )}
