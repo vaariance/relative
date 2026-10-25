@@ -1942,3 +1942,10 @@ another agent needs to know.
   - **Verified on both:** pool 2 reads as a legacy pool: `cryptoClass` 30, `generation` null, 31 assets, lifecycle `active`, gate `open`. Publications 0 to 48 without gaps, status fresh, feed healthy, vault covered. The Epoch config reads `active` with no registry. The 00:00 Epoch is `open`, voidable, not terminal; the 08:00 Epoch is `settled` and terminal; both list 30 coins with `registry` null. `epoch-prepare` answers `TRADING_CLOSED` for this operator-prepared configuration. Epoch history, previews and the faucet answer as before. No warnings logged.
 - **Rules for agents:** Pause B still needs this API pointed at the new pool 3 with its own `pool-3/` history, preview and chain-change prefixes, and checked there before admission opens.
 - **Refs:** commits `8720493`..`f886558`, `apps/app-api/README.md`.
+
+### 2026-10-25 · Godwin (Claude Code) · Web dev server on Turbopack
+
+- **Area:** `apps/web` (`next.config.ts`, `package.json`, `src/lib/empty-module.ts`, README).
+- **What:** At Godwin's request, `pnpm dev` runs `next dev` on Turbopack instead of webpack. Cold page loads measured on a fresh server: `/markets` 52 s → 10–15 s, `/` 22 s → 5–7 s, `/epochs` 14 s → 2.5–3 s, other app pages 6–15 s → about 2 s. `turbopack.resolveAlias` maps the two `.js` specifiers in `@eox/app-api` (`./cox-client.js`, `./cox-types.js`) to their `.ts` files, stubs `@farcaster/mini-app-solana` and `pino-pretty` with `src/lib/empty-module.ts`, and a `turbopack.rules` entry runs the StyleX Babel step on `src/landing` only (landing styles checked). `agentRules: false` stops Next.js writing its own `AGENTS.md` into `apps/web`. Production builds (`next build --webpack`, Vercel) are unchanged.
+- **Rules for agents:** Joel: a new file in `@eox/app-api` imported with a `.js` specifier must be added to `turbopack.resolveAlias`, or `pnpm dev` cannot resolve it; webpack is unaffected. Do not run a second `next dev` in `apps/web` while one is running; they share `.next`.
+- **Refs:** commit `45f86a5`, `apps/web/README.md`.
