@@ -57,7 +57,7 @@ pnpm --filter @eox/web build
 pnpm --filter @eox/web start
 ```
 
-Development and production builds use webpack. [`next.config.ts`](next.config.ts) maps `.js` import specifiers to workspace TypeScript sources through `resolve.extensionAlias`; use the package scripts to preserve that configuration.
+Development uses Turbopack and production builds use webpack. [`next.config.ts`](next.config.ts) maps the `.js` import specifiers in `@eox/app-api` to its TypeScript sources for both: `turbopack.resolveAlias` lists them one by one, and webpack uses `resolve.extensionAlias`. Add a new file of that package to `turbopack.resolveAlias`, or `pnpm dev` cannot resolve it. Use the package scripts to preserve this configuration.
 
 ## Swap, buy and sell
 

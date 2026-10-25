@@ -4,7 +4,21 @@ import { landingDir, stylexBabel } from "./stylex.babel.mjs";
 const optionalModules = ["@farcaster/mini-app-solana", "pino-pretty"];
 
 const config: NextConfig = {
+  agentRules: false,
   transpilePackages: ["@eox/app-api"],
+  turbopack: {
+    resolveAlias: {
+      ...Object.fromEntries(optionalModules.map((name) => [name, "./src/lib/empty-module.ts"])),
+      "./cox-client.js": "../../packages/app-api/src/cox-client.ts",
+      "./cox-types.js": "../../packages/app-api/src/cox-types.ts",
+    },
+    rules: {
+      "*.{ts,tsx}": {
+        condition: { path: /[\\/]src[\\/]landing[\\/]/ },
+        loaders: [{ loader: "babel-loader", options: stylexBabel }],
+      },
+    },
+  },
   webpack(webpackConfig) {
     webpackConfig.resolve.extensionAlias = { ".js": [".ts", ".tsx", ".js"] };
     webpackConfig.resolve.alias = { ...webpackConfig.resolve.alias, ...Object.fromEntries(optionalModules.map((name) => [name, false])) };
