@@ -384,8 +384,13 @@ pub async fn run(config_path: &Path, backup_path: &Path) -> Result<(), Error> {
     if backup.state_directory != config.state_directory {
         return Err(Error::Invalid);
     }
-    let transport = Gcs::new(&backup).map_err(|_| Error::Network)?;
+    config.verify_state_identity().map_err(|_| Error::Invalid)?;
+    let notification_spool = config.state_directory.with_extension("chain-spool");
     let spool = config.state_directory.with_extension("preview-spool");
+    crate::runtime::bind_spool(&config, &spool, "preview").map_err(|_| Error::Invalid)?;
+    crate::runtime::bind_spool(&config, &notification_spool, "chain-changes")
+        .map_err(|_| Error::Invalid)?;
+    let transport = Gcs::new(&backup).map_err(|_| Error::Network)?;
     fs::create_dir_all(&spool).map_err(|_| Error::Storage)?;
     #[cfg(unix)]
     {
@@ -418,9 +423,8 @@ pub async fn run(config_path: &Path, backup_path: &Path) -> Result<(), Error> {
         &config.basic_program,
         &pool,
     );
-    let consumer = consume(&transport, &prefix, &spool);
+    let consumer = consume(&transport, &prefix, &spool, &config.basic_program, &pool);
     let notification_prefix = format!("pool-{}/chain-changes", config.basic_pool_id);
-    let notification_spool = config.state_directory.with_extension("chain-spool");
     let notifications = async {
         crate::notifications::run(
             &transport,
@@ -429,6 +433,7 @@ pub async fn run(config_path: &Path, backup_path: &Path) -> Result<(), Error> {
             &notification_spool,
             &config.basic_program,
             &pool,
+            &config,
         )
         .await
         .map_err(|_| Error::Storage)
@@ -522,7 +527,13 @@ async fn produce(
         }
     }
 }
-async fn consume<T: Transport>(transport: &T, prefix: &str, spool: &Path) -> Result<(), Error> {
+async fn consume<T: Transport>(
+    transport: &T,
+    prefix: &str,
+    spool: &Path,
+    program: &str,
+    pool: &str,
+) -> Result<(), Error> {
     loop {
         let mut pending = Vec::<(u64, PathBuf)>::new();
         for entry in fs::read_dir(spool).map_err(|_| Error::Storage)? {
@@ -552,6 +563,8 @@ async fn consume<T: Transport>(transport: &T, prefix: &str, spool: &Path) -> Res
                 || record.schema != "relative.preview/v1"
                 || record.status != "estimate"
                 || record.network != "solana-devnet"
+                || record.program != program
+                || record.pool != pool
             {
                 return Err(Error::Invalid);
             }

@@ -67,7 +67,17 @@ pub async fn run<T: Transport>(
     spool: &Path,
     program: &str,
     pool: &str,
+    config: &crate::runtime::Config,
 ) -> Result<(), Error> {
+    config.verify_state_identity().map_err(|_| Error::Invalid)?;
+    let expected = config.publication_identity().map_err(|_| Error::Invalid)?;
+    if expected.program != program
+        || expected.pool != pool
+        || prefix != format!("pool-{}/chain-changes", config.basic_pool_id)
+    {
+        return Err(Error::Invalid);
+    }
+    crate::runtime::bind_spool(config, spool, "chain-changes").map_err(|_| Error::Invalid)?;
     fs::create_dir_all(spool).map_err(|_| Error::Storage)?;
     #[cfg(unix)]
     {
@@ -76,7 +86,7 @@ pub async fn run<T: Transport>(
             .map_err(|_| Error::Storage)?;
     }
     let producer = produce(state, spool, program, pool);
-    let consumer = consume(transport, prefix, spool);
+    let consumer = consume(transport, prefix, spool, program, pool);
     tokio::try_join!(producer, consumer)?;
     Ok(())
 }
@@ -113,7 +123,13 @@ async fn produce(state: &Path, spool: &Path, program: &str, pool: &str) -> Resul
         emitted = Instant::now();
     }
 }
-async fn consume<T: Transport>(transport: &T, prefix: &str, spool: &Path) -> Result<(), Error> {
+async fn consume<T: Transport>(
+    transport: &T,
+    prefix: &str,
+    spool: &Path,
+    program: &str,
+    pool: &str,
+) -> Result<(), Error> {
     loop {
         let mut files = Vec::<PathBuf>::new();
         for entry in fs::read_dir(spool).map_err(|_| Error::Storage)? {
@@ -134,6 +150,13 @@ async fn consume<T: Transport>(transport: &T, prefix: &str, spool: &Path) -> Res
             }
             let bytes = fs::read(&path).map_err(|_| Error::Storage)?;
             let record: Record = serde_json::from_slice(&bytes).map_err(|_| Error::Invalid)?;
+            if record.program != program
+                || record.pool != pool
+                || record.network != "solana-devnet"
+                || record.schema != "relative.chain-notification/v1"
+            {
+                return Err(Error::Invalid);
+            }
             if path.file_name().and_then(|x| x.to_str()) != Some(record.name()?.as_str()) {
                 return Err(Error::Invalid);
             }
@@ -154,6 +177,52 @@ async fn consume<T: Transport>(transport: &T, prefix: &str, spool: &Path) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    struct NoUploads;
+    impl Transport for NoUploads {
+        async fn create(
+            &self,
+            _: &str,
+            _: &[u8],
+            _: &str,
+        ) -> Result<backup::Created, backup::Error> {
+            panic!("old-generation notifications must not reach transport")
+        }
+        async fn get(&self, _: &str, _: u64) -> Result<backup::RemoteObject, backup::Error> {
+            panic!("notification consumer does not fetch objects")
+        }
+    }
+    #[tokio::test]
+    async fn notification_consumer_rejects_another_pool_before_upload() {
+        let root = std::env::temp_dir().join(format!(
+            "old-notification-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let changes = changes::ChainChanges::open(&root.join("chain.state")).unwrap();
+        changes.confirm(100, [1; 32]).unwrap();
+        let notification = changes::read(&root.join("chain.state")).unwrap().unwrap();
+        let program = solana_address::Address::new_from_array([1; 32]).to_string();
+        let old_pool = solana_address::Address::new_from_array([2; 32]).to_string();
+        let new_pool = solana_address::Address::new_from_array([3; 32]).to_string();
+        let record = Record::new(&program, &old_pool, 1, notification).unwrap();
+        journal::atomic_write(&root.join(record.name().unwrap()), &record).unwrap();
+        assert_eq!(
+            consume(
+                &NoUploads,
+                "pool-7/chain-changes",
+                &root,
+                &program,
+                &new_pool
+            )
+            .await,
+            Err(Error::Invalid)
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
     #[tokio::test]
     async fn chain_notifications_are_produced_without_price_observations() {
         let root = std::env::temp_dir().join(format!(

@@ -16,6 +16,24 @@ SPEC.loader.exec_module(release)
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_generation_bound_backup_configuration_requires_runtime_binding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "prepared.json"
+            destination = root / "native-backup.json"
+            destination.write_text("old configuration")
+            for value in [None, "relative/native.json", 3]:
+                source.write_text(json.dumps({"schema": "relative.backup/v2", "runtime_config_path": value}))
+                with self.assertRaisesRegex(ValueError, "absolute runtime"):
+                    release.replace_service_configuration(source, destination, 0, 0)
+                self.assertEqual(destination.read_text(), "old configuration")
+            config = {"schema": "relative.backup/v2", "runtime_config_path": "/etc/cox-publisher/native.json"}
+            source.write_text(json.dumps(config))
+            with patch.object(release.os, "fchown"):
+                release.replace_service_configuration(source, destination, 0, 0)
+            self.assertEqual(json.loads(destination.read_text()), config)
+            self.assertEqual(destination.stat().st_mode & 0o777, 0o640)
+
     def test_config_replacement_preserves_service_access_and_failure_keeps_original(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

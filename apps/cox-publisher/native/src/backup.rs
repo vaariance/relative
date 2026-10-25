@@ -33,6 +33,8 @@ const MUTABLE: [&str; 12] = [
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub schema: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_config_path: Option<PathBuf>,
     pub bucket: String,
     pub prefix: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -148,7 +150,14 @@ impl Config {
         Ok(value)
     }
     pub fn validate(&self) -> Result<(), Error> {
-        if self.schema != "relative.backup/v1"
+        if !matches!(
+            self.schema.as_str(),
+            "relative.backup/v1" | "relative.backup/v2"
+        ) || (self.schema == "relative.backup/v2") != self.runtime_config_path.is_some()
+            || self
+                .runtime_config_path
+                .as_ref()
+                .is_some_and(|path| !path.is_absolute())
             || !(3..=222).contains(&self.bucket.len())
             || !self
                 .bucket
@@ -202,7 +211,26 @@ impl Config {
             }
             _ => return Err(Error::Configuration),
         }
+        self.bound_runtime()?;
         Ok(())
+    }
+    fn bound_runtime(&self) -> Result<Option<crate::runtime::Config>, Error> {
+        let Some(path) = &self.runtime_config_path else {
+            return Ok(None);
+        };
+        let runtime = crate::runtime::Config::read(path).map_err(|_| Error::Configuration)?;
+        let expected = runtime
+            .publication_identity()
+            .map_err(|_| Error::Configuration)?;
+        if self.state_directory != runtime.state_directory
+            || self.prefix != format!("pool-{}/native", runtime.basic_pool_id)
+            || self.publication_history_prefix.as_deref()
+                != Some(format!("pool-{}/history", runtime.basic_pool_id).as_str())
+            || self.publication_identity.as_ref() != Some(&expected)
+        {
+            return Err(Error::Configuration);
+        }
+        Ok(Some(runtime))
     }
 }
 fn check_components(path: &Path) -> Result<(), Error> {
@@ -383,6 +411,12 @@ fn capture_snapshot(
         .into_iter()
         .filter_map(|(path, bytes)| bytes.map(|bytes| (path, bytes)))
         .collect::<std::collections::BTreeMap<_, _>>();
+    if let Some(runtime) = config.bound_runtime()? {
+        let identity = frozen.get("identity.json").ok_or(Error::Manifest)?;
+        runtime
+            .verify_identity_bytes(identity)
+            .map_err(|_| Error::Conflict)?;
+    }
     let mut paths = Vec::new();
     walk(config, &config.state_directory, "", &mut paths, &mut 0)?;
     paths.sort();
@@ -790,6 +824,25 @@ pub async fn restore<T: Transport>(
     }
     let manifest: Manifest = serde_json::from_slice(&remote.body).map_err(|_| Error::Manifest)?;
     validate_manifest(&manifest, config)?;
+    if let Some(runtime) = config.bound_runtime()? {
+        let identity = manifest
+            .entries
+            .iter()
+            .find(|entry| entry.path == "identity.json")
+            .ok_or(Error::Manifest)?;
+        let object = content_object(&config.prefix, &identity.sha256);
+        let remote = transport.get(&object, config.max_file_bytes).await?;
+        check_remote(&remote.metadata, &object, &remote.body)?;
+        if digest(&remote.body) != identity.sha256
+            || crc32c(&remote.body) != identity.crc32c
+            || remote.body.len() as u64 != identity.bytes
+        {
+            return Err(Error::Checksum);
+        }
+        runtime
+            .verify_identity_bytes(&remote.body)
+            .map_err(|_| Error::Conflict)?;
+    }
     fs::create_dir(destination).map_err(|_| Error::Storage)?;
     #[cfg(unix)]
     {

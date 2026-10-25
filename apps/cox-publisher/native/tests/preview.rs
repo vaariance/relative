@@ -6,6 +6,8 @@ use relative_publisher::{
 };
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, sync::Mutex};
+#[path = "support/runtime.rs"]
+mod runtime_fixture;
 fn fixture() -> (Anchor, Observation, Ledger) {
     let anchor = Anchor {
         universe_digest: [1; 32],
@@ -58,6 +60,55 @@ fn fixture() -> (Anchor, Observation, Ledger) {
         ],
     };
     (anchor, value, ledger)
+}
+#[tokio::test]
+async fn exporter_rejects_unbound_notification_spool_before_uploading_any_preview() {
+    use relative_publisher::{journal, preview};
+    let root = std::fs::canonicalize(std::env::temp_dir())
+        .unwrap()
+        .join(format!(
+            "preview-generation-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+    let state = root.join("new-generation");
+    let runtime = runtime_fixture::config(state.clone(), 7);
+    let runtime_path = root.join("runtime.json");
+    journal::atomic_write(&runtime_path, &runtime).unwrap();
+    journal::atomic_write(
+        &state.join("identity.json"),
+        &serde_json::json!({
+            "identity": runtime.identity().unwrap(), "anchor": runtime.anchor,
+        }),
+    )
+    .unwrap();
+    let backup_path = root.join("backup.json");
+    journal::atomic_write(&backup_path, &serde_json::json!({
+        "schema": "relative.backup/v2", "runtime_config_path": runtime_path,
+        "bucket": "unused-test-bucket", "prefix": "pool-7/native",
+        "publication_history_prefix": "pool-7/history", "publication_identity": runtime.publication_identity().unwrap(),
+        "state_directory": state, "markers_directory": root.join("markers"),
+        "max_file_bytes": 16_777_216, "max_files": 100, "max_total_bytes": 33_554_432,
+    })).unwrap();
+    let old_notification = state.with_extension("chain-spool").join("old.json");
+    journal::atomic_write(
+        &old_notification,
+        &serde_json::json!({"old":"notification"}),
+    )
+    .unwrap();
+    assert_eq!(
+        preview::run(&runtime_path, &backup_path).await,
+        Err(Error::Invalid)
+    );
+    assert!(old_notification.exists());
+    assert!(!state
+        .with_extension("chain-spool")
+        .join("identity.binding")
+        .exists());
+    std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
 fn references_and_backing_projection_follow_the_existing_protocol_without_treating_reference_as_nav(

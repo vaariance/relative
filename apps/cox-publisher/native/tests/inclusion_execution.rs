@@ -199,6 +199,87 @@ fn invalid_admission_never_creates_hold_or_cutoff_and_no_approval_means_no_local
     assert_eq!(work, expected);
     std::fs::remove_dir_all(directory).unwrap();
 }
+#[test]
+fn malformed_candidate_is_rejected_but_corrupt_accepted_journal_fails_closed_as_storage() {
+    use relative_publisher::worker;
+    let directory = directory();
+    journal::atomic_write(
+        &directory.join("inclusion-approved.json"),
+        &serde_json::json!({"invalid":true}),
+    )
+    .unwrap();
+    let shared = Controller::open(&directory).unwrap();
+    assert_eq!(
+        shared.lock().unwrap().refresh_file(),
+        Err(worker::Error::Snapshot)
+    );
+    assert!(!directory.join("inclusion-execution.json").exists());
+    std::fs::File::create(directory.join("inclusion-approved.json"))
+        .unwrap()
+        .set_len(journal::MAX_JOURNAL_BYTES + 1)
+        .unwrap();
+    assert_eq!(
+        shared.lock().unwrap().refresh_file(),
+        Err(worker::Error::Snapshot)
+    );
+    journal::atomic_write(
+        &directory.join("inclusion-execution.json"),
+        &serde_json::json!({"invalid":true}),
+    )
+    .unwrap();
+    assert!(matches!(
+        Controller::open(&directory),
+        Err(worker::Error::Storage)
+    ));
+    std::fs::remove_dir_all(directory).unwrap();
+}
+#[test]
+fn failed_approval_journal_commit_is_storage_error_without_installing_in_memory_transition() {
+    use relative_publisher::worker;
+    let directory = directory();
+    journal::atomic_write(&directory.join("inclusion-approved.json"), &approved()).unwrap();
+    let shared = Controller::open(&directory).unwrap();
+    std::fs::create_dir(directory.join("inclusion-execution.json")).unwrap();
+    assert_eq!(
+        shared.lock().unwrap().refresh_file(),
+        Err(worker::Error::Storage)
+    );
+    let mut work = vec![Work::Entry {
+        id: "basic:1".into(),
+        pool: Pool::Basic,
+        eligible_after_ms: 0,
+    }];
+    let expected = work.clone();
+    inclusion_execution::filter_work(&shared, u64::MAX, &mut work).unwrap();
+    assert_eq!(work, expected);
+    std::fs::remove_dir(directory.join("inclusion-execution.json")).unwrap();
+    assert!(shared.lock().unwrap().refresh_file().unwrap());
+    assert!(!shared.lock().unwrap().refresh_file().unwrap());
+    std::fs::remove_dir_all(directory).unwrap();
+}
+#[test]
+fn replacement_of_an_unfinished_approval_is_candidate_rejection_and_keeps_original_journal() {
+    use relative_publisher::worker;
+    let directory = directory();
+    let first = approved();
+    journal::atomic_write(&directory.join("inclusion-approved.json"), &first).unwrap();
+    let shared = Controller::open(&directory).unwrap();
+    assert!(shared.lock().unwrap().refresh_file().unwrap());
+    let before = std::fs::read(directory.join("inclusion-execution.json")).unwrap();
+    let mut replacement = first;
+    replacement.schema = "unsupported-candidate".into();
+    journal::atomic_write(&directory.join("inclusion-approved.json"), &replacement).unwrap();
+    assert_eq!(
+        shared.lock().unwrap().refresh_file(),
+        Err(worker::Error::Snapshot)
+    );
+    assert_eq!(
+        std::fs::read(directory.join("inclusion-execution.json")).unwrap(),
+        before
+    );
+    Controller::open(&directory).unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+}
 #[tokio::test]
 async fn deterministic_successor_failure_records_reschedule_and_unblocks_current_market_without_rpc(
 ) {

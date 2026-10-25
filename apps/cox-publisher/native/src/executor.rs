@@ -1280,7 +1280,7 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
                 &self.reader,
                 &state,
                 path.parent().ok_or(worker::Error::Storage)?,
-                now_ms,
+                self.discovery.first_epoch(),
             )
             .await?
         } else {
@@ -1724,6 +1724,10 @@ impl DraftSigner for crate::signing::RemoteSigner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    mod universe_fixture {
+        use crate as relative_publisher;
+        include!("../tests/support/universe.rs");
+    }
     use crate::{benchmark::Asset, chain::tests::state, rpc::Rpc};
     use anchor_lang::Discriminator;
     use std::sync::Arc;
@@ -1848,6 +1852,85 @@ mod tests {
         executor.mapping = view.mapping.clone();
         executor.dynamic = Some((view, executor.anchor.clone()));
         executor
+    }
+    #[test]
+    fn confirmed_universe_adoption_waits_for_basic_and_recovered_epoch_batches() {
+        use crate::{journal, runtime::SnapshotArchive, universe_runtime};
+        let (first, next) = universe_fixture::receipts_to(31);
+        let initial = first.validate().unwrap();
+        let active = next.validate().unwrap();
+        let directory = std::fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!(
+                "relative-executor-adoption-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+            ));
+        first.persist(&directory).unwrap();
+        next.persist(&directory).unwrap();
+        universe_runtime::reconcile_committed(&directory, &first.canonical, &initial.anchor)
+            .unwrap();
+        let history = journal::FileHistory {
+            directory: directory.join("prices"),
+        };
+        let archive = SnapshotArchive::new(initial.anchor.clone(), history.clone(), 5_000).unwrap();
+        let mut executor = executor();
+        executor.anchor = initial.anchor.clone();
+        executor.mapping = initial.mapping.clone();
+        executor.dynamic = Some((initial.clone(), initial.anchor.clone()));
+        executor.snapshot_archive = Some(archive);
+        let mut state = crate::chain::tests::dynamic_state(31);
+        state.basic.methodology.canonical = next.canonical.clone();
+        state.basic.methodology.digest = active.digest;
+        state.basic.pool.stage = Some(anchor_lang::prelude::Pubkey::new_unique());
+        assert_eq!(
+            executor.adopt_committed_universe(&state),
+            Err(worker::Error::StaleDraft)
+        );
+        assert_eq!(executor.anchor, initial.anchor);
+        assert_eq!(executor.mapping, initial.mapping);
+        state.basic.pool.stage = None;
+        let stage = crate::epoch_stage::Stage {
+            schema: "relative.epoch-snapshot-stage/v1".into(),
+            program: executor.reader.epoch_program.to_string(),
+            config: executor.reader.epoch_config.to_string(),
+            operator: executor.reader.operator.to_string(),
+            anchor: initial.anchor.clone(),
+            observation: first.captured_observation().unwrap(),
+            work: vec![Work::Entry {
+                id: "epoch:14400:0".into(),
+                pool: Pool::Epoch,
+                eligible_after_ms: 0,
+            }],
+        };
+        journal::atomic_write(&directory.join("epoch-snapshot-stage.json"), &Some(stage)).unwrap();
+        let mut executor = executor
+            .with_discovery_state(directory.join("discovery.json"), 14_400)
+            .unwrap();
+        assert!(executor.epoch_stage.is_some());
+        assert_eq!(
+            executor.adopt_committed_universe(&state),
+            Err(worker::Error::StaleDraft)
+        );
+        assert_eq!(executor.anchor, initial.anchor);
+        assert_eq!(
+            history.active_anchor().unwrap(),
+            Some(initial.anchor.clone())
+        );
+        executor.persist_epoch_stage(None).unwrap();
+        executor.adopt_committed_universe(&state).unwrap();
+        assert_eq!(executor.anchor, active.anchor);
+        assert_eq!(executor.mapping, active.mapping);
+        assert_eq!(executor.dynamic.as_ref().unwrap().0.digest, active.digest);
+        assert_eq!(history.active_anchor().unwrap(), Some(active.anchor));
+        assert_eq!(
+            executor.reader.rpc.usage().unwrap().physical_http_requests,
+            0
+        );
+        std::fs::remove_dir_all(directory).unwrap();
     }
     #[test]
     fn dynamic_partial_price_restart_reuses_exact_accepted_timestamp_and_rejects_changed_prefix() {

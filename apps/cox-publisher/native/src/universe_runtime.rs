@@ -494,6 +494,14 @@ pub fn reconcile_committed(
     canonical: &[u8],
     initial_anchor: &Anchor,
 ) -> Result<View, Error> {
+    reconcile_committed_checked(state_directory, canonical, initial_anchor, |_, _| Ok(()))
+}
+pub(crate) fn reconcile_committed_checked(
+    state_directory: &Path,
+    canonical: &[u8],
+    initial_anchor: &Anchor,
+    validate: impl FnOnce(&View, &Observation) -> Result<(), Error>,
+) -> Result<View, Error> {
     let expected = view(canonical)?;
     let receipt: Receipt = journal::read(
         &state_directory
@@ -522,13 +530,20 @@ pub fn reconcile_committed(
             return Err(Error::Lineage);
         }
     }
-    history
-        .activate(&expected.anchor)
-        .map_err(|_| Error::Storage)?;
     let resumed = history
         .latest_staged(&expected.anchor)
         .map_err(|_| Error::Storage)?
         .unwrap_or(receipt.captured_observation()?);
+    crate::benchmark::Benchmark::new(
+        expected.anchor.clone(),
+        history.clone(),
+        Some(resumed.clone()),
+    )
+    .map_err(|_| Error::Storage)?;
+    validate(&expected, &resumed)?;
+    history
+        .activate(&expected.anchor)
+        .map_err(|_| Error::Storage)?;
     if history
         .latest()
         .map_err(|_| Error::Storage)?

@@ -129,9 +129,7 @@ impl Config {
             || epoch.len() != ids.len()
             || feeds.len() != ids.len()
             || self.mapping.iter().any(|asset| {
-                asset.basic_id >= 256
-                    || asset.epoch_id >= 256
-                    || asset.epoch_feed_id == [0; 32]
+                asset.basic_id >= 256 || asset.epoch_id >= 256 || asset.epoch_feed_id == [0; 32]
             })
         {
             return Err(Error::Configuration);
@@ -142,6 +140,79 @@ impl Config {
     }
     pub fn identity(&self) -> Result<[u8; 32], Error> {
         Ok(Sha256::digest(serde_json::to_vec(self).map_err(|_| Error::Configuration)?).into())
+    }
+    pub fn verify_identity_bytes(&self, bytes: &[u8]) -> Result<(), Error> {
+        let stored: StateIdentity = serde_json::from_slice(bytes).map_err(|_| Error::Storage)?;
+        if stored.identity != self.identity()? || stored.anchor != self.anchor {
+            return Err(Error::Storage);
+        }
+        Ok(())
+    }
+    pub fn verify_state_identity(&self) -> Result<(), Error> {
+        let stored: StateIdentity = journal::read(&self.state_directory.join("identity.json"))
+            .map_err(|_| Error::Storage)?
+            .ok_or(Error::Storage)?;
+        if stored.identity != self.identity()? || stored.anchor != self.anchor {
+            return Err(Error::Storage);
+        }
+        Ok(())
+    }
+    pub fn publication_identity(&self) -> Result<crate::publications::Identity, Error> {
+        let program: Address = self
+            .basic_program
+            .parse()
+            .map_err(|_| Error::Configuration)?;
+        let pool =
+            Address::find_program_address(&[b"pool", &self.basic_pool_id.to_le_bytes()], &program)
+                .0;
+        Ok(crate::publications::Identity {
+            program: program.to_string(),
+            pool: pool.to_string(),
+            genesis_hash: crate::rpc::DEVNET_GENESIS.into(),
+        })
+    }
+}
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct StateIdentity {
+    identity: [u8; 32],
+    anchor: Anchor,
+}
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct SpoolIdentity {
+    identity: [u8; 32],
+    publication: crate::publications::Identity,
+    namespace: String,
+}
+pub(crate) fn bind_spool(config: &Config, directory: &Path, namespace: &str) -> Result<(), Error> {
+    config.verify_state_identity()?;
+    std::fs::create_dir_all(directory).map_err(|_| Error::Storage)?;
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(directory.join(".identity.lock"))
+        .map_err(|_| Error::Storage)?;
+    lock.try_lock().map_err(|_| Error::Locked)?;
+    let path = directory.join("identity.binding");
+    let expected = SpoolIdentity {
+        identity: config.identity()?,
+        publication: config.publication_identity()?,
+        namespace: namespace.into(),
+    };
+    match journal::read::<SpoolIdentity>(&path).map_err(|_| Error::Storage)? {
+        Some(actual) if actual == expected => Ok(()),
+        Some(_) => Err(Error::Storage),
+        None => {
+            for entry in std::fs::read_dir(directory).map_err(|_| Error::Storage)? {
+                let name = entry.map_err(|_| Error::Storage)?.file_name();
+                if name != ".identity.lock" && name != "writer.lock" {
+                    return Err(Error::Storage);
+                }
+            }
+            journal::atomic_write(&path, &expected).map_err(|_| Error::Storage)
+        }
     }
 }
 struct MemoryHistory;
@@ -168,17 +239,12 @@ impl StateLock {
             .open(directory.join("publisher.lock"))
             .map_err(|_| Error::Storage)?;
         file.try_lock().map_err(|_| Error::Locked)?;
-        #[derive(Serialize, Deserialize, PartialEq, Eq)]
-        struct Binding {
-            identity: [u8; 32],
-            anchor: Anchor,
-        }
-        let binding = Binding {
+        let binding = StateIdentity {
             identity,
             anchor: anchor.clone(),
         };
         let path = directory.join("identity.json");
-        match journal::read::<Binding>(&path).map_err(|_| Error::Storage)? {
+        match journal::read::<StateIdentity>(&path).map_err(|_| Error::Storage)? {
             Some(prior) if prior != binding => return Err(Error::Storage),
             Some(_) => {}
             None => journal::atomic_write(&path, &binding).map_err(|_| Error::Storage)?,
@@ -224,9 +290,16 @@ impl SnapshotArchive {
             .directory
             .parent()
             .ok_or(worker::Error::Storage)?;
-        let view =
-            crate::universe_runtime::reconcile_committed(directory, canonical, initial_anchor)
-                .map_err(|_| worker::Error::Storage)?;
+        let view = crate::universe_runtime::reconcile_committed_checked(
+            directory,
+            canonical,
+            initial_anchor,
+            |view, value| {
+                self.validate_for_anchor(&view.anchor, value)
+                    .map_err(|_| crate::universe_runtime::Error::Storage)
+            },
+        )
+        .map_err(|_| worker::Error::Storage)?;
         let resumed = self
             .history
             .latest_for_anchor(&view.anchor)
@@ -272,39 +345,46 @@ impl SnapshotArchive {
         anchor: &Anchor,
         value: &Observation,
     ) -> Result<(), worker::Error> {
-        if value.timestamp_us % 1_000_000 != 0 {
-            return Err(worker::Error::Snapshot);
-        }
-        Benchmark::new(anchor.clone(), MemoryHistory, Some(value.clone()))
-            .map_err(|_| worker::Error::Snapshot)?;
-        if let Some(signers) = self
+        let signers = self
             .trusted_signers
             .read()
-            .map_err(|_| worker::Error::Storage)?
-            .as_ref()
-        {
-            let batch = pyth::verify_payload(
-                &value.signed_payload,
-                signers,
-                value.timestamp_us / 1_000_000,
-                self.max_feed_age_us,
-            )
-            .map_err(|_| worker::Error::Snapshot)?;
-            if batch.prices.len() != anchor.assets.len() {
-                return Err(worker::Error::Snapshot);
-            }
-            let mut calculator = Benchmark::new(anchor.clone(), MemoryHistory, None)
-                .map_err(|_| worker::Error::Snapshot)?;
-            if calculator
-                .observe(&batch, |_| Ok(()))
-                .map_err(|_| worker::Error::Snapshot)?
-                != *value
-            {
-                return Err(worker::Error::Snapshot);
-            }
-        }
-        Ok(())
+            .map_err(|_| worker::Error::Storage)?;
+        validate_observation(anchor, value, signers.as_deref(), self.max_feed_age_us)
     }
+}
+fn validate_observation(
+    anchor: &Anchor,
+    value: &Observation,
+    signers: Option<&[pyth::TrustedSigner]>,
+    max_feed_age_us: u64,
+) -> Result<(), worker::Error> {
+    if value.timestamp_us % 1_000_000 != 0 {
+        return Err(worker::Error::Snapshot);
+    }
+    Benchmark::new(anchor.clone(), MemoryHistory, Some(value.clone()))
+        .map_err(|_| worker::Error::Snapshot)?;
+    if let Some(signers) = signers {
+        let batch = pyth::verify_payload(
+            &value.signed_payload,
+            signers,
+            value.timestamp_us / 1_000_000,
+            max_feed_age_us,
+        )
+        .map_err(|_| worker::Error::Snapshot)?;
+        if batch.prices.len() != anchor.assets.len() {
+            return Err(worker::Error::Snapshot);
+        }
+        let mut calculator = Benchmark::new(anchor.clone(), MemoryHistory, None)
+            .map_err(|_| worker::Error::Snapshot)?;
+        if calculator
+            .observe(&batch, |_| Ok(()))
+            .map_err(|_| worker::Error::Snapshot)?
+            != *value
+        {
+            return Err(worker::Error::Snapshot);
+        }
+    }
+    Ok(())
 }
 impl Snapshots for SnapshotArchive {
     fn selection_time_ms(&self, _: u64) -> Result<u64, worker::Error> {
@@ -371,6 +451,16 @@ fn secret(name: &str) -> Result<String, Error> {
         .ok()
         .filter(|value| !value.is_empty())
         .ok_or(Error::Configuration)
+}
+fn refresh_inclusion(shared: &crate::inclusion_execution::Shared) -> Result<bool, Error> {
+    match shared.lock().map_err(|_| Error::Storage)?.refresh_file() {
+        Ok(changed) => Ok(changed),
+        Err(worker::Error::Storage) => Err(Error::Storage),
+        Err(_) => {
+            eprintln!("Inclusion approval rejected; current universe remains active");
+            Ok(false)
+        }
+    }
 }
 async fn stopped(stop: &mut watch::Receiver<bool>) {
     while !*stop.borrow() {
@@ -668,6 +758,9 @@ pub async fn run(path: &Path) -> Result<(), Error> {
         crate::rpc::with_trigger("startup", reader.read_with_discovery(&mut boot_discovery))
             .await
             .map_err(|_| Error::Network)?;
+    let trusted_signers = crate::rpc::with_trigger("startup", pyth::read_trusted_signers(&rpc))
+        .await
+        .map_err(|_| Error::Feed)?;
     let dynamic = if boot_state.basic.pool.schema_version == 5 {
         let universe = cox::read_dynamic_manifest(&boot_state.basic.methodology)
             .map_err(|_| Error::Configuration)?;
@@ -699,10 +792,19 @@ pub async fn run(path: &Path) -> Result<(), Error> {
             )
             .map_err(|_| Error::Configuration)?;
         }
-        let view = crate::universe_runtime::reconcile_committed(
+        let view = crate::universe_runtime::reconcile_committed_checked(
             &config.state_directory,
             &boot_state.basic.methodology.canonical,
             &config.anchor,
+            |view, value| {
+                validate_observation(
+                    &view.anchor,
+                    value,
+                    Some(&trusted_signers),
+                    config.max_feed_age_ms * 1_000,
+                )
+                .map_err(|_| crate::universe_runtime::Error::Storage)
+            },
         )
         .map_err(|_| Error::Storage)?;
         if view.source_methodology != universe.source_methodology {
@@ -744,15 +846,8 @@ pub async fn run(path: &Path) -> Result<(), Error> {
     ]);
     let (wakes, mut wake) = watch::channel(WakeHint::default());
     let inclusion = crate::inclusion_execution::Controller::open(&config.state_directory)
-        .map_err(|_| Error::Configuration)?;
-    if inclusion
-        .lock()
-        .map_err(|_| Error::Storage)?
-        .refresh_file()
-        .is_err()
-    {
-        eprintln!("Inclusion approval rejected; current universe remains active");
-    }
+        .map_err(|_| Error::Storage)?;
+    refresh_inclusion(&inclusion)?;
     let chain = Executor::new(
         reader,
         signer,
@@ -805,11 +900,7 @@ pub async fn run(path: &Path) -> Result<(), Error> {
     *archive
         .trusted_signers
         .write()
-        .map_err(|_| Error::Storage)? = Some(
-        crate::rpc::with_trigger("startup", pyth::read_trusted_signers(&rpc))
-            .await
-            .map_err(|_| Error::Feed)?,
-    );
+        .map_err(|_| Error::Storage)? = Some(trusted_signers);
     if let Some(value) = archive.latest.read().map_err(|_| Error::Storage)?.as_ref() {
         archive.validate(value).map_err(|_| Error::Storage)?;
     }
@@ -907,10 +998,11 @@ pub async fn run(path: &Path) -> Result<(), Error> {
                     _=heartbeat.tick()=>{
                         changes.heartbeat().map_err(|_|Error::Storage)?;
                         if inclusion_capture.as_ref().is_some_and(|task|task.is_finished()) {
-                            if let Some(task)=inclusion_capture.take(){if !matches!(task.await,Ok(Ok(()))){eprintln!("Inclusion capture sidecar stopped; exact-boundary evidence remains required");}inclusion.lock().map_err(|_|Error::Storage)?.capture_stopped();}
+                            if let Some(task)=inclusion_capture.take(){match task.await{Ok(Ok(()))=>{},Ok(Err(worker::Error::Storage))|Err(_)=>return Err(Error::Storage),Ok(Err(_))=>eprintln!("Inclusion capture sidecar stopped; exact-boundary evidence remains required")};inclusion.lock().map_err(|_|Error::Storage)?.capture_stopped();}
                         }
                         let now=now_ms()?;
-                        let (changed,request)={let mut control=inclusion.lock().map_err(|_|Error::Storage)?;let changed=match control.refresh_file(){Ok(changed)=>changed,Err(_)=>{eprintln!("Inclusion approval rejected; current universe remains active");false}}|control.expire_if_due(now).map_err(|_|Error::Storage)?|control.take_dirty();let request=if inclusion_capture.is_none(){control.capture_request(now)}else{None};(changed,request)};
+                        let approval_changed=refresh_inclusion(&inclusion)?;
+                        let (changed,request)={let mut control=inclusion.lock().map_err(|_|Error::Storage)?;let changed=approval_changed|control.expire_if_due(now).map_err(|_|Error::Storage)?|control.take_dirty();let request=if inclusion_capture.is_none(){control.capture_request(now)}else{None};(changed,request)};
                         if let Some(request)=request {inclusion_capture=Some(tokio::spawn(crate::inclusion_execution::capture(inclusion.clone(),request,pyth_key.clone(),archive.clone(),stop.clone())));}
                         if changed {schedule.deadline_ms=now;schedule.trigger=Some("inclusion-event");break;}
                     },
@@ -975,6 +1067,10 @@ async fn shutdown() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    mod universe_fixture {
+        use crate as relative_publisher;
+        include!("../tests/support/universe.rs");
+    }
     use crate::{
         benchmark::{Asset, History},
         scheduler::Pool,
@@ -1052,6 +1148,172 @@ mod tests {
             signed_payload: vec![1],
         }
     }
+    #[tokio::test]
+    async fn live_ingestion_consumers_and_feed_watch_switch_together_and_resume_after_adoption() {
+        use crate::universe_runtime;
+        let path = std::fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(directory().file_name().unwrap());
+        let (first, next) = universe_fixture::receipts_to(31);
+        let initial = first.validate().unwrap();
+        let active = next.validate().unwrap();
+        first.persist(&path).unwrap();
+        universe_runtime::reconcile_committed(&path, &first.canonical, &initial.anchor).unwrap();
+        let mut archive = SnapshotArchive::new(
+            initial.anchor.clone(),
+            FileHistory {
+                directory: path.join("prices"),
+            },
+            5_000,
+        )
+        .unwrap();
+        let (feed_updates, mut feeds) = watch::channel(
+            initial
+                .anchor
+                .assets
+                .iter()
+                .map(|asset| asset.feed_id)
+                .collect::<Vec<_>>(),
+        );
+        archive.feed_updates = Some(feed_updates);
+        let first_time = now_ms().unwrap() / 1_000 * 1_000_000 - 2_000_000;
+        let (old_payload, mut signers) = universe_fixture::signed(first_time, 30, 100);
+        signers[0].expires_at_seconds = i64::MAX;
+        *archive.trusted_signers.write().unwrap() = Some(signers.clone());
+        let consumer = archive.clone();
+        let rpc = Arc::new(Rpc::direct_devnet("unused-test-key").unwrap());
+        let (prices, inputs) = mpsc::channel(4);
+        let (_notifications, notifications) = watch::channel(WakeHint::default());
+        let (stop, stopped) = watch::channel(false);
+        let task = tokio::spawn(benchmark_task(
+            rpc.clone(),
+            archive.clone(),
+            60_000,
+            inputs,
+            notifications,
+            path.join("usage.json"),
+            stopped,
+        ));
+        prices.send(old_payload).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if archive
+                    .latest
+                    .read()
+                    .unwrap()
+                    .as_ref()
+                    .is_some_and(|value| value.timestamp_us == first_time)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        journal::atomic_write(
+            &path.join("inclusion-approved.json"),
+            &serde_json::json!({"invalid":"candidate"}),
+        )
+        .unwrap();
+        let inclusion = crate::inclusion_execution::Controller::open(&path).unwrap();
+        assert!(!refresh_inclusion(&inclusion).unwrap());
+        assert!(!task.is_finished());
+        next.persist(&path).unwrap();
+        let staged_time = first_time + 1_000_000;
+        let (bytes, _) = universe_fixture::signed(staged_time, 31, 200);
+        let mut staged = next.captured_observation().unwrap();
+        staged.timestamp_us = staged_time;
+        staged.signed_payload = bytes;
+        archive
+            .history
+            .stage_observation(&active.anchor, &staged)
+            .unwrap();
+        assert_eq!(
+            consumer
+                .select(&[], None, first_time / 1_000)
+                .unwrap()
+                .unwrap()
+                .prices_e8
+                .len(),
+            30
+        );
+        assert!(!feeds.has_changed().unwrap());
+        let staged_path = archive
+            .history
+            .directory
+            .join(hex::encode(active.anchor.universe_digest))
+            .join((staged_time / 3_600_000_000).to_string())
+            .join(format!("{staged_time}.json"));
+        let mut invalid_signature = staged.clone();
+        invalid_signature.signed_payload[4] ^= 1;
+        journal::atomic_write(&staged_path, &invalid_signature).unwrap();
+        assert_eq!(
+            archive.adopt_committed(&next.canonical, &initial.anchor),
+            Err(worker::Error::Storage)
+        );
+        assert_eq!(
+            archive.history.active_anchor().unwrap(),
+            Some(initial.anchor.clone())
+        );
+        assert!(!feeds.has_changed().unwrap());
+        journal::atomic_write(&staged_path, &staged).unwrap();
+        assert_eq!(
+            archive
+                .adopt_committed(&next.canonical, &initial.anchor)
+                .unwrap(),
+            active
+        );
+        assert!(feeds.has_changed().unwrap());
+        assert_eq!(feeds.borrow_and_update().len(), 31);
+        assert_eq!(
+            consumer.select(&[], None, staged_time / 1_000).unwrap(),
+            Some(staged)
+        );
+        let next_time = first_time + 2_000_000;
+        let (new_payload, _) = universe_fixture::signed(next_time, 31, 210);
+        prices.send(new_payload).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if archive
+                    .latest
+                    .read()
+                    .unwrap()
+                    .as_ref()
+                    .is_some_and(|value| value.timestamp_us == next_time)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let selected = consumer
+            .select(&[], None, next_time / 1_000)
+            .unwrap()
+            .unwrap();
+        assert_eq!(selected.prices_e8, vec![210; 31]);
+        assert_eq!(selected.benchmark, 210 * cox_math::SCALE);
+        assert_eq!(rpc.usage().unwrap().physical_http_requests, 0);
+        assert!(archive
+            .adopt_committed(&first.canonical, &initial.anchor)
+            .is_err());
+        assert!(!feeds.has_changed().unwrap());
+        assert_eq!(
+            consumer.select(&[], None, next_time / 1_000).unwrap(),
+            Some(selected.clone())
+        );
+        stop.send(true).unwrap();
+        task.await.unwrap().unwrap();
+        let restarted =
+            SnapshotArchive::new(active.anchor, archive.history.clone(), 5_000).unwrap();
+        assert_eq!(
+            restarted.select(&[], None, next_time / 1_000).unwrap(),
+            Some(selected)
+        );
+        std::fs::remove_dir_all(path).unwrap();
+    }
     #[test]
     fn configuration_rejects_retired_pool_wrong_network_duplicate_mappings_and_unknown_fields() {
         let mut value = config(directory());
@@ -1101,6 +1363,37 @@ mod tests {
             .load(),
             Err(worker::Error::Storage)
         );
+        std::fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
+    fn read_only_identity_and_spool_bindings_reject_old_configuration_or_unbound_records() {
+        let path = directory();
+        let config = config(path.clone());
+        let locked = StateLock::acquire(&path, config.identity().unwrap(), &config.anchor).unwrap();
+        config.verify_state_identity().unwrap();
+        let spool = path.join("spool");
+        bind_spool(&config, &spool, "preview").unwrap();
+        journal::atomic_write(&spool.join("1.json"), &serde_json::json!({"pending":true})).unwrap();
+        bind_spool(&config, &spool, "preview").unwrap();
+        assert_eq!(
+            bind_spool(&config, &spool, "chain-changes"),
+            Err(Error::Storage)
+        );
+        let mut different = config.clone();
+        different.basic_pool_id = 3;
+        assert_eq!(different.verify_state_identity(), Err(Error::Storage));
+        assert_eq!(
+            bind_spool(&different, &spool, "preview"),
+            Err(Error::Storage)
+        );
+        let unbound = path.join("unbound");
+        journal::atomic_write(&unbound.join("1.json"), &serde_json::json!({"old":true})).unwrap();
+        assert_eq!(
+            bind_spool(&config, &unbound, "preview"),
+            Err(Error::Storage)
+        );
+        assert!(!unbound.join("identity.binding").exists());
+        drop(locked);
         std::fs::remove_dir_all(path).unwrap();
     }
     #[test]

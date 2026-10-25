@@ -198,17 +198,20 @@ fn ensure_journal_size(value: &Stored) -> Result<(), worker::Error> {
 }
 impl Controller {
     pub fn open(directory: &Path) -> Result<Shared, worker::Error> {
-        let stored: Option<Stored> =
-            journal::read(&directory.join("inclusion-execution.json")).map_err(err)?;
+        let stored: Option<Stored> = journal::read(&directory.join("inclusion-execution.json"))
+            .map_err(|_| worker::Error::Storage)?;
         if let Some(stored) = &stored {
-            stored.approved.validate()?;
+            stored
+                .approved
+                .validate()
+                .map_err(|_| worker::Error::Storage)?;
             if stored.schema != "relative.inclusion-execution/v1"
                 || stored.digest != stored.approved.digest()?
             {
                 return Err(worker::Error::Storage);
             }
             if let Some(prepared) = &stored.prepared {
-                inclusion_pipeline::validate(prepared).map_err(err)?;
+                inclusion_pipeline::validate(prepared).map_err(|_| worker::Error::Storage)?;
             }
         }
         Ok(Arc::new(Mutex::new(Self {
@@ -223,7 +226,7 @@ impl Controller {
         if let Some(stored) = &self.stored {
             ensure_journal_size(stored)?;
             journal::atomic_write(&self.directory.join("inclusion-execution.json"), stored)
-                .map_err(err)?;
+                .map_err(|_| worker::Error::Storage)?;
         }
         Ok(())
     }
@@ -233,11 +236,11 @@ impl Controller {
             return Ok(false);
         };
         if info.len() > journal::MAX_JOURNAL_BYTES {
-            return Err(worker::Error::Storage);
+            return Err(worker::Error::Snapshot);
         }
         let approved: Approved = journal::read(&path)
             .map_err(err)?
-            .ok_or(worker::Error::Storage)?;
+            .ok_or(worker::Error::Snapshot)?;
         let digest = approved.digest()?;
         if self
             .stored
@@ -249,7 +252,7 @@ impl Controller {
         if self.stored.as_ref().is_some_and(|stored| {
             !matches!(stored.phase, Phase::Complete | Phase::RescheduleRequired)
         }) {
-            return Err(worker::Error::Storage);
+            return Err(worker::Error::Snapshot);
         }
         approved.validate()?;
         let next = Stored {
@@ -262,11 +265,12 @@ impl Controller {
             phase: Phase::Waiting,
             reason: None,
         };
-        ensure_journal_size(&next)?;
+        ensure_journal_size(&next).map_err(|_| worker::Error::Snapshot)?;
+        journal::atomic_write(&self.directory.join("inclusion-execution.json"), &next)
+            .map_err(|_| worker::Error::Storage)?;
         self.stored = Some(next);
         self.capturing = false;
         self.approved_onchain = false;
-        self.persist()?;
         Ok(true)
     }
     fn active(&self) -> Option<&Stored> {
@@ -345,7 +349,7 @@ impl Controller {
             &self.directory.join("inclusion-preview-cutoff.json"),
             &cutoff,
         )
-        .map_err(err)
+        .map_err(|_| worker::Error::Storage)
     }
     fn reschedule(&mut self, reason: &str) -> Result<(), worker::Error> {
         if let Some(stored) = self.stored.as_mut() {
@@ -653,7 +657,7 @@ pub async fn plan(
         .join("universes")
         .join(format!("{}.json", hex::encode(next.digest)));
     let receipt_persisted = journal::read::<crate::universe_runtime::Receipt>(&receipt_path)
-        .map_err(err)?
+        .map_err(|_| worker::Error::Storage)?
         .as_ref()
         == Some(&prepared.receipt);
     let next_registry_version =
@@ -723,7 +727,13 @@ pub async fn plan(
     match result.status {
         Status::Transaction => Ok(Action::Instructions(result.instructions)),
         Status::PersistReceipt => {
-            prepared.receipt.persist(&directory).map_err(err)?;
+            prepared
+                .receipt
+                .persist(&directory)
+                .map_err(|error| match error {
+                    crate::universe_runtime::Error::Storage => worker::Error::Storage,
+                    _ => worker::Error::Snapshot,
+                })?;
             Ok(Action::Waiting)
         }
         Status::Complete => Ok(Action::Adopt),
@@ -784,7 +794,9 @@ pub async fn capture(
         let history = FileHistory {
             directory: directory.join("prices"),
         };
-        let resumed = history.latest_staged(&captured.next_anchor).map_err(err)?;
+        let resumed = history
+            .latest_staged(&captured.next_anchor)
+            .map_err(|_| worker::Error::Storage)?;
         Some(
             Benchmark::new(
                 captured.next_anchor.clone(),

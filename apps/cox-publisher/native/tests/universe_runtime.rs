@@ -287,6 +287,67 @@ fn running_snapshot_consumers_adopt_committed_universe_without_process_restart()
 }
 
 #[test]
+fn corrupted_staged_benchmark_cannot_replace_the_running_universe() {
+    use relative_publisher::{
+        journal::{self, FileHistory},
+        runtime::SnapshotArchive,
+        worker::Snapshots,
+    };
+    let (first, next) = receipts();
+    let initial = first.validate().unwrap();
+    let active = next.validate().unwrap();
+    let root = fs::canonicalize(std::env::temp_dir())
+        .unwrap()
+        .join(format!(
+            "relative-corrupt-adoption-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+    first.persist(&root).unwrap();
+    next.persist(&root).unwrap();
+    universe_runtime::reconcile_committed(&root, &first.canonical, &initial.anchor).unwrap();
+    let history = FileHistory {
+        directory: root.join("prices"),
+    };
+    let archive = SnapshotArchive::new(initial.anchor.clone(), history.clone(), 5_000).unwrap();
+    let old = archive
+        .select(&[], None, initial.anchor.timestamp_us / 1_000)
+        .unwrap();
+    let mut corrupted = next.captured_observation().unwrap();
+    history
+        .stage_observation(&active.anchor, &corrupted)
+        .unwrap();
+    corrupted.benchmark += 1;
+    journal::atomic_write(
+        &history
+            .directory
+            .join(hex::encode(active.anchor.universe_digest))
+            .join((corrupted.timestamp_us / 3_600_000_000).to_string())
+            .join(format!("{}.json", corrupted.timestamp_us)),
+        &corrupted,
+    )
+    .unwrap();
+    assert_eq!(
+        archive.adopt_committed(&next.canonical, &initial.anchor),
+        Err(relative_publisher::worker::Error::Storage)
+    );
+    assert_eq!(
+        history.active_anchor().unwrap(),
+        Some(initial.anchor.clone())
+    );
+    assert_eq!(
+        archive
+            .select(&[], None, initial.anchor.timestamp_us / 1_000)
+            .unwrap(),
+        old
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn fresh_generation_initializes_31_assets_at_100_without_adaptive_root_or_pool_two() {
     use relative_publisher::universe_runtime::{Evidence, FreshGenesisRequest};
     let (_, next) = receipts();

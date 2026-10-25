@@ -52,9 +52,14 @@ def replace_service_configuration(source, destination, uid, gid):
             and not destination.parent.is_symlink(), "Unsafe configuration destination")
     payload = source.read_bytes()
     config = json.loads(payload)
-    expected = {"native.json": "relative.publisher/v1", "native-backup.json": "relative.backup/v1"}
-    require(destination.name in expected and config.get("schema") == expected[destination.name],
+    expected = {"native.json": {"relative.publisher/v1"},
+                "native-backup.json": {"relative.backup/v1", "relative.backup/v2"}}
+    require(destination.name in expected and config.get("schema") in expected[destination.name],
             "Configuration name or schema mismatch")
+    if config.get("schema") == "relative.backup/v2":
+        runtime_path = config.get("runtime_config_path")
+        require(isinstance(runtime_path, str) and Path(runtime_path).is_absolute(),
+                "Generation-bound backup requires an absolute runtime configuration path")
     fd, temporary = tempfile.mkstemp(prefix="." + destination.name + ".", dir=destination.parent)
     try:
         with os.fdopen(fd, "wb") as output:

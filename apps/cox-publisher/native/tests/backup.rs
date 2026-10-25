@@ -5,6 +5,8 @@ use relative_publisher::backup::{
 use sha2::{Digest, Sha256};
 use solana_address::Address;
 use std::{collections::BTreeMap, fs, path::PathBuf, sync::Mutex};
+#[path = "support/runtime.rs"]
+mod runtime_fixture;
 fn digest(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
@@ -50,6 +52,7 @@ impl Fixture {
         Self {
             config: Config {
                 schema: "relative.backup/v1".into(),
+                runtime_config_path: None,
                 bucket: "fixture-bucket".into(),
                 prefix: "basic-2/native".into(),
                 publication_history_prefix: None,
@@ -65,6 +68,24 @@ impl Fixture {
             },
             root,
         }
+    }
+    fn bind_runtime(&mut self, pool_id: u64) -> relative_publisher::runtime::Config {
+        let runtime = runtime_fixture::config(self.config.state_directory.clone(), pool_id);
+        runtime.validate().unwrap();
+        let path = self.root.join("runtime.json");
+        relative_publisher::journal::atomic_write(&path, &runtime).unwrap();
+        relative_publisher::journal::atomic_write(
+            &runtime.state_directory.join("identity.json"),
+            &serde_json::json!({"identity": runtime.identity().unwrap(), "anchor": runtime.anchor}),
+        )
+        .unwrap();
+        self.config.schema = "relative.backup/v2".into();
+        self.config.runtime_config_path = Some(path);
+        self.config.prefix = format!("pool-{pool_id}/native");
+        self.config.publication_history_prefix = Some(format!("pool-{pool_id}/history"));
+        self.config.publication_identity = Some(runtime.publication_identity().unwrap());
+        fs::remove_file(runtime.state_directory.join("publications/0.json")).unwrap();
+        runtime
     }
 }
 impl Drop for Fixture {
@@ -119,6 +140,58 @@ impl Transport for Memory {
             body: value.body.clone(),
         })
     }
+}
+#[test]
+fn bound_backup_requires_matching_runtime_identity_and_canonical_pool_namespaces() {
+    let mut fixture = Fixture::new();
+    let runtime = fixture.bind_runtime(7);
+    backup::capture(&fixture.config).unwrap();
+    let mut wrong = fixture.config.clone();
+    wrong.prefix = "basic-2/native".into();
+    assert_eq!(wrong.validate(), Err(Error::Configuration));
+    wrong = fixture.config.clone();
+    wrong.publication_history_prefix = Some("pool-2/history".into());
+    assert_eq!(wrong.validate(), Err(Error::Configuration));
+    fs::write(
+        runtime.state_directory.join("identity.json"),
+        b"old-generation",
+    )
+    .unwrap();
+    assert_eq!(backup::capture(&fixture.config), Err(Error::Conflict));
+}
+#[tokio::test]
+async fn bound_restore_rejects_another_generation_before_creating_destination() {
+    let mut fixture = Fixture::new();
+    let mut runtime = fixture.bind_runtime(7);
+    let transport = Memory::default();
+    let report = backup::backup(&fixture.config, &transport).await.unwrap();
+    let destination = fixture.root.join("same-generation");
+    backup::restore(
+        &fixture.config,
+        &transport,
+        &report.manifest_sha256,
+        &destination,
+    )
+    .await
+    .unwrap();
+    runtime.anchor.universe_digest = [9; 32];
+    relative_publisher::journal::atomic_write(
+        fixture.config.runtime_config_path.as_ref().unwrap(),
+        &runtime,
+    )
+    .unwrap();
+    let refused = fixture.root.join("wrong-generation");
+    assert_eq!(
+        backup::restore(
+            &fixture.config,
+            &transport,
+            &report.manifest_sha256,
+            &refused
+        )
+        .await,
+        Err(Error::Conflict)
+    );
+    assert!(!refused.exists());
 }
 #[test]
 fn crc32c_matches_castagnoli_check_vector() {
