@@ -59,7 +59,7 @@ function configBytes(name: string): { address: string; owner: PublicKey; data: B
   return { address: account.address, owner: new PublicKey(account.owner), data: Buffer.from(account.dataHex, "hex") };
 }
 
-async function load(name: string, configFrom?: string) {
+async function load(name: string, configFrom?: string, named = 256, onUnnamedAsset?: (id: number) => void) {
   const fixture = read(name);
   const connection = new FixtureConnection();
   for (const account of fixture.accounts) connection.set(account.address, new PublicKey(account.owner), Buffer.from(account.dataHex, "hex"));
@@ -80,8 +80,8 @@ async function load(name: string, configFrom?: string) {
       connection.set(round.testVault.toBase58(), TOKEN_PROGRAM, token(configAccount.testMint ?? configAccount.mint, BigInt(round.state.ledger.pendingGross.toString())));
     }
   }
-  const source = await EpochSource.open({ connection: connection as unknown as Connection, program, config, basic, now: () => fixture.unixTimestamp });
-  source.nameAssets(new Map(Array.from({ length: 256 }, (_, id) => [id, `A${id}`] as const)));
+  const source = await EpochSource.open({ connection: connection as unknown as Connection, program, config, basic, now: () => fixture.unixTimestamp, onUnnamedAsset });
+  source.nameAssets(new Map(Array.from({ length: named }, (_, id) => [id, `A${id}`] as const)));
   const opensAt = (key: string) => Number(rounds.get(key)!.opensAt.toString());
   return { fixture, connection, source, rounds, opensAt, expected: fixture.expected };
 }
@@ -182,5 +182,29 @@ describe("Epoch generation fixtures", () => {
     const basket = epoch.universe.slice(0, 30).map((asset) => asset.assetId);
     expect(rounds.get("epoch")!.state).not.toBeNull();
     await expect(source.entry({ owner: WALLET, opensAt: opensAt("epoch"), basket, backedAsset: basket[0]!, grossStake: "1000000" })).rejects.toBeInstanceOf(TradingClosedError);
+  });
+  it("unnamed coin: an Epoch asset the methodology does not name reads as #id and can be entered", async () => {
+    const warned: number[] = [];
+    const { source, opensAt } = await load("successor-32", undefined, 31, (id) => warned.push(id));
+    const epoch = (await source.epoch(opensAt("epoch")))!;
+    expect(epoch.universe.map((asset) => asset.assetId).slice(-1)).toEqual(["#31"]);
+    expect((await source.epoch(opensAt("epoch")))!.registry?.originBenchmarks.at(-1)?.assetId).toBe("#31");
+    expect(warned).toEqual([31]);
+    expect(epoch.entriesOpen).toBe(true);
+    const basket = ["#31", ...epoch.universe.slice(0, 29).map((asset) => asset.assetId)];
+    const built = await source.entry({ owner: WALLET, opensAt: opensAt("epoch"), basket, backedAsset: "#31", grossStake: "1000000" });
+    expect(built.operation).toBe("epoch-entry");
+  });
+
+  it("round of more than 30 coins: an entry takes any 30 of them and refuses other sizes", async () => {
+    const { source, opensAt } = await load("successor-32");
+    const epoch = (await source.epoch(opensAt("epoch")))!;
+    expect(epoch.universe.length).toBeGreaterThan(30);
+    const ids = epoch.universe.map((asset) => asset.assetId);
+    const basket = ids.slice(2, 32);
+    const built = await source.entry({ owner: WALLET, opensAt: opensAt("epoch"), basket, backedAsset: ids[31]!, grossStake: "1000000" });
+    expect(built.operation).toBe("epoch-entry");
+    await expect(source.entry({ owner: WALLET, opensAt: opensAt("epoch"), basket: ids.slice(0, 31), backedAsset: ids[0]!, grossStake: "1000000" })).rejects.toThrow("basket must list 30 assets");
+    await expect(source.entry({ owner: WALLET, opensAt: opensAt("epoch"), basket: [...ids.slice(0, 29), ids[0]!], backedAsset: ids[0]!, grossStake: "1000000" })).rejects.toThrow("must not repeat");
   });
 });

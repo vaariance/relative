@@ -122,6 +122,7 @@ export interface EpochSourceOptions {
   basic?: Program | null;
   assetIds?: ReadonlyMap<number, string>;
   now?: () => number;
+  onUnnamedAsset?: (id: number) => void;
 }
 
 const text = (value: Integer): string => value.toString();
@@ -161,6 +162,7 @@ export class EpochSource {
   private readonly cache = new Map<string, Promise<unknown>>();
   private caching = false;
   private assetIds: ReadonlyMap<number, string>;
+  private readonly unnamed = new Set<number>();
 
   private constructor(
     private readonly options: EpochSourceOptions,
@@ -174,6 +176,7 @@ export class EpochSource {
 
   nameAssets(assetIds: ReadonlyMap<number, string>): void {
     this.assetIds = assetIds;
+    this.unnamed.clear();
     this.cache.clear();
   }
 
@@ -236,8 +239,12 @@ export class EpochSource {
 
   private ticker(id: number): string {
     const value = this.assetIds.get(id);
-    if (!value) throw new Error("EpochAssetUnknown");
-    return value;
+    if (value) return value;
+    if (!this.unnamed.has(id)) {
+      this.unnamed.add(id);
+      this.options.onUnnamedAsset?.(id);
+    }
+    return `#${id}`;
   }
 
   cacheUntilInvalidated(): void {

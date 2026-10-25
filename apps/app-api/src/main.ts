@@ -137,7 +137,7 @@ async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transaction
   const epochConfig = process.env.COX_EPOCH_CONFIG;
   if (epochConfig !== undefined && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(epochConfig)) throw new Error(`invalid COX_EPOCH_CONFIG: ${epochConfig}`);
   const epochs = epochConfig
-    ? await EpochSource.open({ connection, program: loadProgram(connection, process.env.COX_EPOCH_IDL_PATH ?? join(here, "..", "..", "..", "packages", "cox-epoch", "idl", "epoch.json")), config: new PublicKey(epochConfig), basic: program })
+    ? await EpochSource.open({ connection, program: loadProgram(connection, process.env.COX_EPOCH_IDL_PATH ?? join(here, "..", "..", "..", "packages", "cox-epoch", "idl", "epoch.json")), config: new PublicKey(epochConfig), basic: program, onUnnamedAsset: (id) => console.warn(`cox epoch asset ${id} has no name in the pool methodology`) })
     : null;
   const poolAddress = addresses(program.programId).pool(poolId);
   const archive = source ? new PublicationArchive(source, program, poolAddress, genesis) : null;
