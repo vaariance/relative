@@ -2073,3 +2073,17 @@ another agent needs to know.
 - **Rules for agents:** These are isolated-validator and production-component results using disposable keys and controlled signed feeds. They do not certify live Pyth/gRPC, Cloud KMS/IAM, GCS transport, subsecond latency or four hours of real elapsed operation. Test-only loopback, genesis and clock scopes do not relax production network/authentication checks. No live mutation, commit or deployment occurred. Preserve uncommitted Alchemy records.
 - **Open:** Scoped commit approval, final old-account inventory, reviewed release build/cutover and future reset capture remain. Pause A is passed; Pause B and live section-5 acceptance remain required. An intentionally missing-close predecessor remains unsettled only in the disposable test ledger.
 - **Refs:** `apps/cox-publisher/README.md`, `packages/cox-methodology/README.md`; private `.cox/local-rehearsal/completion-verification.json`, `epoch-post-inclusion-verification.json`, `archive-post-inclusion-report.json`.
+
+### 2026-10-25 · Joel (Claude Code) · Archived legacy market read correctly; unnamed Epoch coins
+
+- **Area:** `apps/app-api` (`src/cox/live-source.ts`, `src/cox/epoch-source.ts`, `src/main.ts`); Cloud Run `cox-app-api-live`, dev VM.
+- **What:** Follows Peter's 2026-10-25 email that pool 2 and Epoch config 2 are Archived on chain.
+  - **Startup bug:** archiving gave pool 2 a lifecycle marker but no generation id or asset registry. The API refused to start on that (`PoolGenerationMissing`), and the VM API was down for a few minutes after a redeploy. A pool with a lifecycle but neither a generation nor a registry is now read as a legacy pool (`generation: null`, history from publication 0); one with only one of the two is still refused (`199a047`).
+  - **Status:** both APIs report gate and lifecycle `archived`, trading closed, and both Epoch rounds `entriesOpen: false`. The chain-change feed is `unhealthy` because the publisher is stopped, so this came from the start-up read and the 20-minute safety read; no faster polling was added.
+  - **Unnamed Epoch coins:** an Epoch asset id the methodology does not name is returned as `#<id>` with a one-time warning, instead of failing every Epoch route (Godwin's request in his 2026-10-25 Epoch entry). Tests cover entering with an unnamed coin and choosing 30 of a 32-coin round (`9a91900`).
+  - **Tests:** 147 pass.
+  - **Deployed:** Cloud Run `cox-app-api-live-00031-s9d` (image `cox-app-api:199a047`, settings unchanged) and the VM at `199a047`.
+  - **Verified on both:** publications 0 to 61 without gaps, vault covered, previews `stale`.
+- **Rules for agents:** Do not treat a lifecycle marker as proof of a fresh generation; read the generation id and registry.
+- **Open:** Pause B: pool 3 and Epoch config 3 identities from Peter, then their `pool-3/` prefixes.
+- **Refs:** commits `9a91900`, `199a047`.
