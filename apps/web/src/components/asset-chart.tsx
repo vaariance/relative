@@ -75,7 +75,7 @@ function since(cutoff: number, end: number): string {
 export function AssetChart({ series, note, height }: { series: Series[]; note?: string; height?: number }) {
   const [selected, setSelected] = useState(series[0].id);
   const [range, setRange] = useState(240);
-  const [candles, setCandles] = useState(false);
+  const [candles, setCandles] = useState(true);
   const [chosen, setChosen] = useState<number | null>(null);
   const { history } = useLive();
   const { sequence } = useAccount();
@@ -91,7 +91,6 @@ export function AssetChart({ series, note, height }: { series: Series[]; note?: 
   const recent = estimated.filter((point) => point.cutoff > end - range * 60);
   const live = preferEstimates(recent, settled);
   const shown = live ? recent : settled;
-  const settledMarks = live ? settled.filter((point) => point.cutoff >= recent[0].cutoff).map((point) => ({ cutoff: point.cutoff, side: "settled" as const, label: `Settled on chain ${new Date(point.cutoff * 1000).toISOString().slice(11, 19)} UTC` })) : [];
   const choices = live && realtime ? [...seconds, ...intervals] : intervals;
   const wanted = candles ? preset.interval : live && realtime ? preset.interval / 5 : Math.max(1, Math.floor(preset.interval / 5));
   const fitting = [...choices].reverse().find((item) => item.minutes <= wanted && barsOf(shown, item.minutes).length >= MIN_BARS);
@@ -136,7 +135,7 @@ export function AssetChart({ series, note, height }: { series: Series[]; note?: 
       </div>
       <div className="px-1 pb-1 pt-2">
         {bars.length > 1 ? (
-          <TradeChart bars={bars} candles={candles} digits={current.digits} label={current.label} lines={lines} marks={[...(current.marks ?? []), ...settledMarks]} compare={current.compare} height={height} />
+          <TradeChart bars={bars} candles={candles} digits={current.digits} label={current.label} lines={lines} marks={current.marks ?? []} compare={current.compare} height={height} />
         ) : (
           <p className="flex items-center justify-center px-6 text-center text-sm text-muted" style={{ height: height ?? 420 }}>
             {shown.length > 1 ? "There is not enough history yet for bars this wide. Choose a shorter interval." : current.live ? "The live line starts in a few seconds." : "No settled values in this period yet. Choose a longer range."}
@@ -145,7 +144,7 @@ export function AssetChart({ series, note, height }: { series: Series[]; note?: 
       </div>
       {(note || short || live) && (
         <p className="border-t border-line px-4 py-2 text-xs text-muted">
-          {live && `Estimates from ${since(recent[0].cutoff, end)}, ${realtime ? "updated every second" : "the current minute moves every second and finished minutes stay fixed"}. ${settledMarks.length > 0 ? "Dots are on-chain settlements. " : ""}`}
+          {live && `Estimates from ${since(recent[0].cutoff, end)}, ${realtime ? "updated every second" : "the current minute moves every second and finished minutes stay fixed"}. `}
           {short && (live ? `Estimates cover ${span(held)} of this range. ` : held >= 23 * 3600 ? "Showing the last 24 hours, the most this page loads. " : `Showing ${span(held)} of history so far. `)}
           {note}
         </p>
