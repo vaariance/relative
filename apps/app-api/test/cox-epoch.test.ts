@@ -399,4 +399,18 @@ describe("permissionless Epoch round preparation", () => {
     await t.encodeEpoch(t.sealed, OPEN, t.state, { emptyFinalized: true });
     await expect(source.finalizeEmpty({ owner: payer.toBase58(), opensAt: OPEN })).rejects.toBeInstanceOf(NothingToDoError);
   });
+  it("builds a permissionless void only after the closing window passes", async () => {
+    const t = await setup(OPEN + 14_400 + 86_400);
+    await t.encodeEpoch(t.sealed, OPEN, t.state);
+    const source = await EpochSource.open({ connection: t.connection as unknown as Connection, program: t.program, config, now: () => t.now });
+    const payer = Keypair.generate().publicKey;
+    await expect(source.voidRound({ owner: payer.toBase58(), opensAt: OPEN })).rejects.toThrow("can still be closed");
+    t.now = OPEN + 14_400 + 86_401;
+    const built = await source.voidRound({ owner: payer.toBase58(), opensAt: OPEN });
+    const tx = VersionedTransaction.deserialize(Buffer.from(built.transaction, "base64"));
+    expect(Buffer.from(tx.message.compiledInstructions[0]!.data).subarray(0, 8).equals(discriminator("global", "void_epoch"))).toBe(true);
+    expect(built.operation).toBe("epoch-void");
+    await t.encodeEpoch(t.sealed, OPEN, { ...t.state, phase: { voided: {} } });
+    await expect(source.voidRound({ owner: payer.toBase58(), opensAt: OPEN })).rejects.toBeInstanceOf(NothingToDoError);
+  });
 });

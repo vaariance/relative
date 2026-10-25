@@ -20,6 +20,7 @@ import type {
   EpochLot,
   EpochOverview,
   EpochFinalizeEmptyInput,
+  EpochVoidInput,
   EpochPreparation,
   EpochPrepareInput,
   EpochRefundInput,
@@ -144,6 +145,7 @@ export function createCoxApiClient(options: CoxApiClientOptions) {
     buildEpochRefund: (input: EpochRefundInput) => post<UnsignedTransaction>("transactions/epoch-refund", input),
     buildEpochPrepare: (input: EpochPrepareInput) => post<EpochPreparation>("transactions/epoch-prepare", input),
     buildEpochFinalizeEmpty: (input: EpochFinalizeEmptyInput) => post<UnsignedTransaction>("transactions/epoch-finalize-empty", input),
+    buildEpochVoid: (input: EpochVoidInput) => post<UnsignedTransaction>("transactions/epoch-void", input),
     preview: () => get<Preview>("preview"),
     previewHistory: (from: number, to: number, step: 1 | 60 | 300 | 3600) => get<PreviewHistory>(`preview/history?from=${from}&to=${to}&step=${step}`),
     previewPortfolio: (owner: string) => {

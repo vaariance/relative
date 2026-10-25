@@ -8,6 +8,7 @@ import {
   type EpochConfiguration,
   type EpochEntryInput,
   type EpochFinalizeEmptyInput,
+  type EpochVoidInput,
   type EpochPreparation,
   type EpochPrepareInput,
   type EpochLedger,
@@ -543,6 +544,18 @@ export class EpochSource {
       key = versions.assetRegistryVersion(this.account.assetRegistry, Uint8Array.from(version.predecessor));
     }
     throw new TradingClosedError("no registry version covers the current round");
+  }
+
+  async voidRound(input: EpochVoidInput): Promise<UnsignedTransaction> {
+    const payer = owner(input.owner);
+    const selection = this.selection(input.opensAt);
+    const { address, account } = await this.state(selection);
+    const state = account.state;
+    if (!state) throw new TransactionInputError("this Epoch was never sealed");
+    if (variant(state.phase, PHASES).name === "voided") throw new NothingToDoError("this Epoch is already voided");
+    if (variant(state.phase, PHASES).name !== "open" || state.closingSnapshot) throw new TransactionInputError("this Epoch is closing or closed");
+    if (this.now() <= input.opensAt + EPOCH_SECONDS + CLOSING_GRACE_SECONDS) throw new TransactionInputError("this Epoch can still be closed");
+    return unsignedTransaction(this.options.connection, { operation: "epoch-void", owner: payer, instructions: [this.instructions.voidEpoch(selection)], details: { requestId: address.toBase58() } });
   }
 
   async finalizeEmpty(input: EpochFinalizeEmptyInput): Promise<UnsignedTransaction> {

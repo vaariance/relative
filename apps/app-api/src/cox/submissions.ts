@@ -32,6 +32,7 @@ const EPOCH_INSTRUCTIONS: readonly { operation: TransactionOperation; name: stri
   { operation: "epoch-prepare", name: "copy_registry_assets" },
   { operation: "epoch-prepare", name: "seal_current_epoch" },
   { operation: "epoch-finalize-empty", name: "finalize_empty" },
+  { operation: "epoch-void", name: "void_epoch" },
 ];
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 const SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
