@@ -2034,3 +2034,11 @@ another agent needs to know.
 - **Rules for agents:** Pause A is cleared. This does not bypass the remaining local running-services/scheduled-inclusion rehearsal, final inventory, committed-source release, future reset boundary or Pause B. Peter withheld the local-fix commits until this re-check; approval is still required before any commit/push. No live mutation, commit or deployment occurred during verification. Preserve the uncommitted Alchemy entry.
 - **Open:** Fresh actual generation selection and prepared transactions remain Pause B work. Historical API instances retain different observation/finality metadata and optional flow detail; do not equate those fields with the matching immutable publication commitments.
 - **Refs:** Joel commits `0476586`, `5f1725e`, `6d72ce9`; private `.cox/pause-a-recheck-6d72ce9/verification.json`, `source-verification.json`, `chain-comparison.json`.
+
+### 2026-10-25 · Peter (Codex) · Versioned fresh inclusion class reservation
+
+- **Area:** `packages/cox-methodology/rust`, native inclusion validator and tests.
+- **What:** Local fresh-generation inclusion exposed the legacy unconditional class-30 reservation. Transition request v1 retains CRYPTO class 30; explicit v2 reserves CRYPTO class 0 and permits underlying class 30. Native successor validation binds the request version to the canonical predecessor schema. Existing asset bindings and origins remain immutable; the legacy commitment digest is pinned unchanged.
+- **Verification:** Methodology 26 tests and native inclusion checks pass; the actual local 31→32 transition passed with fresh class 0.
+- **Rules for agents:** Use request v2 only for fresh universe schema 2. Do not silently reinterpret a v1 request or change legacy commitments.
+- **Refs:** `packages/cox-methodology/README.md`; private `.cox/local-rehearsal/completion-verification.json`.
