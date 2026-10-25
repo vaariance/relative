@@ -342,14 +342,13 @@ test("dynamic positions materialize old staged credits before appending zero cla
 
 test("large dynamic position simulations fail with account-reader guidance before requesting a blockhash", async () => {
   const value = fixture("pool"), owner = fixture("position").account.owner;
-  const pool = { ...value.account, schemaVersion: 5, testCollateralMint: null,
-    classes: Array.from({ length: 32 }, () => ({ backing: new anchor.BN(0), units: new anchor.BN(0) })),
-    references: Array.from({ length: 32 }, () => new anchor.BN("100000000000000")) };
-  const encoded = Buffer.from(value.info.data); encoded.writeUInt16LE(5, 8);
+  const compiled = JSON.parse(readFileSync(new URL("../../cox/fixtures/generation/active.json", import.meta.url), "utf8")) as { accounts: { name: string; address: string; owner: string; dataHex: string }[] };
+  const pool = compiled.accounts.find(row => row.name === "pool")!;
   let reads = 0;
-  const connection = { getAccountInfo: async (key: PublicKey) => { reads++; assert.ok(key.equals(value.key)); return { ...value.info, data: encoded }; },
+  const poolKey = new PublicKey(pool.address);
+  const connection = { getAccountInfo: async (key: PublicKey) => { reads++; assert.ok(key.equals(poolKey)); return { ...value.info, data: Buffer.from(pool.dataHex, "hex") }; },
     getLatestBlockhash: async () => { throw new Error("UnnecessaryBlockhashRequest"); } } as unknown as Connection;
-  const dynamic = { programId: program.programId, idl: program.idl, provider: { connection }, coder: { accounts: { decode: () => pool } } } as unknown as typeof program;
-  await assert.rejects(new CoxSimulations(dynamic, owner).position(value.key, owner), /CoxPositionSimulationLimit:UseCoxReader.position/);
+  const dynamic = new anchor.Program(program.idl, { connection });
+  await assert.rejects(new CoxSimulations(dynamic, owner).position(poolKey, owner), /CoxPositionSimulationLimit:UseCoxReader.position/);
   assert.equal(reads, 1);
 });

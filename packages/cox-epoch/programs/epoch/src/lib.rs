@@ -491,9 +491,41 @@ pub struct PoolConfig {
     pub max_entry_price_age: u64,
     pub max_lots: u32,
     pub bump: u8,
+    pub lifecycle_extension: ConfigLifecycleExtension,
+}
+pub const CONFIG_LIFECYCLE_MAGIC: [u8; 8] = *b"RLCFG001";
+#[derive(AnchorSerialize, Clone, Debug)]
+pub struct ConfigLifecycleExtension {
+    pub magic: [u8; 8],
     pub lifecycle_version: u8,
     pub lifecycle: ConfigLifecycle,
     pub asset_registry: Pubkey,
+}
+impl Default for ConfigLifecycleExtension {
+    fn default() -> Self { Self { magic: CONFIG_LIFECYCLE_MAGIC, lifecycle_version: 0,
+        lifecycle: ConfigLifecycle::Active, asset_registry: Pubkey::default() } }
+}
+impl AnchorDeserialize for ConfigLifecycleExtension {
+    fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let mut magic = [0; 8];
+        match reader.read_exact(&mut magic) {
+            Ok(()) if magic == CONFIG_LIFECYCLE_MAGIC => {},
+            Ok(()) => return Ok(Self::default()),
+            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(Self::default()),
+            Err(error) => return Err(error),
+        }
+        let lifecycle_version = u8::deserialize_reader(reader)?;
+        if lifecycle_version > 1 { return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "unsupported config lifecycle")); }
+        Ok(Self { magic, lifecycle_version, lifecycle: ConfigLifecycle::deserialize_reader(reader)?,
+            asset_registry: Pubkey::deserialize_reader(reader)? })
+    }
+}
+impl std::ops::Deref for PoolConfig {
+    type Target = ConfigLifecycleExtension;
+    fn deref(&self) -> &Self::Target { &self.lifecycle_extension }
+}
+impl std::ops::DerefMut for PoolConfig {
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.lifecycle_extension }
 }
 
 #[account]
@@ -505,11 +537,49 @@ pub struct EpochAccount {
     pub bump: u8,
     pub universe: Vec<Asset>,
     pub state: Option<Epoch>,
+    pub registry_binding: EpochRegistryBinding,
+}
+pub const EPOCH_REGISTRY_MAGIC: [u8; 8] = *b"RLEPCH01";
+#[derive(AnchorSerialize, Clone, Debug)]
+pub struct EpochRegistryBinding {
+    pub magic: [u8; 8],
     pub binding_version: u8,
     pub registry_version: Pubkey,
     pub registry_origin_benchmarks: Vec<u128>,
     pub universe_digest: [u8; 32],
     pub empty_finalized: bool,
+}
+impl Default for EpochRegistryBinding {
+    fn default() -> Self { Self { magic: EPOCH_REGISTRY_MAGIC, binding_version: 0,
+        registry_version: Pubkey::default(), registry_origin_benchmarks: Vec::new(),
+        universe_digest: [0; 32], empty_finalized: false } }
+}
+impl AnchorDeserialize for EpochRegistryBinding {
+    fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let mut magic = [0; 8];
+        match reader.read_exact(&mut magic) {
+            Ok(()) if magic == EPOCH_REGISTRY_MAGIC => {},
+            Ok(()) => return Ok(Self::default()),
+            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(Self::default()),
+            Err(error) => return Err(error),
+        }
+        let binding_version = u8::deserialize_reader(reader)?;
+        if binding_version > 1 { return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "unsupported epoch binding")); }
+        let registry_version = Pubkey::deserialize_reader(reader)?;
+        let count = u32::deserialize_reader(reader)? as usize;
+        if count > engine::MAX_UNIVERSE { return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid epoch origin count")); }
+        let mut registry_origin_benchmarks = Vec::with_capacity(count);
+        for _ in 0..count { registry_origin_benchmarks.push(u128::deserialize_reader(reader)?); }
+        Ok(Self { magic, binding_version, registry_version, registry_origin_benchmarks,
+            universe_digest: <[u8; 32]>::deserialize_reader(reader)?, empty_finalized: bool::deserialize_reader(reader)? })
+    }
+}
+impl std::ops::Deref for EpochAccount {
+    type Target = EpochRegistryBinding;
+    fn deref(&self) -> &Self::Target { &self.registry_binding }
+}
+impl std::ops::DerefMut for EpochAccount {
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.registry_binding }
 }
 
 #[account]

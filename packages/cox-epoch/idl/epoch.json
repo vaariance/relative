@@ -4283,31 +4283,12 @@
             }
           },
           {
-            "name": "binding_version",
-            "type": "u8"
-          },
-          {
-            "name": "registry_version",
-            "type": "pubkey"
-          },
-          {
-            "name": "registry_origin_benchmarks",
+            "name": "registry_binding",
             "type": {
-              "vec": "u128"
+              "defined": {
+                "name": "EpochRegistryBinding"
+              }
             }
-          },
-          {
-            "name": "universe_digest",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "empty_finalized",
-            "type": "bool"
           }
         ]
       }
@@ -4537,20 +4518,12 @@
             "type": "u8"
           },
           {
-            "name": "lifecycle_version",
-            "type": "u8"
-          },
-          {
-            "name": "lifecycle",
+            "name": "lifecycle_extension",
             "type": {
               "defined": {
-                "name": "ConfigLifecycle"
+                "name": "ConfigLifecycleExtension"
               }
             }
-          },
-          {
-            "name": "asset_registry",
-            "type": "pubkey"
           }
         ]
       }
@@ -4640,6 +4613,83 @@
           {
             "name": "bump",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigLifecycleExtension",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "magic",
+            "type": {
+              "array": [
+                "u8",
+                8
+              ]
+            }
+          },
+          {
+            "name": "lifecycle_version",
+            "type": "u8"
+          },
+          {
+            "name": "lifecycle",
+            "type": {
+              "defined": {
+                "name": "ConfigLifecycle"
+              }
+            }
+          },
+          {
+            "name": "asset_registry",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EpochRegistryBinding",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "magic",
+            "type": {
+              "array": [
+                "u8",
+                8
+              ]
+            }
+          },
+          {
+            "name": "binding_version",
+            "type": "u8"
+          },
+          {
+            "name": "registry_version",
+            "type": "pubkey"
+          },
+          {
+            "name": "registry_origin_benchmarks",
+            "type": {
+              "vec": "u128"
+            }
+          },
+          {
+            "name": "universe_digest",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "empty_finalized",
+            "type": "bool"
           }
         ]
       }

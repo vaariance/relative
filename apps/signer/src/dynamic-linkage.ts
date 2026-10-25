@@ -72,7 +72,7 @@ function method(bytes: Buffer, requireSealed: boolean): Method {
   if (canonical.length === expected) { equal(hash(canonical), digest, "canonical digest"); value = universe(canonical); }
   return { digest, canonical, sealed: tag === 1, activation, expected, value };
 }
-function poolFields(bytes: Buffer) {
+export function poolFields(bytes: Buffer) {
   const c = new Cursor(bytes); c.take(147); const origin = c.u64(), batch = c.u64(), sequence = c.u64(), state = c.take(32), benchmark = c.i128();
   const origins = Array.from({ length: c.count(255) }, () => c.u64()), prices = Array.from({ length: c.count(255) }, () => c.u64());
   const references = c.vector(16, 256), classes = c.vector(24, 256); c.take(40);
@@ -84,11 +84,13 @@ function poolFields(bytes: Buffer) {
   if (c.bytes.length - c.offset >= 89) {
     c.take(8 + 8 + 2 + 8 + 8 + 8 + 1 + 8 + 2 + 8 + 8 + 1 + 8);
     const testMint = c.byte(); if (testMint > 1) return deny("invalid dynamic collateral option"); if (testMint) c.take(32);
-    if (c.bytes.length - c.offset >= 66) {
+    if (c.bytes.subarray(c.offset, c.offset + 8).equals(Buffer.from("RLPOOL01"))) {
+      if (c.bytes.length - c.offset < 76) return deny("truncated dynamic lifecycle extension");
+      c.take(8);
       const version = c.byte(), state = c.byte();
       if (version > 1 || state > 2) return deny("unsupported dynamic lifecycle extension");
-      lifecycle = version === 0 ? 1 : state; assetRegistry = c.key(); generation = c.take(32);
-      if (version === 1) { if (c.bytes.length - c.offset < 2) return deny("missing dynamic CRYPTO class"); cryptoClass = c.u16(); }
+      const registry = c.key(), identity = c.take(32), crypto = c.u16();
+      if (version === 1) { lifecycle = state; assetRegistry = registry; generation = identity; cryptoClass = crypto; }
     }
   }
   if (origins.length < 30 || prices.length !== origins.length || classes !== origins.length + 1 || references !== classes) return deny("invalid dynamic pool capacity");

@@ -187,6 +187,19 @@ fn compiled_missing_close_voids_only_after_deadline_and_donations_remain_segrega
 }
 
 #[test]
+fn compiled_executed_round_requires_exact_closing_price_even_when_submitted_later() {
+    let mut h=Harness::new();h.queue(0,0,false,true);
+    h.time(OPEN+1);let entry=h.snapshot(1,OPEN+1,1_000);h.execute(0,entry,true);
+    h.time(OPEN+EPOCH_SECONDS+10);let payer=h.bob.insecure_clone();
+    h.send(ix(h.settlement(),i::FinalizeEmpty {}),&payer,false);
+    let early=h.snapshot(2,OPEN+EPOCH_SECONDS-1,1_100);h.close(early,false);
+    let late=h.snapshot(3,OPEN+EPOCH_SECONDS+1,1_100);h.close(late,false);
+    assert_eq!(h.read::<EpochAccount>(h.epoch).state.unwrap().phase(),Phase::Open);
+    let exact=h.snapshot(4,OPEN+EPOCH_SECONDS,1_100);h.close(exact,true);
+    assert_eq!(h.read::<EpochAccount>(h.epoch).state.unwrap().phase(),Phase::Scoring);
+}
+
+#[test]
 fn compiled_rejections_roll_back_deposits_and_enforce_operator_and_account_bindings() {
     let mut h=Harness::new();let before=h.balance(h.alice_token);
     h.queue(0,31,false,false);assert_eq!(h.balance(h.alice_token),before);assert!(h.svm.get_account(&h.lot(0)).is_none());
@@ -348,8 +361,19 @@ fn compiled_empty_round_finalizes_without_operator_or_snapshot_and_archival_is_t
 #[test]
 fn compiled_archival_preserves_pending_refund_and_owner_withdrawal() {
     let mut h=Harness::new();h.queue(0,0,false,true);let admin=h.admin.insecure_clone();let bob=h.bob.insecure_clone();
+    h.time(OPEN+1);let snapshot=h.snapshot(1,OPEN+1,1_000);
     h.send(ix(a::ManageConfig {admin:admin.pubkey(),config:h.config},i::SetConfigLifecycle {
         lifecycle:relative_epoch::ConfigLifecycle::Archived}),&admin,true);
+    let config_before=h.svm.get_account(&h.config).unwrap().data;
+    let operator=h.operator.insecure_clone();
+    h.execute(0,snapshot,false);
+    let rejected=pda(&[b"snapshot",h.config.as_ref(),&2u64.to_le_bytes()]);
+    h.send(ix(a::InitializeSnapshot {operator:operator.pubkey(),config:h.config,snapshot:rejected,system_program:system_program::ID},
+        i::InitializeSnapshot {sequence:2,oracle_timestamp:OPEN+1,benchmark:1_000,expected_prices:30}),&operator,false);
+    h.send(ix(a::InitializeSnapshot {operator:operator.pubkey(),config:h.config,snapshot:rejected,system_program:system_program::ID},
+        i::PublishSnapshot {sequence:2,oracle_timestamp:OPEN+1,benchmark:1_000,prices:prices(1_000)}),&operator,false);
+    assert!(h.svm.get_account(&rejected).is_none());
+    assert_eq!(h.svm.get_account(&h.config).unwrap().data,config_before);
     h.time(OPEN+EPOCH_SECONDS);h.send(ix(h.manage(0),i::Refund {}),&bob,true);
     h.send(ix(h.settlement(),i::FinalizeEmpty {}),&bob,true);h.withdraw(0,false,true);
     assert_eq!(h.balance(h.alice_token),2*STAKE);
@@ -358,6 +382,24 @@ fn compiled_archival_preserves_pending_refund_and_owner_withdrawal() {
 fn install_anchor_account<T: AccountSerialize>(h: &mut Harness, address: Pubkey, value: &T, owner: Pubkey, space: usize) {
     let mut data=Vec::new();value.try_serialize(&mut data).unwrap();assert!(data.len()<=space);data.resize(space,0);
     h.svm.set_account(address,Account {lamports:100_000_000,data,owner,executable:false,rent_epoch:0}).unwrap();
+}
+
+fn export_generation(h:&Harness,name:&str,accounts:&[(&str,Pubkey)],expected:serde_json::Value) {
+    let Ok(directory)=std::env::var("EPOCH_GENERATION_FIXTURES_DIR") else {return;};
+    let directory=std::path::Path::new(&directory);std::fs::create_dir_all(directory).unwrap();
+    let dirty_padding=name=="legacy-dirty-padding";
+    let records=accounts.iter().map(|(name,address)| {
+        let account=h.svm.get_account(address).unwrap();
+        serde_json::json!({"name":name,"address":address.to_string(),"owner":account.owner.to_string(),
+            "dataHex":account.data.iter().map(|byte|format!("{byte:02x}")).collect::<String>(),
+            "provenance":if dirty_padding {"compiled-output-with-injected-legacy-padding"}else if account.owner==cox::ID {"canonical-test-prestate"}else{"compiled-instruction-output"}})
+    }).collect::<Vec<_>>();
+    let clock=h.svm.get_sysvar::<Clock>();
+    std::fs::write(directory.join(format!("{name}.json")),serde_json::to_vec_pretty(&serde_json::json!({
+        "schema":"cox.compiled-account-fixtures/v1","programAddress":relative_epoch::ID.to_string(),
+        "basicProgramAddress":cox::ID.to_string(),"unixTimestamp":clock.unix_timestamp,
+        "evidence":"controlled-compiled-LiteSVM-test-not-live-Pyth-or-devnet",
+        "expected":expected,"accounts":records})).unwrap()).unwrap();
 }
 
 fn permissionless_registry_round(asset_count:usize) {
@@ -394,6 +436,18 @@ fn permissionless_registry_round(asset_count:usize) {
     h.send(ix(a::InitializeConfig {admin:admin.pubkey(),mint:old_config.mint,config:h.config,system_program:system_program::ID},
         i::InitializeRegistryConfig {config_id:1,operator:h.operator.pubkey(),methodology:old_config.methodology,
             origin_benchmark:100*cox_epoch::math::SCALE,max_entry_price_age:5,max_lots:100,asset_registry:registry}),&admin,true);
+    if asset_count==31 {export_generation(&h,"preparing",&[("config",h.config),("assetRegistry",registry),("assetRegistryVersion",version),("methodology",methodology)],
+        serde_json::json!({"lifecycle":"Preparing","registryAssets":31,"registryVersion":1,"cryptoClass":0}));}
+    for invalid_open in [OPEN-EPOCH_SECONDS,OPEN+EPOCH_SECONDS,OPEN+1] {
+        let epoch=pda(&[b"epoch",h.config.as_ref(),&invalid_open.to_le_bytes()]);
+        let vault=pda(&[b"vault",epoch.as_ref()]);let test_vault=pda(&[b"test-vault",epoch.as_ref()]);
+        h.send(ix(a::InitializeCurrentEpoch {payer:alice.pubkey(),config:h.config,asset_registry:registry,
+            registry_version:version,methodology,mint:old_config.mint,test_mint:old_config.mint,epoch,vault,test_vault,
+            token_program:spl_token::ID,system_program:system_program::ID},
+            i::InitializeCurrentEpoch {opens_at:invalid_open}),&alice,false);
+        assert!(h.svm.get_account(&epoch).is_none());assert!(h.svm.get_account(&vault).is_none());
+        assert!(h.svm.get_account(&test_vault).is_none());
+    }
     let init=|h:&Harness|ix(a::InitializeCurrentEpoch {payer:alice.pubkey(),config:h.config,asset_registry:registry,
         registry_version:version,methodology,mint:old_config.mint,test_mint:old_config.mint,epoch:h.epoch,vault:h.vault,
         test_vault:h.test_vault,token_program:spl_token::ID,system_program:system_program::ID},i::InitializeCurrentEpoch {opens_at:OPEN});
@@ -404,23 +458,76 @@ fn permissionless_registry_round(asset_count:usize) {
     h.send(init(&h),&alice,false);
     version_account.effective_until=0;install_anchor_account(&mut h,version,&version_account,cox::ID,256);
     h.send(init(&h),&alice,true);
-    let draft=|h:&Harness,payer:Pubkey|a::ManageCurrentEpochDraft {payer,config:h.config,asset_registry:registry,
-        registry_version:version,methodology,epoch:h.epoch,system_program:system_program::ID};
+    let draft=|h:&Harness,payer:Pubkey| {
+        let epoch:EpochAccount=h.read(h.epoch);let version:cox::AssetRegistryVersion=h.read(epoch.registry_version);
+        a::ManageCurrentEpochDraft {payer,config:h.config,asset_registry:registry,
+            registry_version:epoch.registry_version,methodology:version.methodology,epoch:h.epoch,system_program:system_program::ID}
+    };
+    h.send(ix(draft(&h,bob.pubkey()),i::GrowCurrentEpoch {additional_bytes:relative_epoch::MAX_GROWTH as u32+1}),&bob,false);
     while h.svm.get_account(&h.epoch).unwrap().data.len()<relative_epoch::EPOCH_SPACE {
         let current=h.svm.get_account(&h.epoch).unwrap().data.len();let additional=(relative_epoch::EPOCH_SPACE-current).min(relative_epoch::MAX_GROWTH);
         h.send(ix(draft(&h,alice.pubkey()),i::GrowCurrentEpoch {additional_bytes:additional as u32}),&alice,true);
     }
     h.send(ix(draft(&h,bob.pubkey()),i::CopyRegistryAssets {start:1,count:8}),&bob,false);
+    h.send(ix(draft(&h,bob.pubkey()),i::CopyRegistryAssets {start:0,count:9}),&bob,false);
+    let mut latest_version=version;let mut latest_methodology=methodology;let mut latest_count=asset_count;
     for start in (0..asset_count).step_by(8) {
+        if start==8 && asset_count==31 {
+            let before:EpochAccount=h.read(h.epoch);assert_eq!(before.universe.len(),8);
+            h.time(OPEN+150);
+            let mut next=universe.clone();next.version=2;next.predecessor_digest=universe.digest;
+            next.expected_instruments=32;next.capture.timestamp=OPEN+150;
+            next.capture.benchmark=103*cox_math::SCALE;
+            next.capture.prices_e8.push(1_000);next.capture.predecessor_sequence=1;next.capture.predecessor_state_digest=[86;32];
+            next.instruments.push(cox::Instrument {stable_id:"new-asset".into(),symbol:"NEW".into(),class_id:32,epoch_id:31,
+                pyth_pro_feed_id:32,pyth_core_feed_id:asset(31).feed_id,token_mint:None,
+                original_price_e8:1_000,original_benchmark:103*cox_math::SCALE,original_timestamp:OPEN+150});
+            next.sealed=false;next.seal_successor(&universe,103*cox_math::SCALE).unwrap();
+            let (next_methodology,next_methodology_bump)=Pubkey::find_program_address(&[b"methodology",&next.digest],&cox::ID);
+            let canonical=next.canonical_bytes().unwrap();
+            install_anchor_account(&mut h,next_methodology,&cox::Methodology {schema_version:3,bump:next_methodology_bump,
+                digest:next.digest,canonical:canonical.clone(),sealed:true,activation_batch:150,expected_length:canonical.len() as u32,
+                roster:(0..32).collect(),origin:OPEN,bybit:false},cox::ID,canonical.len()+512);
+            let (next_version,next_bump)=Pubkey::find_program_address(&[b"asset-version",registry.as_ref(),&next.digest],&cox::ID);
+            version_account.effective_until=OPEN+150;install_anchor_account(&mut h,version,&version_account,cox::ID,256);
+            install_anchor_account(&mut h,next_version,&cox::AssetRegistryVersion {schema_version:1,bump:next_bump,registry,generation,
+                methodology:next_methodology,digest:next.digest,predecessor:universe.digest,effective_from:OPEN+150,effective_until:0,sealed:true},cox::ID,256);
+            registry_account.active_version=next_version;registry_account.active_digest=next.digest;registry_account.active_from=OPEN+150;
+            install_anchor_account(&mut h,registry,&registry_account,cox::ID,256);
+            latest_version=next_version;latest_methodology=next_methodology;latest_count=32;
+            let late_config=pda(&[b"config",admin.pubkey().as_ref(),&2u64.to_le_bytes()]);
+            h.send(ix(a::InitializeConfig {admin:admin.pubkey(),mint:old_config.mint,config:late_config,system_program:system_program::ID},
+                i::InitializeRegistryConfig {config_id:2,operator:h.operator.pubkey(),methodology:old_config.methodology,
+                    origin_benchmark:100*cox_epoch::math::SCALE,max_entry_price_age:5,max_lots:100,asset_registry:registry}),&admin,true);
+            let late_epoch=pda(&[b"epoch",late_config.as_ref(),&OPEN.to_le_bytes()]);
+            let late_vault=pda(&[b"vault",late_epoch.as_ref()]);let late_test_vault=pda(&[b"test-vault",late_epoch.as_ref()]);
+            for (selected_version,selected_methodology,success) in [(next_version,next_methodology,false),(version,methodology,true)] {
+                h.send(ix(a::InitializeCurrentEpoch {payer:bob.pubkey(),config:late_config,asset_registry:registry,
+                    registry_version:selected_version,methodology:selected_methodology,mint:old_config.mint,test_mint:old_config.mint,
+                    epoch:late_epoch,vault:late_vault,test_vault:late_test_vault,token_program:spl_token::ID,system_program:system_program::ID},
+                    i::InitializeCurrentEpoch {opens_at:OPEN}),&bob,success);
+                if !success {assert!(h.svm.get_account(&late_epoch).is_none());}
+            }
+            assert_eq!(h.read::<EpochAccount>(late_epoch).registry_version,version);
+            let unchanged:EpochAccount=h.read(h.epoch);assert_eq!(unchanged.universe,before.universe);
+            assert_eq!(unchanged.registry_origin_benchmarks,before.registry_origin_benchmarks);
+        }
         let payer=if start==0 {&alice}else{&bob};
         h.send(ix(draft(&h,payer.pubkey()),i::CopyRegistryAssets {start:start as u16,count:(asset_count-start).min(8) as u16}),payer,true);
     }
     h.send(ix(draft(&h,bob.pubkey()),i::SealCurrentEpoch {}),&bob,true);
     let round:EpochAccount=h.read(h.epoch);assert_eq!(round.registry_version,version);assert_eq!(round.universe_digest,digest);
     assert_eq!(round.registry_origin_benchmarks,vec![100*cox_epoch::math::SCALE;asset_count]);
-    assert_eq!(round.state.unwrap().universe().len(),asset_count);
+    let expected:Vec<Asset>=universe.instruments.iter().map(|instrument|Asset {id:instrument.epoch_id,
+        feed_id:instrument.pyth_core_feed_id,origin_price:instrument.original_price_e8 as u128}).collect();
+    assert_eq!(round.state.unwrap().universe(),expected.as_slice());
+    if asset_count==31 {export_generation(&h,"sealed-frozen-31",&[("config",h.config),("epoch",h.epoch),("assetRegistry",registry),
+        ("assetRegistryVersion",version),("methodology",methodology),("activeAssetRegistryVersion",latest_version),("activeMethodology",latest_methodology)],
+        serde_json::json!({"lifecycle":"Preparing","sealed":true,"frozenAssets":31,"frozenVersion":1,"activeRegistryAssets":32,"activeRegistryVersion":2,"emptyFinalized":false}));}
     h.queue(0,0,false,false);
     h.send(ix(a::ManageConfig {admin:admin.pubkey(),config:h.config},i::SetConfigLifecycle {lifecycle:relative_epoch::ConfigLifecycle::Active}),&admin,true);
+    if asset_count==31 {export_generation(&h,"active",&[("config",h.config),("epoch",h.epoch),("assetRegistry",registry),
+        ("assetRegistryVersion",version),("methodology",methodology)],serde_json::json!({"lifecycle":"Active","sealed":true,"frozenAssets":31,"frozenVersion":1}));}
     h.queue(0,0,false,true);
     let predecessor=h.epoch;
     let next_open=OPEN+EPOCH_SECONDS;
@@ -428,7 +535,7 @@ fn permissionless_registry_round(asset_count:usize) {
     h.epoch=pda(&[b"epoch",h.config.as_ref(),&next_open.to_le_bytes()]);
     h.vault=pda(&[b"vault",h.epoch.as_ref()]);h.test_vault=pda(&[b"test-vault",h.epoch.as_ref()]);
     h.send(ix(a::InitializeCurrentEpoch {payer:bob.pubkey(),config:h.config,asset_registry:registry,
-        registry_version:version,methodology,mint:old_config.mint,test_mint:old_config.mint,epoch:h.epoch,vault:h.vault,
+        registry_version:latest_version,methodology:latest_methodology,mint:old_config.mint,test_mint:old_config.mint,epoch:h.epoch,vault:h.vault,
         test_vault:h.test_vault,token_program:spl_token::ID,system_program:system_program::ID},
         i::InitializeCurrentEpoch {opens_at:next_open}),&bob,true);
     let previous:EpochAccount=h.read(predecessor);let previous=previous.state.unwrap();
@@ -437,13 +544,20 @@ fn permissionless_registry_round(asset_count:usize) {
         let current=h.svm.get_account(&h.epoch).unwrap().data.len();
         h.send(ix(draft(&h,bob.pubkey()),i::GrowCurrentEpoch {additional_bytes:(relative_epoch::EPOCH_SPACE-current).min(relative_epoch::MAX_GROWTH) as u32}),&bob,true);
     }
-    for start in (0..asset_count).step_by(8) {
-        h.send(ix(draft(&h,bob.pubkey()),i::CopyRegistryAssets {start:start as u16,count:(asset_count-start).min(8) as u16}),&bob,true);
+    for start in (0..latest_count).step_by(8) {
+        h.send(ix(draft(&h,bob.pubkey()),i::CopyRegistryAssets {start:start as u16,count:(latest_count-start).min(8) as u16}),&bob,true);
     }
     h.send(ix(draft(&h,bob.pubkey()),i::SealCurrentEpoch {}),&bob,true);
     h.queue(0,0,false,true);
     let successor:EpochAccount=h.read(h.epoch);
+    assert_eq!(successor.registry_version,latest_version);
+    assert_eq!(successor.state.as_ref().unwrap().universe().len(),latest_count);
+    assert_eq!(&successor.registry_origin_benchmarks[..asset_count],vec![100*cox_epoch::math::SCALE;asset_count].as_slice());
+    if asset_count==31 {assert_eq!(successor.registry_origin_benchmarks[31],103*cox_epoch::math::SCALE);}
     assert_eq!(successor.state.unwrap().ledger().pending_gross,STAKE);
+    if asset_count==31 {export_generation(&h,"successor-32",&[("config",h.config),("epoch",h.epoch),("predecessorEpoch",predecessor),
+        ("assetRegistry",registry),("assetRegistryVersion",latest_version),("methodology",latest_methodology)],
+        serde_json::json!({"lifecycle":"Active","sealed":true,"frozenAssets":32,"frozenVersion":2,"predecessorPhase":"Open","pendingGross":STAKE,"newAssetOriginBenchmark":(103*cox_epoch::math::SCALE).to_string()}));}
     let previous:EpochAccount=h.read(predecessor);
     assert_eq!(previous.state.unwrap().phase(),Phase::Open);
     h.time(next_open+EPOCH_SECONDS);
@@ -451,16 +565,25 @@ fn permissionless_registry_round(asset_count:usize) {
     h.send(ix(h.manage(0),i::Refund {}),&alice,true);
     h.send(ix(h.settlement(),i::FinalizeEmpty {}),&alice,true);
     h.withdraw(0,false,true);
+    if asset_count==31 {export_generation(&h,"empty-terminal-sealed",&[("config",h.config),("epoch",h.epoch)],
+        serde_json::json!({"lifecycle":"Active","phase":"Settled","statePresent":true,"emptyFinalized":true,"frozenAssets":32}));}
     let final_open=next_open+EPOCH_SECONDS;
     h.time(final_open+1);
     h.epoch=pda(&[b"epoch",h.config.as_ref(),&final_open.to_le_bytes()]);
     h.vault=pda(&[b"vault",h.epoch.as_ref()]);h.test_vault=pda(&[b"test-vault",h.epoch.as_ref()]);
     h.send(ix(a::InitializeCurrentEpoch {payer:bob.pubkey(),config:h.config,asset_registry:registry,
-        registry_version:version,methodology,mint:old_config.mint,test_mint:old_config.mint,epoch:h.epoch,vault:h.vault,
+        registry_version:latest_version,methodology:latest_methodology,mint:old_config.mint,test_mint:old_config.mint,epoch:h.epoch,vault:h.vault,
         test_vault:h.test_vault,token_program:spl_token::ID,system_program:system_program::ID},
         i::InitializeCurrentEpoch {opens_at:final_open}),&bob,true);
     h.time(final_open+EPOCH_SECONDS);h.send(ix(h.settlement(),i::FinalizeEmpty {}),&alice,true);
     let empty:EpochAccount=h.read(h.epoch);assert!(empty.empty_finalized);assert!(empty.state.is_none());
+    if asset_count==31 {
+        export_generation(&h,"empty-terminal-draft",&[("config",h.config),("epoch",h.epoch)],
+            serde_json::json!({"lifecycle":"Active","statePresent":false,"emptyFinalized":true,"draftAssets":0}));
+        h.send(ix(a::ManageConfig {admin:admin.pubkey(),config:h.config},i::SetConfigLifecycle {lifecycle:relative_epoch::ConfigLifecycle::Archived}),&admin,true);
+        export_generation(&h,"archived",&[("config",h.config),("epoch",h.epoch)],
+            serde_json::json!({"lifecycle":"Archived","statePresent":false,"emptyFinalized":true}));
+    }
 }
 
 #[test]
@@ -476,8 +599,34 @@ fn compiled_permissionless_registry_round_supports_255_assets_with_bounded_trans
 #[test]
 fn compiled_legacy_zero_padding_remains_active_and_unknown_lifecycle_versions_fail_closed() {
     let mut h=Harness::new();let config:relative_epoch::PoolConfig=h.read(h.config);
-    let mut encoded=Vec::new();config.try_serialize(&mut encoded).unwrap();let offset=encoded.len()-34;
+    let mut encoded=Vec::new();config.try_serialize(&mut encoded).unwrap();let offset=encoded.len()-42;
     let mut account=h.svm.get_account(&h.config).unwrap();account.data[offset..].fill(0);
     h.svm.set_account(h.config,account.clone()).unwrap();h.queue(0,0,false,true);
-    account.data[offset]=2;h.svm.set_account(h.config,account).unwrap();h.queue(1,1,false,false);
+    account.data[offset..offset+8].copy_from_slice(&relative_epoch::CONFIG_LIFECYCLE_MAGIC);
+    account.data[offset+8]=2;h.svm.set_account(h.config,account).unwrap();h.queue(1,1,false,false);
+}
+
+#[test]
+fn compiled_dirty_legacy_epoch_and_config_padding_preserves_refund_rights_after_archive() {
+    let mut h=Harness::new();
+    let config:relative_epoch::PoolConfig=h.read(h.config);let epoch:EpochAccount=h.read(h.epoch);
+    let mut encoded=Vec::new();config.try_serialize(&mut encoded).unwrap();let config_offset=encoded.len()-42;
+    let mut config_account=h.svm.get_account(&h.config).unwrap();config_account.data[config_offset..].fill(49);
+    h.svm.set_account(h.config,config_account).unwrap();
+    encoded.clear();epoch.try_serialize(&mut encoded).unwrap();let epoch_offset=encoded.len()-78;
+    let mut epoch_account=h.svm.get_account(&h.epoch).unwrap();epoch_account.data[epoch_offset..].fill(72);
+    h.svm.set_account(h.epoch,epoch_account).unwrap();
+    assert_eq!(h.read::<relative_epoch::PoolConfig>(h.config).lifecycle_version,0);
+    assert_eq!(h.read::<EpochAccount>(h.epoch).binding_version,0);
+    export_generation(&h,"legacy-dirty-padding",&[("config",h.config),("epoch",h.epoch)],
+        serde_json::json!({"lifecycle":"Active","lifecycleVersion":0,"bindingVersion":0,"sealed":true,"frozenAssets":30,"configPaddingByte":49,"epochPaddingByte":72}));
+    h.queue(0,0,false,true);
+    let admin=h.admin.insecure_clone();let bob=h.bob.insecure_clone();
+    h.send(ix(a::ManageConfig {admin:admin.pubkey(),config:h.config},i::SetConfigLifecycle {
+        lifecycle:relative_epoch::ConfigLifecycle::Archived}),&admin,true);
+    h.queue(1,1,true,false);
+    h.time(OPEN+EPOCH_SECONDS);h.send(ix(h.manage(0),i::Refund {}),&bob,true);
+    h.send(ix(h.settlement(),i::FinalizeEmpty {}),&bob,true);h.withdraw(0,false,true);
+    assert_eq!(h.balance(h.alice_token),2*STAKE);
+    assert_eq!(h.read::<relative_epoch::PoolConfig>(h.config).lifecycle,relative_epoch::ConfigLifecycle::Archived);
 }

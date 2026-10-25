@@ -10241,33 +10241,12 @@
             }
           },
           {
-            "name": "lifecycle_version",
-            "type": "u8"
-          },
-          {
-            "name": "lifecycle",
+            "name": "lifecycle_extension",
             "type": {
               "defined": {
-                "name": "InstanceLifecycle"
+                "name": "PoolLifecycle"
               }
             }
-          },
-          {
-            "name": "asset_registry",
-            "type": "pubkey"
-          },
-          {
-            "name": "generation",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "crypto_class",
-            "type": "u16"
           }
         ]
       }
@@ -11081,6 +11060,52 @@
           {
             "name": "amount",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PoolLifecycle",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "magic",
+            "type": {
+              "array": [
+                "u8",
+                8
+              ]
+            }
+          },
+          {
+            "name": "lifecycle_version",
+            "type": "u8"
+          },
+          {
+            "name": "lifecycle",
+            "type": {
+              "defined": {
+                "name": "InstanceLifecycle"
+              }
+            }
+          },
+          {
+            "name": "asset_registry",
+            "type": "pubkey"
+          },
+          {
+            "name": "generation",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "crypto_class",
+            "type": "u16"
           }
         ]
       }

@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { PublicKey, SystemProgram, TransactionMessage, VersionedTransaction, type TransactionInstruction } from "@solana/web3.js";
 import { checkProtocolLinkage } from "../src/protocol-linkage.js";
-import { universe } from "../src/dynamic-linkage.js";
+import { poolFields, universe } from "../src/dynamic-linkage.js";
 import type { ChainAccount } from "../src/cox-linkage.js";
 import type { DynamicCoxLinkage, EpochLinkage, SolanaProgramBinding } from "../src/config.js";
 
@@ -13,6 +13,18 @@ const require = createRequire(new URL("../../../packages/cox-client/package.json
 const { CoxInstructions } = require("./src/builders.ts"), { EpochInstructions } = require("./src/epoch.ts");
 const disc = (name: string) => createHash("sha256").update(`account:${name}`).digest().subarray(0, 8);
 const keyAt = (bytes: Buffer, offset: number) => new PublicKey(bytes.subarray(offset, offset + 32));
+test("signer accepts captured legacy padding and fails closed on malformed tagged lifecycle", () => {
+  const captured = JSON.parse(readFileSync(new URL("../../../packages/cox/fixtures/generation/legacy-pool-dirty-padding.json", import.meta.url), "utf8")) as { dataHex: string };
+  const legacy = poolFields(Buffer.from(captured.dataHex, "hex"));
+  assert.equal(legacy.lifecycle, 1);
+  assert.equal(legacy.cryptoClass, 30);
+  assert.equal(legacy.classes, 32);
+  const f = fixture(), bytes = Buffer.from(f.pool.data), marker = bytes.indexOf(Buffer.from("RLPOOL01"));
+  assert.ok(marker > 0);
+  bytes[marker + 8] = 2;
+  assert.throws(() => poolFields(bytes), /unsupported dynamic lifecycle/);
+  assert.throws(() => poolFields(bytes.subarray(0, marker + 10)), /truncated dynamic lifecycle/);
+});
 function fixture(phase = "active") {
   const input = JSON.parse(readFileSync(new URL(`../../../packages/cox/fixtures/generation/${phase}.json`, import.meta.url), "utf8")) as { programAddress: string; accounts: { name: string; address: string; owner: string; dataHex: string }[] };
   const rows = new Map<string, ChainAccount>(input.accounts.map(row => [row.address, { owner: new PublicKey(row.owner), data: Buffer.from(row.dataHex, "hex") }]));
@@ -50,7 +62,7 @@ test("sole operator can prepare a registry-bound round without administrator aut
   const sdk = new EpochInstructions(program), config = sdk.pdas.config(f.admin, 77n), mint = keyAt(f.pool.data, 83);
   const root = Buffer.alloc(256); disc("PoolConfig").copy(root); f.admin.toBuffer().copy(root, 8); root.writeBigUInt64LE(77n, 40);
   f.operator.toBuffer().copy(root, 48); mint.toBuffer().copy(root, 80); f.manifest.source.copy(root, 113);
-  root[174] = 1; root[175] = 0; f.registry.key.toBuffer().copy(root, 176);
+  Buffer.from("RLCFG001").copy(root, 174); root[182] = 1; root[183] = 0; f.registry.key.toBuffer().copy(root, 184);
   f.rows.set(config.toBase58(), { owner: program.programId, data: root });
   const linkage: EpochLinkage = { kind: "epoch-v1", configId: "77", config: config.toBase58(), admin: f.admin.toBase58(), operator: f.operator.toBase58(), methodologyDigest: f.manifest.source.toString("hex"), registry: { programId: f.binding.programId, assetRegistry: f.registry.key.toBase58(), generation: f.registry.data.subarray(11, 43).toString("hex") } };
   const binding = { programId: program.programId.toBase58(), discriminators: [] };
@@ -66,12 +78,12 @@ test("sole operator can prepare a registry-bound round without administrator aut
   await assert.rejects(checkProtocolLinkage(binding, linkage, f.transaction(initialize), f.fetch), /interval/);
   f.version.data.writeBigUInt64LE(0n, 179);
   const epoch = sdk.pdas.epoch(selection), bytes = Buffer.alloc(2048);
-  disc("EpochAccount").copy(bytes); config.toBuffer().copy(bytes, 8); bytes.writeBigUInt64LE(opening, 40); bytes[118] = 1; f.version.key.toBuffer().copy(bytes, 119);
+  disc("EpochAccount").copy(bytes); config.toBuffer().copy(bytes, 8); bytes.writeBigUInt64LE(opening, 40); Buffer.from("RLEPCH01").copy(bytes, 118); bytes[126] = 1; f.version.key.toBuffer().copy(bytes, 127);
   f.rows.set(epoch.toBase58(), { owner: program.programId, data: bytes });
   await checkProtocolLinkage(binding, linkage, f.transaction(sdk.growCurrentEpoch(f.operator, selection, registryBinding, 8192)), f.fetch);
   await checkProtocolLinkage(binding, linkage, f.transaction(sdk.copyRegistryAssets(f.operator, selection, registryBinding, 0, 8)), f.fetch);
   await assert.rejects(checkProtocolLinkage(binding, linkage, f.transaction(sdk.copyRegistryAssets(f.operator, selection, registryBinding, 1, 8)), f.fetch), /canonical Epoch page/);
   await assert.rejects(checkProtocolLinkage(binding, linkage, f.transaction(sdk.setConfigLifecycle(f.admin, config, "active")), f.fetch), /sole operator|not Epoch runtime/);
-  root[175] = 2;
+  root[183] = 2;
   await assert.rejects(checkProtocolLinkage(binding, linkage, f.transaction(initialize), f.fetch), /not available/);
 });

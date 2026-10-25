@@ -67,6 +67,16 @@ node packages/cox/scripts/deployment.ts verify \
 
 A verified executable is only one part of activation. Pool initialization must bind the intended registry, sealed methodology, mint and vault. The signing service must independently bind those accounts, the verified program and approved runtime instructions before enabling publication. Admin operations, upgrades, wallet trades and token transfers remain outside the runtime signer allowlist. See the [publisher guide](../../../apps/cox-publisher/README.md) for runtime configuration and execution.
 
+## Fresh-generation reset boundary
+
+The lifecycle reset is prepared source, not a deployed reset. Preserve old account bytes, program/program-data identities, collateral vaults and publication history in a hash-addressed inventory before cutover. The approved old test owners are recorded privately in `.cox/fresh-generation-known-owners.json`; no old position is migrated, refunded or swept by the reset. A new owner or changed economic inventory requires Peter's review before discarding those test positions. A current capture is required again immediately before cutover; a development-time inventory is not final approval.
+
+Legacy accounts can have nonzero unused trailing storage. The reviewed lifecycle release recognizes extensions by explicit markers (`RLPOOL01`, `RLCFG001`, `RLEPCH01`) rather than interpreting that storage as a version or enum. Exact markers with unsupported versions or incomplete payloads fail closed. Compiled tests use the actual captured old Basic account and dirty-padding Epoch accounts, including archival and owner withdrawal/refund paths. Rebuild and record artifacts after account-layout changes; do not deploy the earlier unmarked-footer release.
+
+New Basic/Epoch identities remain Preparing until the later cutover/readiness gates. A single qualifying signed Pyth capture establishes the new origins at benchmark/display references 100; calculations continue afterward. Keep the current geometric and payout arithmetic, 30-member baskets, dual devnet collateral and 2-bps/$0.20 cap. A reset does not correct or overwrite the old benchmark history.
+
+Global Basic pause also blocks existing batch cranks. Finish accepted work first, then atomically pause and archive with the administrator; the archival stage guard rejects a concurrently accepted batch. Recheck ownership and activity before retrying. Archived instances stay archived after global unpause and preserve historical reads and existing withdrawal/refund rights. Live cutover must still wait for the deployed-consumer evidence at Pause A; admission remains closed through Pause B.
+
 ## Fee upgrade for an existing pool
 
 The configurable fee release preserves pool 1 and its existing collateral,

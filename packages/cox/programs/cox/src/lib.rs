@@ -2007,11 +2007,48 @@ pub struct Pool {
     pub fee_initial_scheduled: bool,
     pub trading_opens_at: u64,
     pub test_collateral_mint: Option<Pubkey>,
+    pub lifecycle_extension: PoolLifecycle,
+}
+
+pub const POOL_LIFECYCLE_MAGIC: [u8; 8] = *b"RLPOOL01";
+
+#[derive(AnchorSerialize, Clone, Debug)]
+pub struct PoolLifecycle {
+    pub magic: [u8; 8],
     pub lifecycle_version: u8,
     pub lifecycle: InstanceLifecycle,
     pub asset_registry: Pubkey,
     pub generation: [u8; 32],
     pub crypto_class: u16,
+}
+impl Default for PoolLifecycle {
+    fn default() -> Self {
+        Self { magic: POOL_LIFECYCLE_MAGIC, lifecycle_version: 0, lifecycle: InstanceLifecycle::Active,
+            asset_registry: Pubkey::default(), generation: [0; 32], crypto_class: 30 }
+    }
+}
+impl AnchorDeserialize for PoolLifecycle {
+    fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let mut magic = [0; 8];
+        match reader.read_exact(&mut magic) {
+            Ok(()) if magic == POOL_LIFECYCLE_MAGIC => {},
+            Ok(()) => return Ok(Self::default()),
+            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(Self::default()),
+            Err(error) => return Err(error),
+        }
+        let lifecycle_version = u8::deserialize_reader(reader)?;
+        if lifecycle_version > 1 { return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "unsupported pool lifecycle")); }
+        Ok(Self { magic, lifecycle_version, lifecycle: InstanceLifecycle::deserialize_reader(reader)?,
+            asset_registry: Pubkey::deserialize_reader(reader)?, generation: <[u8; 32]>::deserialize_reader(reader)?,
+            crypto_class: u16::deserialize_reader(reader)? })
+    }
+}
+impl std::ops::Deref for Pool {
+    type Target = PoolLifecycle;
+    fn deref(&self) -> &Self::Target { &self.lifecycle_extension }
+}
+impl std::ops::DerefMut for Pool {
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.lifecycle_extension }
 }
 #[account]
 pub struct Position {

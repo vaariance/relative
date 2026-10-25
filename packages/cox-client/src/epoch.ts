@@ -4,6 +4,8 @@ import { PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.j
 import { bytes32, integer } from "./wire.ts";
 import type { MarketLifecycle } from "./lifecycle.ts";
 
+export * from "./epoch-readers.ts";
+
 export const EPOCH_SECONDS = 14_400n;
 export const EPOCH_FEE_BPS = 2n;
 export const EPOCH_FEE_CAP = 200_000n;

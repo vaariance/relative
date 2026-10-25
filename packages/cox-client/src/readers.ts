@@ -6,6 +6,7 @@ import { addresses } from "./pdas.ts";
 import { readDynamicManifest } from "./dynamic.ts";
 import { decodeState, sha256 } from "./wire.ts";
 import { marketLifecycle } from "./lifecycle.ts";
+import { decodeMarkedAccount } from "./account-extension.ts";
 
 const appended = {
   pool: ["feeVersion", "feeBps", "feeCap", "fees", "feeNextVersion", "feePending", "feePendingVersion", "feePendingBps", "feePendingCap", "feePendingCutoff", "feeInitialScheduled", "tradingOpensAt"],
@@ -19,7 +20,7 @@ function compatibilityCoder(program: Program, name: keyof Accounts, schema: numb
     coders = new Map();
     compatibilityCoders.set(program, coders);
   }
-  const key = `${name}:${schema}`;
+  const key = `${name}:${schema}:${fields.join(",")}`;
   let coder = coders.get(key);
   if (!coder) {
     const idl = structuredClone(program.idl) as Idl;
@@ -41,10 +42,12 @@ export function decodeAccount<K extends keyof Accounts>(program: Program, name: 
     : name === "batch" || name === "publication" ? schema === 2 || schema === 3 || schema === 4 : name === "methodology" ? schema === 1 || schema === 2 || schema === 3 : schema === 1;
   if (!supported) throw new Error("AccountVersionMismatch");
   const fields: string[] = [...(legacy ? appended[name as keyof typeof appended] ?? [] : [])];
-  if (name === "pool" && schema < 4) fields.push("tradingOpensAt", "testCollateralMint", "lifecycleVersion", "lifecycle", "assetRegistry", "generation", "cryptoClass");
+  if (name === "pool" && schema < 4) fields.push("tradingOpensAt", "testCollateralMint", "lifecycleExtension", "lifecycleVersion", "lifecycle", "assetRegistry", "generation", "cryptoClass");
   if (name === "request" && schema !== 4 && schema !== 3) fields.push("refundedAmount");
   if (name === "request" && schema !== 3) fields.push("fromId", "toId");
-  const account = (fields.length ? compatibilityCoder(program, name, schema, fields) : program.coder.accounts).decode(name, info.data) as Accounts[K];
+  const taggedPool = name === "pool" && schema >= 4 && program.idl.types?.some(type => type.name === "pool" && type.type.kind === "struct" && type.type.fields?.some(field => typeof field === "object" && "name" in field && field.name === "lifecycleExtension"));
+  const account = (taggedPool ? decodeMarkedAccount(program, name, info.data, "lifecycleExtension", "RLPOOL01").account
+    : (fields.length ? compatibilityCoder(program, name, schema, fields) : program.coder.accounts).decode(name, info.data)) as unknown as Accounts[K];
   for (const field of fields) {
     const value = field === "fromId" || field === "toId" ? 65535 : field === "testCollateralMint" ? null : field === "feeBps" || field === "feePendingBps" ? 0
       : field === "feePending" || field === "feeInitialScheduled" ? false : new BN(0);

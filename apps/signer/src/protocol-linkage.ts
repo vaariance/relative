@@ -186,8 +186,10 @@ export async function checkProtocolLinkage(binding: SolanaProgramBinding, linkag
   const methodOffset = root[112] === 1 ? 145 : 113;
   if (root.length < methodOffset + 32 || root.subarray(methodOffset, methodOffset + 32).toString("hex") !== l.methodologyDigest)
     deny("wrong Epoch methodology");
-  const lifecycleVersion = root.length > methodOffset + 62 ? root[methodOffset + 61]! : 0;
-  const lifecycle = lifecycleVersion === 0 ? 1 : root[methodOffset + 62]!;
+  const lifecycleMarked = root.subarray(methodOffset + 61, methodOffset + 69).equals(Buffer.from("RLCFG001"));
+  if (lifecycleMarked && root.length < methodOffset + 103) deny("truncated Epoch lifecycle extension");
+  const lifecycleVersion = lifecycleMarked ? root[methodOffset + 69]! : 0;
+  const lifecycle = lifecycleVersion === 0 ? 1 : root[methodOffset + 70]!;
   if (lifecycleVersion > 1 || lifecycle > 2) deny("unsupported Epoch lifecycle extension");
   interface StagedSnapshot { sequence: bigint; timestamp: bigint; benchmark: bigint; expected: number; prices: Buffer[]; sealed: boolean; allocated: number }
   const stagedSnapshots = new Map<string, StagedSnapshot>(), closedSnapshots = new Set<string>();

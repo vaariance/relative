@@ -12,6 +12,32 @@ import { CoxSwapSdk } from "../src/swap.ts";
 
 interface Fixture { programAddress: string; accounts: { name: string; address: string; owner: string; dataHex: string }[] }
 const idl = JSON.parse(readFileSync(new URL("../../cox/idl/cox.json", import.meta.url), "utf8")) as Idl;
+test("captured legacy pool ignores dirty padding and retains class 30 and financial state", () => {
+  const row = JSON.parse(readFileSync(new URL("../../cox/fixtures/generation/legacy-pool-dirty-padding.json", import.meta.url), "utf8")) as { owner: string; dataHex: string };
+  const program = new anchor.Program(idl, { connection: {} as Connection });
+  const data = Buffer.from(row.dataHex, "hex");
+  for (const bytes of [data, data.subarray(0, 2180)]) {
+    const pool = decodeAccount(program, "pool", { owner: new PublicKey(row.owner), data: bytes, executable: false, lamports: 1, rentEpoch: 0 });
+    assert.equal(pool.poolId.toString(), "2");
+    assert.equal(pool.classes.length, 32);
+    assert.equal(pool.lifecycleVersion, 0);
+    assert.equal(pool.cryptoClass, 30);
+    assert.equal(marketLifecycle(pool), "active");
+    assert.ok(pool.assetRegistry.equals(PublicKey.default));
+    assert.ok(pool.generation.every(value => value === 0));
+  }
+});
+test("marked lifecycle extensions reject unknown versions, invalid states and truncated payloads", () => {
+  const f = setup("active"), row = f.fixture.accounts.find(row => row.name === "pool")!;
+  const info = f.rows.get(row.address)!;
+  const offset = info.data.indexOf(Buffer.from("RLPOOL01"));
+  assert.ok(offset > 0);
+  const version = Buffer.from(info.data); version[offset + 8] = 2;
+  assert.throws(() => decodeAccount(f.program, "pool", { ...info, data: version }), /UnsupportedLifecycleVersion/);
+  const state = Buffer.from(info.data); state[offset + 9] = 255;
+  assert.throws(() => decodeAccount(f.program, "pool", { ...info, data: state }));
+  assert.throws(() => decodeAccount(f.program, "pool", { ...info, data: info.data.subarray(0, offset + 10) }));
+});
 function setup(phase: string) {
   const fixture = JSON.parse(readFileSync(new URL(`../../cox/fixtures/generation/${phase}.json`, import.meta.url), "utf8")) as Fixture;
   const rows = new Map<string, AccountInfo<Buffer>>(fixture.accounts.map(row => [row.address, { owner: new PublicKey(row.owner), data: Buffer.from(row.dataHex, "hex"), executable: false, lamports: 1, rentEpoch: 0 }]));

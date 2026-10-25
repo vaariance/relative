@@ -1,5 +1,5 @@
 mod support;
-use anchor_lang::AnchorSerialize;
+use anchor_lang::{AccountDeserialize, AccountSerialize, AnchorSerialize};
 use cox::{
     accounts as a, instruction as i, Instrument, Methodology, PriceWire, Request, UniverseCapture,
     UniverseVersion,
@@ -860,6 +860,11 @@ fn fresh_generation(count: usize, export: bool) -> (PoolHarness, Pubkey) {
     p.h.send("activate_fresh_pool",&[Harness::instruction(a::ManagePoolLifecycle {admin:admin.pubkey(),registry:p.registry,pool:p.pool,asset_registry:Some(asset_registry)},i::SetPoolLifecycle {lifecycle:cox::InstanceLifecycle::Active})],&[&admin],true);
     assert_eq!(p.pool_state().crypto_class,0);
     assert_eq!(p.pool_state().fee_cap,200_000); assert_eq!(p.pool_state().fee_bps,2);
+    let initial=p.pool_state();
+    assert_eq!((initial.active,initial.pending,initial.payable,initial.residual,initial.fees),(0,0,0,0,0));
+    assert_eq!(initial.next_request_nonce,0);
+    assert!(initial.classes.iter().all(|class|class.units==0 && class.backing==0));
+    assert_eq!(p.h.token_balance(p.vault),0);
     assert_eq!(cox::pool_lifecycle(&p.pool_state()).unwrap(),cox::InstanceLifecycle::Active);
     if export { export_generation(&p,"active",Some(asset_registry),Some(version),count); }
     (p,asset_registry)
@@ -881,8 +886,48 @@ fn fresh_31_asset_generation_bootstraps_without_migration_and_archive_preserves_
     let accounts=p.submit_accounts(owner.pubkey(),p.h.alice_token);
     p.h.send("archived_reject_deposit",&[Harness::instruction(accounts,i::DepositV2 {to:31,amount:1_000_000,minimum_units:1,expiry:100,expected_fee_version:1})],&[&owner],false);
     p.h.send("cannot_reactivate_archived",&[Harness::instruction(a::ManagePoolLifecycle {admin:admin.pubkey(),registry:p.registry,pool:p.pool,asset_registry:Some(registry)},i::SetPoolLifecycle {lifecycle:cox::InstanceLifecycle::Active})],&[&admin],false);
+    let state=p.pool_state();let runtime=p.h.runtime.insecure_clone();
+    p.h.send("archived_reject_publication",&[Harness::instruction(a::BeginDynamicPublication {
+        payer:runtime.pubkey(),runtime:runtime.pubkey(),registry:p.registry,pool:p.pool,methodology:p.methodology,
+        batch:pda(&[b"batch",p.pool.as_ref()]),vault:p.vault,system_program:system_program::ID,test_vault:p.test_vault(),
+    },i::BeginDynamicPublication {batch_id:60,sequence:state.sequence+1,predecessor:state.state_digest,snapshot:[9;32],benchmark:state.benchmark})],&[&runtime],false);
+    p.h.send("archived_reject_fee_configuration",&[Harness::instruction(a::ManageFees {
+        admin:admin.pubkey(),registry:p.registry,pool:p.pool,vault:p.vault,
+    },i::ScheduleFees {bps:2,cap:200_000,activation_cutoff:ORIGIN+86_461})],&[&admin],false);
+    assert_eq!(p.pool_state().sequence,state.sequence);
+    assert_eq!(p.pool_state().state_digest,state.state_digest);
+    assert_eq!(p.pool_state().fee_version,state.fee_version);
+    assert!(!p.pool_state().fee_pending);
+    assert_eq!(p.h.token_balance(p.vault),custody);
     p.cancel(0,false,true);p.refund(0,false,true);
     assert_eq!(p.h.token_balance(p.vault),0);
+}
+
+#[test]
+fn archived_fresh_generation_preserves_already_settled_owner_withdrawals() {
+    let (mut p,registry)=fresh_generation(31,false);
+    let owner=p.h.alice.insecure_clone();let admin=p.h.admin.insecure_clone();
+    let accounts=p.submit_accounts(owner.pubkey(),p.h.alice_token);
+    p.h.send("settled_deposit",&[Harness::instruction(accounts,i::DepositV2 {
+        to:0,amount:1_000_000,minimum_units:1,expiry:100,expected_fee_version:1,
+    })],&[&owner],true);
+    let universe=cox::read_dynamic_manifest(&p.h.read::<Methodology>(p.methodology)).unwrap();
+    p.h.time(ORIGIN+61);publish(&mut p,&universe,61);
+    let position=p.materialize(owner.pubkey());
+    let accounts=p.submit_accounts(owner.pubkey(),p.h.alice_token);let request=accounts.request;
+    p.h.send("settled_redemption",&[Harness::instruction(accounts,i::RedeemV2 {
+        from:0,units:position.classes[0].units,minimum_proceeds:1,expiry:100,expected_fee_version:1,
+    })],&[&owner],true);
+    p.h.time(ORIGIN+62);publish(&mut p,&universe,62);
+    let redemption:Request=p.h.read(request);assert!(redemption.proceeds>0);
+    p.h.send("archive_after_settlement",&[Harness::instruction(a::ManagePoolLifecycle {
+        admin:admin.pubkey(),registry:p.registry,pool:p.pool,asset_registry:Some(registry),
+    },i::SetPoolLifecycle {lifecycle:cox::InstanceLifecycle::Archived})],&[&admin],true);
+    let wallet_before=p.h.token_balance(p.h.alice_token);
+    p.withdraw(false,redemption.proceeds,true);
+    assert_eq!(p.h.token_balance(p.h.alice_token),wallet_before+redemption.proceeds);
+    assert_eq!(p.pool_state().payable,0);
+    assert_eq!(p.h.token_balance(p.vault),p.pool_state().fees);
 }
 
 #[test]
@@ -897,6 +942,13 @@ fn shared_registry_activation_closes_intervals_atomically_and_requires_bound_reg
     let (mut p,asset_registry)=fresh_generation(31,false);
     let previous=cox::read_dynamic_manifest(&p.h.read::<Methodology>(p.methodology)).unwrap();
     let admin=p.h.admin.insecure_clone();let runtime=p.h.runtime.insecure_clone();
+    let owner=p.h.alice.insecure_clone();
+    for to in [0,31] {
+        let accounts=p.submit_accounts(owner.pubkey(),p.h.alice_token);
+        p.h.send("fund_before_registry_activation",&[Harness::instruction(accounts,i::DepositV2 {
+            to,amount:1_000_000,minimum_units:1,expiry:100,expected_fee_version:1,
+        })],&[&owner],true);
+    }
     let registry:cox::AssetRegistry=p.h.read(asset_registry);let previous_version=registry.active_version;
     let mut next=UniverseVersion::draft(0,p.pool,runtime.pubkey(),previous.source_methodology,2,previous.digest,32,
         UniverseCapture {timestamp:ORIGIN+61,prices_e8:vec![100_000_000;32],..previous.capture.clone()}).unwrap();
@@ -905,15 +957,45 @@ fn shared_registry_activation_closes_intervals_atomically_and_requires_bound_reg
         pyth_core_feed_id:[88;32],token_mint:None,original_price_e8:100_000_000,original_benchmark:100*cox_math::SCALE,original_timestamp:ORIGIN+61});
     let schedule=pda(&[b"universe-schedule",p.pool.as_ref(),&2u64.to_le_bytes()]);
     let schedule_args=i::ScheduleUniverse {version:2,identities_digest:cox::instrument_identities_digest_for_schema(2,&next.instruments).unwrap(),expected_instruments:32,activation_timestamp:ORIGIN+61,expires_at:ORIGIN+100};
+    p.h.send("runtime_cannot_approve_registry_addition",&[Harness::instruction(a::ScheduleUniverse {
+        admin:runtime.pubkey(),registry:p.registry,pool:p.pool,methodology:p.methodology,schedule,
+        system_program:system_program::ID,asset_registry:Some(asset_registry),
+    },i::ScheduleUniverse {version:2,identities_digest:cox::instrument_identities_digest_for_schema(2,&next.instruments).unwrap(),expected_instruments:32,activation_timestamp:ORIGIN+61,expires_at:ORIGIN+100})],&[&runtime],false);
     p.h.send("bound_schedule_cannot_omit_registry",&[Harness::instruction(a::ScheduleUniverse {admin:admin.pubkey(),registry:p.registry,pool:p.pool,methodology:p.methodology,schedule,system_program:system_program::ID,asset_registry:None},i::ScheduleUniverse {version:2,identities_digest:cox::instrument_identities_digest_for_schema(2,&next.instruments).unwrap(),expected_instruments:32,activation_timestamp:ORIGIN+61,expires_at:ORIGIN+100})],&[&admin],false);
     p.h.send("bound_schedule",&[Harness::instruction(a::ScheduleUniverse {admin:admin.pubkey(),registry:p.registry,pool:p.pool,methodology:p.methodology,schedule,system_program:system_program::ID,asset_registry:Some(asset_registry)},schedule_args)],&[&admin],true);
     let r:cox::AssetRegistry=p.h.read(asset_registry);assert_eq!(r.pending_activation,ORIGIN+61);
     p.h.time(ORIGIN+61);publish(&mut p,&previous,61);
     let state=p.pool_state();next.capture.predecessor_sequence=state.sequence;next.capture.predecessor_state_digest=state.state_digest;
+    assert!(state.classes[0].units>0 && state.classes[31].units>0);
+    for mutation in 0..7 {
+        let mut invalid=next.clone();
+        match mutation {
+            0=>invalid.instruments[0].original_price_e8+=1,
+            1=>invalid.instruments[0].original_benchmark+=1,
+            2=>invalid.instruments[0].original_timestamp+=1,
+            3=>invalid.instruments[0].class_id=0,
+            4=>invalid.instruments[0].pyth_core_feed_id=[99;32],
+            5=>invalid.schema_version=1,
+            _=>invalid.instruments.last_mut().unwrap().original_price_e8+=1,
+        }
+        assert!(invalid.seal_successor(&previous,state.benchmark).is_err(),"mutation {mutation}");
+    }
+    let approved:cox::UniverseSchedule=p.h.read(schedule);
+    let mut wrong_boundary=next.clone();wrong_boundary.capture.timestamp+=1;
+    assert!(approved.validate_successor(&previous,&wrong_boundary).is_err());
     next.digest=next.canonical_digest().unwrap();
     let methodology=upload(&mut p,&next);
     let version=pda(&[b"asset-version",asset_registry.as_ref(),&next.digest]);
     p.h.send("register_successor_version",&[Harness::instruction(a::RegisterAssetRegistryVersion {payer:runtime.pubkey(),registry:p.registry,pool:p.pool,asset_registry,methodology,version,system_program:system_program::ID},i::RegisterAssetRegistryVersion {})],&[&runtime],true);
+    p.h.send("registration_cannot_bypass_scheduled_activation",&[Harness::instruction(a::ActivateAssetRegistryVersion {
+        runtime:runtime.pubkey(),registry:p.registry,pool:p.pool,methodology:p.methodology,asset_registry,
+        version,previous_version:Some(previous_version),
+    },i::ActivateAssetRegistryVersion {})],&[&runtime],false);
+    let accounts=p.submit_accounts(owner.pubkey(),p.h.alice_token);
+    p.h.send("queue_during_candidate_preparation",&[Harness::instruction(accounts,i::DepositV2 {
+        to:31,amount:1_000_000,minimum_units:1,expiry:100,expected_fee_version:1,
+    })],&[&owner],true);
+    let financial_before=p.pool_state();let custody_before=p.h.token_balance(p.vault);
     let before=p.h.svm.get_account(&p.pool).unwrap().data;
     p.h.send("activation_cannot_omit_registry",&[Harness::instruction(a::ActivateUniverse {runtime:runtime.pubkey(),registry:p.registry,pool:p.pool,methodology:p.methodology,next_methodology:methodology,vault:p.vault,schedule,test_vault:None,asset_registry:None,next_registry_version:None,previous_registry_version:None},i::ActivateUniverse {})],&[&runtime],false);
     assert_eq!(p.h.svm.get_account(&p.pool).unwrap().data,before);
@@ -922,6 +1004,32 @@ fn shared_registry_activation_closes_intervals_atomically_and_requires_bound_reg
     assert_eq!(old.effective_until,ORIGIN+61);assert_eq!(new.effective_from,ORIGIN+61);assert!(new.sealed);
     assert_eq!(r.active_version,version);assert_eq!(r.pending_activation,0);assert_eq!(p.pool_state().methodology,methodology);
     let u=cox::read_dynamic_manifest(&p.h.read::<Methodology>(methodology)).unwrap();assert!(u.instruments.starts_with(&previous.instruments));
+    assert_eq!(old.registry,new.registry);assert_eq!(old.generation,new.generation);
+    assert_eq!(new.predecessor,old.digest);assert_eq!(old.effective_from,ORIGIN);
+    let after=p.pool_state();assert_eq!(after.benchmark,financial_before.benchmark);
+    assert_eq!(&after.references[..32],financial_before.references.as_slice());
+    assert_eq!(after.references[32],100*cox_math::SCALE);
+    assert_eq!(&after.origin_prices[..31],financial_before.origin_prices.as_slice());
+    assert_eq!(&after.last_prices[..31],financial_before.last_prices.as_slice());
+    assert_eq!(after.classes[..32].iter().map(|class|(class.backing,class.units)).collect::<Vec<_>>(),
+        financial_before.classes.iter().map(|class|(class.backing,class.units)).collect::<Vec<_>>());
+    assert_eq!((after.active,after.pending,after.payable,after.residual,after.fees,after.next_request_nonce),
+        (financial_before.active,financial_before.pending,financial_before.payable,financial_before.residual,financial_before.fees,financial_before.next_request_nonce));
+    assert_eq!(p.h.token_balance(p.vault),custody_before);
+    assert_eq!(after.crypto_class,0);assert_eq!(u.instruments[30].class_id,31);
+    let valid_at=|version_key:Pubkey,methodology_key:Pubkey,opening:u64| {
+        let mut version_account=p.h.svm.get_account(&version_key).unwrap();
+        let mut methodology_account=p.h.svm.get_account(&methodology_key).unwrap();
+        let version_info=anchor_lang::prelude::AccountInfo::new(&version_key,false,false,
+            &mut version_account.lamports,&mut version_account.data,&version_account.owner,false,0);
+        let methodology_info=anchor_lang::prelude::AccountInfo::new(&methodology_key,false,false,
+            &mut methodology_account.lamports,&mut methodology_account.data,&methodology_account.owner,false,0);
+        cox::validate_registry_version(&version_info,&methodology_info,asset_registry,r.generation,opening).is_ok()
+    };
+    assert!(valid_at(previous_version,p.methodology,ORIGIN+60));
+    assert!(!valid_at(previous_version,p.methodology,ORIGIN+61));
+    assert!(!valid_at(version,methodology,ORIGIN+60));
+    assert!(valid_at(version,methodology,ORIGIN+61));
 }
 
 #[test]
@@ -941,4 +1049,26 @@ fn fresh_class_zero_is_crypto_and_first_underlying_is_class_one() {
     assert!(after.classes[1].backing>after.classes[0].backing);
     assert_eq!(after.classes[0].units,before.classes[0].units);
     assert_eq!(after.classes[1].units,before.classes[1].units);
+}
+
+#[test]
+fn captured_deployed_pool_dirty_padding_is_not_a_lifecycle_extension() {
+    let record:serde_json::Value=serde_json::from_str(include_str!("../../../fixtures/generation/legacy-pool-dirty-padding.json")).unwrap();
+    let hex=record["dataHex"].as_str().unwrap();
+    let data:Vec<u8>=(0..hex.len()).step_by(2).map(|index|u8::from_str_radix(&hex[index..index+2],16).unwrap()).collect();
+    let pool=cox::Pool::try_deserialize(&mut data.as_slice()).unwrap();
+    assert_eq!(pool.pool_id,2);assert_eq!(pool.schema_version,5);
+    assert_eq!(pool.lifecycle_version,0);assert_eq!(pool.crypto_class,30);
+    assert_eq!(cox::pool_lifecycle(&pool).unwrap(),cox::InstanceLifecycle::Active);
+    let mut encoded=Vec::new();pool.try_serialize(&mut encoded).unwrap();
+    let extension_offset=encoded.len()-76;
+    assert_ne!(&data[extension_offset..extension_offset+8],cox::POOL_LIFECYCLE_MAGIC.as_ref());
+    assert_eq!(&data[..extension_offset],&encoded[..extension_offset]);
+    let restored=cox::Pool::try_deserialize(&mut encoded.as_slice()).unwrap();
+    assert_eq!(restored.state_digest,pool.state_digest);assert_eq!(restored.active,pool.active);
+    assert_eq!(restored.lifecycle_version,0);
+    encoded[extension_offset+8]=2;
+    assert!(cox::Pool::try_deserialize(&mut encoded.as_slice()).is_err());
+    encoded[extension_offset+8]=1;encoded[extension_offset+9]=49;
+    assert!(cox::Pool::try_deserialize(&mut encoded.as_slice()).is_err());
 }

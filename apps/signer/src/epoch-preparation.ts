@@ -27,8 +27,8 @@ export async function checkEpochPreparation(program: PublicKey, linkage: EpochLi
   same(registryKey, pda(basic, Buffer.from("asset-registry"), generation));
   same(keys[keys.length - 1]!, SystemProgram.programId);
   const methodOffset = root[112] === 1 ? 145 : 113;
-  if (root.length < methodOffset + 95 || root[methodOffset + 61] !== 1 || root[methodOffset + 62]! > 1) return deny("Epoch config is not available for preparation");
-  same(keyAt(root, methodOffset + 63), registryKey);
+  if (root.length < methodOffset + 103 || !root.subarray(methodOffset + 61, methodOffset + 69).equals(Buffer.from("RLCFG001")) || root[methodOffset + 69] !== 1 || root[methodOffset + 70]! > 1) return deny("Epoch config is not available for preparation");
+  same(keyAt(root, methodOffset + 71), registryKey);
   const registry = await account(registryKey, basic, "AssetRegistry", 187);
   const version = await account(keys[3]!, basic, "AssetRegistryVersion", 188);
   const method = await account(keys[4]!, basic, "Methodology", 48);
@@ -59,8 +59,8 @@ export async function checkEpochPreparation(program: PublicKey, linkage: EpochLi
     same(keyAt(epoch, 8), new PublicKey(linkage.config));
     opening = epoch.readBigUInt64LE(40); draftCount = epoch.readUInt32LE(113); allocated = epoch.length;
     const stateTag = 117 + 50 * draftCount;
-    if (draftCount > manifest.count || epoch.length < stateTag + 34 || epoch[stateTag] !== 0 || epoch[stateTag + 1] !== 1) return deny("Epoch is not a registry-bound draft");
-    same(keyAt(epoch, stateTag + 2), keys[3]!);
+    if (draftCount > manifest.count || epoch.length < stateTag + 42 || epoch[stateTag] !== 0 || !epoch.subarray(stateTag + 1, stateTag + 9).equals(Buffer.from("RLEPCH01")) || epoch[stateTag + 9] !== 1) return deny("Epoch is not a registry-bound draft");
+    same(keyAt(epoch, stateTag + 10), keys[3]!);
     if (name === "grow_current_epoch") {
       if (bytes.length !== 12 || bytes.readUInt32LE(8) < 1 || bytes.readUInt32LE(8) > 8192 || allocated + bytes.readUInt32LE(8) > 64000) return deny("invalid current Epoch growth");
     } else if (name === "copy_registry_assets") {
