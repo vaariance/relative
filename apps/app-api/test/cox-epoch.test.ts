@@ -80,7 +80,7 @@ function token(mint: PublicKey, amount: bigint): Buffer {
   return data;
 }
 
-async function setup(now: number) {
+async function setup(now: number, configExtension: object = {}) {
   const connection = new EpochConnection();
   const program = loadProgram(connection as unknown as Connection, idlPath);
   const coder = program.coder.accounts as anchor.BorshAccountsCoder;
@@ -96,11 +96,15 @@ async function setup(now: number) {
   };
   connection.set(config, Buffer.from(await coder.encode("poolConfig", {
     admin: ADMIN, configId: bn(2), operator: OPERATOR, mint: MINT, testMint: TEST_MINT, methodology: Array(32).fill(4), originBenchmark: bn("100000000000000"), maxEntryPriceAge: bn(5), maxLots: 4096, bump: 254,
+    lifecycleVersion: 0, lifecycle: { preparing: {} }, assetRegistry: PublicKey.default, ...configExtension,
   })));
   const sealed = pdas.epoch({ config, opensAt: BigInt(OPEN) });
   const draft = pdas.epoch({ config, opensAt: BigInt(DRAFT) });
-  const encodeEpoch = async (address: PublicKey, opensAt: number, value: object | null) => {
-    connection.set(address, encodeLarge(coder, "epochAccount", { config, opensAt: bn(opensAt), vault: pdas.vault(address), testVault: pdas.testVault(address), bump: 250, universe: value ? [] : universe, state: value }));
+  const encodeEpoch = async (address: PublicKey, opensAt: number, value: object | null, extension: object = {}) => {
+    connection.set(address, encodeLarge(coder, "epochAccount", {
+      config, opensAt: bn(opensAt), vault: pdas.vault(address), testVault: pdas.testVault(address), bump: 250, universe: value ? [] : universe, state: value,
+      bindingVersion: 0, registryVersion: PublicKey.default, registryOriginBenchmarks: [], universeDigest: Array(32).fill(0), emptyFinalized: false, ...extension,
+    }));
   };
   return { connection, program, coder, sealed, draft, encodeEpoch, state, configValue, now, universe };
 }
@@ -249,5 +253,56 @@ describe("Epoch submissions", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("fresh-generation Epochs", () => {
+  const REGISTRY = new PublicKey("DT7LkmtxWQpAbZnfUi5F8WZTqfLbt5ACMxgw2KsUMhzZ");
+  const VERSION = new PublicKey("3yWE56xhhrAyKdP6HyrTCYmUca9yREYEzRV1WK2VW7jw");
+  const entry = (wallet: PublicKey) => ({ owner: wallet.toBase58(), opensAt: OPEN, grossStake: "1000000", basket: ASSETS, backedAsset: "SOL" });
+
+  it("reads an older configuration as active and a fresh one by its lifecycle, refusing entries unless active", async () => {
+    const legacy = await setup(OPEN + 60);
+    await legacy.encodeEpoch(legacy.sealed, OPEN, legacy.state);
+    const legacySource = await EpochSource.open({ connection: legacy.connection as unknown as Connection, program: legacy.program, config, now: () => legacy.now });
+    expect(legacySource.configuration()).toMatchObject({ lifecycle: "active", assetRegistry: null });
+    for (const [lifecycle, allowed] of [["preparing", false], ["active", true], ["archived", false]] as const) {
+      const t = await setup(OPEN + 60, { lifecycleVersion: 1, lifecycle: { [lifecycle]: {} }, assetRegistry: REGISTRY });
+      await t.encodeEpoch(t.sealed, OPEN, t.state);
+      const source = await EpochSource.open({ connection: t.connection as unknown as Connection, program: t.program, config, now: () => t.now });
+      expect(source.configuration()).toMatchObject({ lifecycle, assetRegistry: REGISTRY.toBase58() });
+      const built = source.entry(entry(Keypair.generate().publicKey));
+      if (allowed) await expect(built).resolves.toMatchObject({ operation: "epoch-entry" });
+      else await expect(built).rejects.toThrow(TradingClosedError);
+    }
+  });
+
+  it("shows an empty-finalized round as empty, whether or not it was ever sealed, and refuses entries", async () => {
+    const t = await setup(OPEN + 60);
+    await t.encodeEpoch(t.sealed, OPEN, t.state, { emptyFinalized: true });
+    await t.encodeEpoch(t.draft, DRAFT, null, { emptyFinalized: true });
+    t.connection.set(pdas.vault(t.sealed), token(MINT, 4_500_600n), new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"));
+    t.connection.set(pdas.testVault(t.sealed), token(TEST_MINT, 0n), new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"));
+    const source = await EpochSource.open({ connection: t.connection as unknown as Connection, program: t.program, config, now: () => t.now });
+    expect((await source.epoch(OPEN))).toMatchObject({ phase: "empty", sealed: true, entriesOpen: false, voidable: false });
+    expect((await source.epoch(DRAFT))).toMatchObject({ phase: "empty", sealed: false, entriesOpen: false, voidable: false });
+    await expect(source.entry(entry(Keypair.generate().publicKey))).rejects.toThrow("ended with no entries");
+  });
+
+  it("relays the frozen registry version and each asset's origin benchmark with its scale, reading the sealed roster from state", async () => {
+    const t = await setup(OPEN + 60);
+    const benchmarks = ASSETS.map((_, i) => bn(100_000_000_000_000n + BigInt(i)));
+    await t.encodeEpoch(t.sealed, OPEN, t.state, { bindingVersion: 1, registryVersion: VERSION, registryOriginBenchmarks: benchmarks, universeDigest: Array(32).fill(9) });
+    t.connection.set(pdas.vault(t.sealed), token(MINT, 4_500_600n), new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"));
+    t.connection.set(pdas.testVault(t.sealed), token(TEST_MINT, 0n), new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"));
+    const source = await EpochSource.open({ connection: t.connection as unknown as Connection, program: t.program, config, now: () => t.now });
+    const epoch = (await source.epoch(OPEN))!;
+    expect(epoch.universe).toHaveLength(30);
+    expect(epoch.registry).toEqual({
+      version: VERSION.toBase58(), universeDigest: "09".repeat(32), scale: "1000000000000",
+      originBenchmarks: ASSETS.map((assetId, i) => ({ assetId, benchmark: (100_000_000_000_000n + BigInt(i)).toString() })),
+    });
+    await t.encodeEpoch(t.sealed, OPEN, t.state);
+    expect((await source.epoch(OPEN))!.registry).toBeNull();
   });
 });

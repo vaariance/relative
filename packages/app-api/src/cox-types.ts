@@ -562,7 +562,7 @@ export interface Submission {
 export const EPOCH_SECONDS = 14_400;
 export const EPOCH_BASKET_SIZE = 30;
 
-export type EpochPhase = "draft" | "open" | "scoring" | "allocating" | "settled" | "voided";
+export type EpochPhase = "draft" | "open" | "scoring" | "allocating" | "settled" | "voided" | "empty";
 export type EpochLotState = "pending" | "executed" | "scored" | "claimable" | "withdrawn";
 export type EpochRefundReason = "not-executed" | "voided";
 
@@ -579,6 +579,8 @@ export interface EpochConfiguration {
   maxEntryPriceAgeSeconds: number;
   epochSeconds: number;
   entryFee: { bps: number; cap: BaseUnits };
+  lifecycle: MarketLifecycle;
+  assetRegistry: string | null;
 }
 
 export interface EpochUniverseMember {
@@ -616,6 +618,14 @@ export interface Epoch {
   closingDeadline: UnixSeconds;
   voidable: boolean;
   ledger: EpochLedger | null;
+  registry: EpochRegistryBinding | null;
+}
+
+export interface EpochRegistryBinding {
+  version: string;
+  universeDigest: string;
+  originBenchmarks: { assetId: string; benchmark: Scaled }[];
+  scale: Scaled;
 }
 
 export interface EpochOverview {

@@ -1,5 +1,5 @@
 import anchor, { type Program } from "@coral-xyz/anchor";
-import { discriminator, EPOCH_FEE_BPS, EPOCH_FEE_CAP, EpochInstructions, epochAddresses, type EpochSelection } from "@cox/client";
+import { discriminator, EPOCH_FEE_BPS, EPOCH_FEE_CAP, EpochInstructions, epochAddresses, marketLifecycle, type EpochSelection, type LifecycleValue } from "@cox/client";
 import { PublicKey, type AccountInfo, type Connection } from "@solana/web3.js";
 import {
   EPOCH_BASKET_SIZE,
@@ -12,6 +12,7 @@ import {
   type EpochLotState,
   type EpochOverview,
   type EpochPhase,
+  type EpochRegistryBinding,
   type EpochRefundInput,
   type EpochRefundReason,
   type EpochWithdrawInput,
@@ -30,6 +31,7 @@ const CLOSING_GRACE_SECONDS = 86_400;
 const FUTURE_EPOCHS = 6;
 const LOT_OWNER_OFFSET = 98;
 const CACHE_LIMIT = 1_000;
+const REFERENCE_SCALE = "1000000000000";
 const DEFAULT_ASSET_IDS: ReadonlyMap<number, string> = new Map(PROTOCOL_ASSET_IDS.map((id, index) => [index, id]));
 const PHASES: Record<string, EpochPhase> = { open: "open", scoring: "scoring", allocating: "allocating", settled: "settled", voided: "voided" };
 const LOT_STATES: Record<string, EpochLotState> = { pending: "pending", executed: "executed", scored: "scored", claimable: "claimable", withdrawn: "withdrawn" };
@@ -47,6 +49,9 @@ interface ConfigAccount {
   originBenchmark: Integer;
   maxEntryPriceAge: Integer;
   maxLots: number;
+  lifecycleVersion: number;
+  lifecycle: LifecycleValue;
+  assetRegistry: PublicKey;
 }
 
 interface UniverseAsset {
@@ -78,6 +83,11 @@ interface EpochAccount {
   testVault: PublicKey;
   universe: UniverseAsset[];
   state: EpochState | null;
+  bindingVersion: number;
+  registryVersion: PublicKey;
+  registryOriginBenchmarks: Integer[];
+  universeDigest: number[];
+  emptyFinalized: boolean;
 }
 
 interface EntryLotState {
@@ -190,6 +200,8 @@ export class EpochSource {
       maxEntryPriceAgeSeconds: seconds(this.account.maxEntryPriceAge),
       epochSeconds: EPOCH_SECONDS,
       entryFee: { bps: Number(EPOCH_FEE_BPS), cap: EPOCH_FEE_CAP.toString() },
+      lifecycle: marketLifecycle(this.account),
+      assetRegistry: this.account.assetRegistry.equals(PublicKey.default) ? null : this.account.assetRegistry.toBase58(),
     };
   }
 
@@ -257,11 +269,12 @@ export class EpochSource {
     const state = account.state;
     const closesAt = opensAt + EPOCH_SECONDS;
     const universe = members(account).map((asset) => ({ id: asset.id, assetId: this.ticker(asset.id), originPrice: text(asset.originPrice) }));
+    const registry = this.registry(account);
     if (!state || vault === null) {
-      return { address: address.toBase58(), opensAt, closesAt, phase: "draft", sealed: false, entriesOpen: false, universe, nextNonce: null, lots: null, totalWeight: null, settlementPot: null, allZero: null, closingReferences: [], closingDeadline: closesAt + CLOSING_GRACE_SECONDS, voidable: false, ledger: null };
+      return { address: address.toBase58(), opensAt, closesAt, phase: account.emptyFinalized ? "empty" : "draft", sealed: false, entriesOpen: false, universe, nextNonce: null, lots: null, totalWeight: null, settlementPot: null, allZero: null, closingReferences: [], closingDeadline: closesAt + CLOSING_GRACE_SECONDS, voidable: false, ledger: null, registry };
     }
     if (seconds(state.opensAt) !== opensAt || seconds(state.closesAt) !== closesAt) throw new Error("EpochScheduleMismatch");
-    const phase = variant(state.phase, PHASES).name;
+    const phase = account.emptyFinalized ? "empty" : variant(state.phase, PHASES).name;
     const l = state.ledger;
     const liabilities = [l.pendingGross, l.activeNet, l.heldFees, l.claimable, l.committedFees, l.residual].reduce<bigint>((sum, value) => sum + BigInt(text(value)), 0n);
     const ledger: EpochLedger = {
@@ -287,6 +300,19 @@ export class EpochSource {
       closingDeadline: closesAt + CLOSING_GRACE_SECONDS,
       voidable: phase === "open" && !state.closingSnapshot && now > closesAt + CLOSING_GRACE_SECONDS,
       ledger,
+      registry,
+    };
+  }
+
+  private registry(account: EpochAccount): EpochRegistryBinding | null {
+    if (account.bindingVersion === 0) return null;
+    const assets = members(account);
+    if (account.registryOriginBenchmarks.length !== assets.length) throw new Error("EpochRegistryBenchmarksMismatch");
+    return {
+      version: account.registryVersion.toBase58(),
+      universeDigest: Buffer.from(account.universeDigest).toString("hex"),
+      originBenchmarks: assets.map((asset, i) => ({ assetId: this.ticker(asset.id), benchmark: text(account.registryOriginBenchmarks[i]!) })),
+      scale: REFERENCE_SCALE,
     };
   }
 
@@ -390,7 +416,10 @@ export class EpochSource {
     if (new Set(basket).size !== basket.length) throw new TransactionInputError("basket must not repeat an asset");
     const backed = typeof input.backedAsset === "string" ? ids.get(input.backedAsset) : undefined;
     if (backed === undefined || !basket.includes(backed)) throw new TransactionInputError("backedAsset must be one of the basket's assets");
+    const lifecycle = marketLifecycle(this.account);
+    if (lifecycle !== "active") throw new TradingClosedError(lifecycle === "archived" ? "this Epoch market is archived" : "this Epoch market is still being prepared");
     const state = account.state;
+    if (account.emptyFinalized) throw new TradingClosedError("this Epoch has ended with no entries");
     if (!state) throw new TradingClosedError("this Epoch is a draft and does not accept entries yet");
     const now = this.now();
     if (variant(state.phase, PHASES).name !== "open" || now < input.opensAt || now >= input.opensAt + EPOCH_SECONDS) throw new TradingClosedError("this Epoch is not accepting entries now");
