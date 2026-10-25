@@ -1992,3 +1992,11 @@ another agent needs to know.
   - **Verified on both:** pool 2 legacy, publications 0 to 56 without gaps, status fresh, feed healthy, vault covered. The Epoch config is `active`; the 00:00 round is `open` with `entriesOpen: false` (past its close) and the 08:00 round `settled`.
 - **Rules for agents:** Await `EpochSource.invalidate()`; it now returns a promise. Never derive a fresh generation's history from sequence 0.
 - **Refs:** commits `b030751`..`6d72ce9`, `apps/app-api/README.md`.
+
+### 2026-10-25 · Peter (Codex) · Independent Pause A verification found lifecycle-cache blockers
+
+- **Area:** Read-only verification of Joel’s API deployment and compiled fixture consumers; no API/protocol implementation changes.
+- **What:** Verified Cloud Run `cox-app-api-live-00028-znr` serves 100% traffic from `f886558`; public and VM responses match current confirmed Basic/Epoch accounts, sealed rosters and terminal status. Both previews are fresh. Independently reran all 140 API tests. Permissionless preparation succeeds against the complete compiled registry/configuration fixture set; the deployed legacy configuration correctly rejects it. Fresh-generation live selection remains Pause B work.
+- **Blockers:** Actual fixture reproduction shows `EpochSource.invalidate()` does not refresh its once-loaded configuration: Active → Archived still reports Active. Separately, a freshly read Archived configuration can report `entriesOpen: true` for an otherwise Open round because that field ignores lifecycle. Source tests passing do not clear these runtime transition failures. Joel was emailed the exact reproduction and requested to refresh configuration through the shared confirmed event path, gate entry status on lifecycle, add transition tests and redeploy both instances.
+- **Rules for agents:** Pause A remains closed; do not perform live protocol cutover. Do not add continuous/per-request HTTP polling to resolve lifecycle caching. Keep refunds/withdrawals available. No protocol transaction was submitted; only unsigned preparation was requested. Preserve uncommitted Alchemy records.
+- **Refs:** `apps/app-api/src/cox/epoch-source.ts`; private `.cox/pause-a-interfaces-audit.mts`, `.cox/pause-a-20261025/verification.json`; Joel email thread `1a171a909685571a`.
