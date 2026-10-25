@@ -5,6 +5,8 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { PublicKey, SystemProgram, TransactionMessage, VersionedTransaction, type TransactionInstruction } from "@solana/web3.js";
 import { checkProtocolLinkage } from "../src/protocol-linkage.js";
+import { checkSolanaPolicy } from "../src/policy.js";
+import type { RoleBindings } from "../src/config.js";
 import { poolFields, universe } from "../src/dynamic-linkage.js";
 import type { ChainAccount } from "../src/cox-linkage.js";
 import type { DynamicCoxLinkage, EpochLinkage, SolanaProgramBinding } from "../src/config.js";
@@ -56,6 +58,24 @@ test("fresh class-zero genesis and registry linkage accept compiler-produced acc
   await assert.rejects(checkProtocolLinkage(f.binding, f.linkage, f.transaction(f.sdk.sealGenesisMethodology(f.operator, f.method.key)), f.fetch), /fresh genesis/);
   const old = fixture("archived");
   await assert.rejects(checkProtocolLinkage(old.binding, old.linkage, old.transaction(old.sdk.registerAssetRegistryVersion(old.operator, old.pool.key, old.registry.data.subarray(11, 43), old.version.data.subarray(107, 139))), old.fetch), /archived/);
+});
+test("disabled release policy permits only the bound operator's registry version registration", async () => {
+  const f = fixture();
+  const configured = JSON.parse(readFileSync(new URL("../config/dev-dynamic.json", import.meta.url), "utf8")).bindings["oracle-operator"] as RoleBindings;
+  const program = configured.solana!.programs[0]!;
+  assert.equal(program.enabled, false);
+  const instruction = f.sdk.registerAssetRegistryVersion(f.operator, f.pool.key, f.registry.data.subarray(11, 43), f.version.data.subarray(107, 139));
+  const discriminator = Buffer.from(instruction.data.subarray(0, 8)).toString("hex");
+  const rule = program.instructions!.find(value => value.discriminator === discriminator);
+  assert.ok(rule);
+  const rebound = { ...program, enabled: true, programId: f.binding.programId, instructions: [{ ...rule, accounts: { ...rule.accounts, "1": f.root.key.toBase58(), "2": f.pool.key.toBase58() } }] };
+  const bindings: RoleBindings = { ...configured, solana: { ...configured.solana!, programs: [rebound] } };
+  const transaction = f.transaction(instruction);
+  checkSolanaPolicy("oracle-operator", bindings, transaction, f.operator);
+  await checkProtocolLinkage(rebound, f.linkage, transaction, f.fetch);
+  assert.throws(() => checkSolanaPolicy("oracle-operator", bindings, transaction, f.admin), /signer|payer|operator/i);
+  const archived = fixture("archived");
+  await assert.rejects(checkProtocolLinkage(rebound, archived.linkage, archived.transaction(archived.sdk.registerAssetRegistryVersion(archived.operator, archived.pool.key, archived.registry.data.subarray(11, 43), archived.version.data.subarray(107, 139))), archived.fetch), /archived/);
 });
 test("sole operator can prepare a registry-bound round without administrator authority", async () => {
   const f = fixture(), program = new anchor.Program(JSON.parse(readFileSync(new URL("../../../packages/cox-epoch/idl/epoch.json", import.meta.url), "utf8")), { connection: {} });

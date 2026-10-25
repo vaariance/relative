@@ -94,6 +94,7 @@
             "allowTransactionV1": true,
             "discriminators": [
               "8ffbe191766f819b",
+              "f600437e0f1f85f5",
               "45b3a143b2f735f7",
               "dc3189c2ed6f87bc",
               "4c8b6e4f972af398",
@@ -120,6 +121,19 @@
                 },
                 "v1WritableAccounts": [
                   4
+                ]
+              },
+              {
+                "discriminator": "f600437e0f1f85f5",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+                  "6": "11111111111111111111111111111111"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  5
                 ]
               },
               {
