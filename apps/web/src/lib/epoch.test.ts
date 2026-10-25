@@ -1,7 +1,7 @@
 import type { Epoch, EpochLot } from "@eox/app-api";
 import { describe, expect, it } from "vitest";
 import settled from "../../test/fixtures/epoch-2026-10-23-0800.json";
-import { CLOSING_GRACE_SECONDS, basketProblem, basketScore, byMove, defaultTeam, entryBasket, leaveOutCount, leavesOut, mateLocked, toggleMate, epochBasket, countdown, executionReferences, feeOf, finalPayout, finalScore, lotView, moves, stageOf, timelineStep, withdrawSource } from "./epoch";
+import { CLOSING_GRACE_SECONDS, basketProblem, basketScore, byMove, defaultTeam, entryBasket, leaveOutCount, latestEpochs, leavesOut, mateLocked, toggleMate, epochBasket, countdown, executionReferences, feeOf, finalPayout, finalScore, lotView, moves, stageOf, timelineStep, withdrawSource } from "./epoch";
 
 const epoch = (phase: Epoch["phase"], extra: Partial<Epoch> = {}): Epoch => ({ address: "x", opensAt: 1000, closesAt: 2000, phase, sealed: true, entriesOpen: false, universe: [], nextNonce: null, lots: null, totalWeight: null, settlementPot: null, allZero: null, closingReferences: [], closingDeadline: 88_400, voidable: false, terminal: false, ledger: null, registry: null, ...extra });
 const lot = (extra: Partial<EpochLot>): EpochLot => ({ address: "l", epochOpensAt: 1000, nonce: "0", owner: "o", grossStake: "100000000", fee: "20000", admittedAt: 1100, basket: [], backedAsset: "ETH", execution: { timestamp: 1101, references: [] }, state: "executed", score: null, weight: null, claimable: null, refund: null, ...extra });
@@ -285,5 +285,25 @@ describe("coins the API has not named yet", () => {
     const basket = epochBasket(epoch("open", { universe: [...named.slice(0, 29), "#29"].map(member) }));
     expect(basket).toHaveLength(29);
     expect(basketProblem(basket, "A0", defaultTeam(basket, "A0"))).toBe("This Epoch's asset list is not available yet.");
+  });
+});
+
+describe("keeping the last rounds when a refresh fails", () => {
+  const overview = (tag: string) => ({ configuration: { address: tag }, epochs: [] }) as never;
+  const older = { overview: overview("old"), fetchedAt: 100 };
+  const newer = { overview: overview("new"), fetchedAt: 200 };
+
+  it("shows a fresh read as current", () => {
+    expect(latestEpochs({ ...newer, fresh: true }, older)).toEqual({ shown: { ...newer, fresh: true }, staleSince: null });
+  });
+
+  it("falls back to the newest copy it has, marked stale", () => {
+    expect(latestEpochs(null, older)).toEqual({ shown: older, staleSince: 100 });
+    expect(latestEpochs({ ...older, fresh: false }, newer).shown).toBe(newer);
+    expect(latestEpochs({ ...newer, fresh: false }, older)).toEqual({ shown: { ...newer, fresh: false }, staleSince: 200 });
+  });
+
+  it("has nothing to show only when nothing was ever read", () => {
+    expect(latestEpochs(null, null)).toEqual({ shown: null, staleSince: null });
   });
 });

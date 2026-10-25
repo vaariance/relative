@@ -1,4 +1,4 @@
-import { EPOCH_BASKET_SIZE, type Epoch, type EpochLot} from "@eox/app-api";
+import { EPOCH_BASKET_SIZE, type Epoch, type EpochLot, type EpochOverview } from "@eox/app-api";
 
 export const SCORE_DIGITS = 12;
 export const CLOSING_GRACE_SECONDS = 86_400;
@@ -29,6 +29,17 @@ const UNNAMED = /^#\d+$/;
 
 export function isUnnamedCoin(id: string): boolean {
   return UNNAMED.test(id);
+}
+
+export interface EpochsSnapshot {
+  overview: EpochOverview;
+  fetchedAt: number;
+}
+
+export function latestEpochs(read: (EpochsSnapshot & { fresh: boolean }) | null, kept: EpochsSnapshot | null): { shown: EpochsSnapshot | null; staleSince: number | null } {
+  if (read?.fresh) return { shown: read, staleSince: null };
+  const shown = [read, kept].filter((item): item is EpochsSnapshot => item !== null).sort((a, b) => b.fetchedAt - a.fetchedAt)[0] ?? null;
+  return { shown, staleSince: shown ? shown.fetchedAt : null };
 }
 
 export function defaultTeam(universe: readonly string[], backed: string): string[] {

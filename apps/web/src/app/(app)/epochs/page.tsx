@@ -1,5 +1,5 @@
 import { Timer } from "lucide-react";
-import { EpochsView } from "@/components/epochs-view";
+import { EpochsLive } from "@/components/epochs-view";
 import { epochsEnabled } from "@/lib/config";
 import { getAssets, getEpochs } from "@/lib/data";
 
@@ -19,15 +19,6 @@ function ComingSoon() {
 export default async function EpochsPage() {
   if (!epochsEnabled()) return <ComingSoon />;
 
-  const [overview, assets] = await Promise.all([getEpochs(), getAssets()]);
-  if (!overview) {
-    return (
-      <div className="flex flex-col gap-4">
-        <h1 className="font-display text-title font-semibold tracking-tight">Epochs</h1>
-        <section className="rounded-card border border-line bg-surface p-6 text-sm text-muted shadow-card">Epochs are not available right now.</section>
-      </div>
-    );
-  }
-
-  return <EpochsView overview={overview} roster={assets.map((asset) => asset.assetId)} serverNow={Math.floor(Date.now() / 1000)} />;
+  const [read, roster] = await Promise.all([getEpochs(), getAssets().then((assets) => assets.map((asset) => asset.assetId)).catch(() => [])]);
+  return <EpochsLive read={read} roster={roster} serverNow={Math.floor(Date.now() / 1000)} />;
 }

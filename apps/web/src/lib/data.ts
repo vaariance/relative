@@ -37,11 +37,20 @@ export async function getPreview(): Promise<Preview | null> {
   }
 }
 
-export async function getEpochs(): Promise<EpochOverview | null> {
+export interface EpochsRead {
+  overview: EpochOverview;
+  fetchedAt: number;
+  fresh: boolean;
+}
+
+let lastEpochs: { overview: EpochOverview; fetchedAt: number } | null = null;
+
+export async function getEpochs(): Promise<EpochsRead | null> {
   try {
-    return (await api.epochs()).data;
+    lastEpochs = { overview: (await api.epochs()).data, fetchedAt: Math.floor(Date.now() / 1000) };
+    return { ...lastEpochs, fresh: true };
   } catch {
-    return null;
+    return lastEpochs ? { ...lastEpochs, fresh: false } : null;
   }
 }
 

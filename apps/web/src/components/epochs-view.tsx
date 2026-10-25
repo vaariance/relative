@@ -3,14 +3,14 @@
 import { EPOCH_BASKET_SIZE, type Epoch, type EpochConfiguration, type EpochLot, type EpochOverview, type PreviewHistory } from "@eox/app-api";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Clock, X } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Info, X } from "lucide-react";
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { walletEpochLots } from "@/app/actions";
 import { parseScaled } from "@/lib/amounts";
 import { COLLATERAL } from "@/lib/config";
-import { type LotGroup, type Move, type Stage, STAGE_LABEL, TEAMMATES, type VaultBalances, basketProblem, leavesOut, mateLocked, toggleMate, byMove, defaultTeam, entryBasket, leaveOutCount, countdown, epochBasket, executionReferences, feeOf, finalPayout, lotView, moves, refundStage, stageOf, units, utcTime, windowText, withdrawSource } from "@/lib/epoch";
+import { type LotGroup, type Move, type Stage, STAGE_LABEL, TEAMMATES, type VaultBalances, type EpochsSnapshot, basketProblem, latestEpochs, leavesOut, mateLocked, toggleMate, byMove, defaultTeam, entryBasket, leaveOutCount, countdown, epochBasket, executionReferences, feeOf, finalPayout, lotView, moves, refundStage, stageOf, units, utcTime, windowText, withdrawSource } from "@/lib/epoch";
 import { historyEstimates } from "@/lib/estimate";
 import { formatAmount } from "@/lib/format";
 import { type Collateral, collateralsOf } from "@/lib/market";
@@ -962,7 +962,33 @@ function YourEntries({ epochs, lots, now, decimals, configuration, collaterals, 
   );
 }
 
-export function EpochsView({ overview, roster, serverNow }: { overview: EpochOverview; roster: string[]; serverNow: number }) {
+export function EpochsLive({ read, roster, serverNow }: { read: (EpochsSnapshot & { fresh: boolean }) | null; roster: string[]; serverNow: number }) {
+  const [kept, setKept] = useState<EpochsSnapshot | null>(read);
+  const { shown, staleSince } = latestEpochs(read, kept);
+  useEffect(() => {
+    if (shown && shown !== kept && (!kept || shown.fetchedAt > kept.fetchedAt)) setKept(shown);
+  }, [shown, kept]);
+  if (!shown) {
+    return (
+      <div className="flex flex-col gap-4">
+        <h1 className="font-display text-title font-semibold tracking-tight">Epochs</h1>
+        <section className="rounded-card border border-line bg-surface p-6 text-sm text-muted shadow-card">Epochs are not available right now.</section>
+      </div>
+    );
+  }
+  return <EpochsView overview={shown.overview} roster={roster} serverNow={serverNow} staleSince={staleSince} />;
+}
+
+function Notice({ children }: { children: ReactNode }) {
+  return (
+    <p role="status" className="flex items-start gap-2.5 rounded-xl border border-white/[0.08] bg-surface px-4 py-3 text-sm text-muted">
+      <Info size={16} aria-hidden="true" className="mt-0.5 shrink-0 text-accent" />
+      <span>{children}</span>
+    </p>
+  );
+}
+
+export function EpochsView({ overview, roster, serverNow, staleSince = null }: { overview: EpochOverview; roster: string[]; serverNow: number; staleSince?: number | null }) {
   const now = useNow(serverNow);
   const { owner, market } = useAccount();
   const decimals = market.decimals || 6;
@@ -1011,11 +1037,13 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
       <ModeSwitch />
     </header>
   );
+  const notices = staleSince !== null && <Notice>Rounds could not be refreshed. Showing them as of {utcTime(staleSince)} UTC.</Notice>;
 
   if (!epoch || !stage) {
     return (
       <div className="flex flex-col gap-4">
         {header}
+        {notices}
         <p className={`${card} p-6 text-sm text-muted`}>No Epochs are scheduled yet.</p>
       </div>
     );
@@ -1043,6 +1071,7 @@ export function EpochsView({ overview, roster, serverNow }: { overview: EpochOve
   return (
     <div className={`relative isolate flex flex-col gap-5 ${open ? "pb-24 xl:pb-0" : ""}`}>
       {header}
+      {notices}
       <HeroCard epochs={epochs} ranked={ranked} rankedCoins={rankedCoins} now={now} decimals={decimals} onExplain={() => setExplain(true)} />
 
       <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-12">
