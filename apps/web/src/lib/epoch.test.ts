@@ -1,7 +1,7 @@
 import type { Epoch, EpochLot } from "@eox/app-api";
 import { describe, expect, it } from "vitest";
 import settled from "../../test/fixtures/epoch-2026-10-23-0800.json";
-import { CLOSING_GRACE_SECONDS, basketProblem, basketScore, byMove, defaultTeam, entryBasket, heroRounds, leaveOutCount, latestEpochs, leavesOut, mateLocked, toggleMate, epochBasket, countdown, executionReferences, feeOf, finalPayout, finalScore, lotView, moves, stageOf, timelineStep, withdrawSource } from "./epoch";
+import { basketProblem, basketScore, byMove, defaultTeam, entryBasket, heroRounds, leaveOutCount, latestEpochs, leavesOut, mateLocked, toggleMate, epochBasket, countdown, executionReferences, feeOf, finalPayout, finalScore, lotView, marketClosedReason, moves, refundMint, stageOf, timelineStep, withdrawSource } from "./epoch";
 
 const epoch = (phase: Epoch["phase"], extra: Partial<Epoch> = {}): Epoch => ({ address: "x", opensAt: 1000, closesAt: 2000, phase, sealed: true, entriesOpen: false, universe: [], nextNonce: null, lots: null, totalWeight: null, settlementPot: null, allZero: null, closingReferences: [], closingDeadline: 88_400, voidable: false, terminal: false, ledger: null, registry: null, ...extra });
 const lot = (extra: Partial<EpochLot>): EpochLot => ({ address: "l", epochOpensAt: 1000, nonce: "0", owner: "o", grossStake: "100000000", fee: "20000", admittedAt: 1100, basket: [], backedAsset: "ETH", execution: { timestamp: 1101, references: [] }, state: "executed", score: null, weight: null, claimable: null, refund: null, ...extra });
@@ -22,9 +22,16 @@ describe("epoch stage", () => {
   });
 
   it("stops waiting for a closing reference once the 24-hour window has passed", () => {
-    expect(stageOf(epoch("open"), 2000 + CLOSING_GRACE_SECONDS)).toBe("closing");
-    expect(stageOf(epoch("open"), 2001 + CLOSING_GRACE_SECONDS)).toBe("expired");
+    expect(stageOf(epoch("open"), 88_400)).toBe("closing");
+    expect(stageOf(epoch("open"), 88_401)).toBe("expired");
+    expect(stageOf(epoch("open", { closingDeadline: 3000 }), 3001)).toBe("expired");
     expect(timelineStep("expired")).toBe(-1);
+  });
+
+  it("calls a round finished with no entries finished, not closing or stuck", () => {
+    expect(stageOf(epoch("empty"), 2500)).toBe("empty");
+    expect(stageOf(epoch("empty", { sealed: false }), 100_000)).toBe("empty");
+    expect(timelineStep("empty")).toBe(-1);
   });
 
   it("calls a draft that missed its opening not opened, not scheduled", () => {
@@ -76,7 +83,13 @@ describe("entry states", () => {
 
   it("never says awaiting execution after the close", () => {
     expect(lotView(lot({ state: "pending", execution: null }), epoch("open"), 2000)).toEqual({ group: "pending", label: "Not executed · refund due", refund: true });
-    expect(lotView(lot({}), epoch("open"), 2001 + CLOSING_GRACE_SECONDS)).toEqual({ group: "pending", label: "Awaiting refund", refund: true });
+    expect(lotView(lot({}), epoch("open"), 88_401)).toEqual({ group: "pending", label: "Round not closed", refund: true });
+  });
+
+  it("offers the refund the API reports", () => {
+    expect(lotView(lot({ state: "pending", execution: null, refund: "not-executed" }), epoch("open"), 2000)).toEqual({ group: "withdrawable", label: "Refund ready", refund: true });
+    expect(lotView(lot({ refund: "voided" }), epoch("voided"), 90_000)).toEqual({ group: "withdrawable", label: "Refund ready", refund: true });
+    expect(lotView(lot({ state: "withdrawn", refund: null }), epoch("voided"), 90_000).label).toBe("Withdrawn");
   });
 });
 
@@ -326,5 +339,21 @@ describe("hero rounds", () => {
 
   it("does not offer a round that missed its close as the next one", () => {
     expect(heroRounds([settledRound, epoch("open", { address: "x", opensAt: 0, closesAt: 900 })], 1500).map((item) => item.address)).toEqual(["s"]);
+  });
+});
+
+describe("refunds and market lifecycle", () => {
+  it("refunds the whole stake from a vault that holds all of it", () => {
+    expect(refundMint(["P", "S"], { primary: 10n, secondary: 0n }, 10n)).toEqual({ mint: "P", index: 0 });
+    expect(refundMint(["P", "S"], { primary: 5n, secondary: 10n }, 10n)).toEqual({ mint: "S", index: 1 });
+    expect(refundMint(["P", "S"], { primary: 5n, secondary: 5n }, 10n)).toBeNull();
+    expect(refundMint(["P"], null, 10n)).toEqual({ index: 0 });
+  });
+
+  it("explains why entries are closed when the Epoch market is not active", () => {
+    const configuration = (lifecycle: "preparing" | "active" | "archived") => ({ lifecycle }) as Parameters<typeof marketClosedReason>[0];
+    expect(marketClosedReason(configuration("active"))).toBeNull();
+    expect(marketClosedReason(configuration("preparing"))).toMatch(/being set up/);
+    expect(marketClosedReason(configuration("archived"))).toMatch(/takes no new entries/);
   });
 });

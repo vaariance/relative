@@ -4,13 +4,12 @@ import { EPOCH_BASKET_SIZE, type Epoch, type EpochConfiguration, type EpochLot, 
 import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Info, X } from "lucide-react";
-import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { walletEpochLots } from "@/app/actions";
 import { parseScaled } from "@/lib/amounts";
 import { COLLATERAL } from "@/lib/config";
-import { type LotGroup, type Move, type Stage, STAGE_LABEL, TEAMMATES, type VaultBalances, type EpochsSnapshot, basketProblem, heroRounds, latestEpochs, leavesOut, mateLocked, toggleMate, byMove, defaultTeam, entryBasket, leaveOutCount, countdown, epochBasket, executionReferences, feeOf, finalPayout, lotView, moves, refundStage, stageOf, units, utcTime, windowText, withdrawSource } from "@/lib/epoch";
+import { type LotGroup, type Move, type Stage, STAGE_LABEL, TEAMMATES, type VaultBalances, type EpochsSnapshot, basketProblem, heroRounds, latestEpochs, leavesOut, mateLocked, toggleMate, byMove, defaultTeam, entryBasket, leaveOutCount, countdown, epochBasket, executionReferences, feeOf, finalPayout, lotView, marketClosedReason, moves, refundMint, refundStage, stageOf, units, utcTime, windowText, withdrawSource } from "@/lib/epoch";
 import { historyEstimates } from "@/lib/estimate";
 import { formatAmount } from "@/lib/format";
 import { type Collateral, collateralsOf } from "@/lib/market";
@@ -19,7 +18,9 @@ import { useAccount } from "./account";
 import { CoinIcon } from "./coin-icon";
 import { EmptyMarket } from "./empty-market";
 import { useLive } from "./live";
+import { FundsHint } from "./funds-hint";
 import { SendButton } from "./send-button";
+import { TradeModes } from "./trade-modes";
 
 const REFERENCE_DIGITS = 12;
 const PREVIEW_BASE = 100;
@@ -109,19 +110,10 @@ function useWalletCollateral(mint: string | null, decimals: number, refreshKey: 
   return balance;
 }
 
-function ModeSwitch() {
-  return (
-    <div role="tablist" aria-label="Mode" className="inline-flex rounded-pill bg-surface p-1">
-      <Link href="/markets" role="tab" aria-selected={false} className="rounded-pill px-4 py-1.5 text-sm text-muted transition-colors duration-150 hover:text-ink">Basic</Link>
-      <span role="tab" aria-selected className="rounded-pill bg-surface-2 px-4 py-1.5 text-sm font-medium text-ink">Epoch</span>
-    </div>
-  );
-}
-
 function useHeroRanking(epoch: Epoch, coins: string[], now: number): { rows: Move[]; empty: string | null } {
   const { estimate } = useLive();
   const stage = stageOf(epoch, now);
-  const noResult = stage === "upcoming" || stage === "unopened" || refundStage(stage);
+  const noResult = stage === "upcoming" || stage === "unopened" || stage === "empty" || refundStage(stage);
   const opening = useOpeningReferences(noResult ? null : epoch, now);
   const closing = useMemo(() => {
     if (epoch.closingReferences.length === 0) return null;
@@ -153,7 +145,7 @@ function RankingCarousel({ epoch, coins, now }: { epoch: Epoch; coins: string[];
   }, [epoch.address]);
 
   return (
-    <div aria-roledescription="carousel" aria-label="Ranking against $CRYPTO" className="min-w-0 lg:pt-12">
+    <div aria-roledescription="carousel" aria-label="Ranking against the benchmark" className="min-w-0 lg:pt-12">
       {empty ? (
         <p className="flex h-[116px] items-center justify-center rounded-2xl border border-dashed border-white/10 px-4 text-center text-xs text-muted">{empty}</p>
       ) : (
@@ -294,10 +286,10 @@ interface Slide {
 }
 
 const PAYOUT_SLIDES: Slide[] = [
-  { kicker: "Step 1", title: "Back one coin", body: "Choose the coin you think will do best against $CRYPTO. Your entry counts from when it executes until the round closes." },
-  { kicker: "Step 2", title: "Add to basket", body: "Every entry has a basket that holds your backed coin and 29 others. Coins in your basket that trail $CRYPTO score zero, which raises your coin's share of the score. The basket fills itself; use Edit basket to choose which coins to leave out." },
-  { kicker: "Step 3", title: "Get a score", body: "Your score is your coin's gain over $CRYPTO as a share of the gains of every coin in your basket. Coins behind $CRYPTO count as zero." },
-  { kicker: "Step 4", title: "Share the pot", body: "The pot is every stake after fees, split by stake × score. If your coin is behind $CRYPTO at the close, you get nothing back. If every entry scores zero, everyone is refunded in full, fee included." },
+  { kicker: "Step 1", title: "Pick an asset", body: "Choose the asset whose performance you think will beat the benchmark. Your entry counts from when it executes until the round closes." },
+  { kicker: "Step 2", title: "Add to basket", body: "Curate a basket around your position. It is locked for a four-hour round, so choose your basket wisely." },
+  { kicker: "Step 3", title: "Get a score", body: "Your score is your asset's gain over the benchmark as a share of the gains of every coin in your basket. Coins behind the benchmark count as zero." },
+  { kicker: "Step 4", title: "Share the pot", body: "The pot is every stake after fees, split by stake × score. If your asset is behind the benchmark at the close, you get nothing back. If every entry scores zero, everyone is refunded in full, fee included." },
 ];
 
 function PayoutModal({ onClose }: { onClose: () => void }) {
@@ -431,7 +423,7 @@ function CoinTile({ row, picked, canPick, onPick }: { row: Move; picked: boolean
   return (
     <li>
       {canPick ? (
-        <button type="button" onClick={onPick} aria-pressed={picked} aria-label={`Back ${row.id}, ${pct(row.change, 2)} against $CRYPTO`} className={`${shape} cursor-pointer transition-colors duration-150 ${picked ? "" : "hover:border-white/20"}`}>
+        <button type="button" onClick={onPick} aria-pressed={picked} aria-label={`Trade ${row.id} performance, ${pct(row.change, 2)} against the benchmark`} className={`${shape} cursor-pointer transition-colors duration-150 ${picked ? "" : "hover:border-white/20"}`}>
           {face}
         </button>
       ) : (
@@ -464,7 +456,7 @@ function CoinGroup({ title, rows, backed, canPick, onPick }: { title: string; ro
 function useRoundMoves(epoch: Epoch, coins: string[], now: number): { rows: Move[]; opening: Record<string, number> | null | undefined; end: Record<string, number> | null } {
   const { estimate } = useLive();
   const stage = stageOf(epoch, now);
-  const noResult = stage === "unopened" || refundStage(stage);
+  const noResult = stage === "unopened" || stage === "empty" || refundStage(stage);
   const opening = useOpeningReferences(noResult ? null : epoch, now);
   const closing = useMemo(() => closingMap(epoch), [epoch]);
   const end = closing ?? (stage === "open" ? (estimate?.references ?? null) : null);
@@ -486,7 +478,9 @@ function CoinBoard({ epoch, coins, now, backed, canPick, onPick }: { epoch: Epoc
       ? { title: "Not open yet", text: `Coins appear here when the round opens at ${utcTime(epoch.opensAt)} UTC.`, pending: false }
       : stage === "unopened"
         ? { title: "No result", text: "This round never opened.", pending: false }
-        : refundStage(stage)
+        : stage === "empty"
+          ? { title: "No entries", text: "Nobody entered this round, so it has no result.", pending: false }
+          : refundStage(stage)
           ? { title: "No result", text: "No closing prices were recorded, so every entry is refunded.", pending: false }
           : stage === "closing"
             ? { title: "Waiting for the close", text: "Results appear once the closing prices are recorded.", pending: true }
@@ -502,9 +496,9 @@ function CoinBoard({ epoch, coins, now, backed, canPick, onPick }: { epoch: Epoc
         </EmptyMarket>
       ) : (
         <>
-          <CoinGroup title="Ahead of $CRYPTO" rows={ahead} backed={backed} canPick={canPick} onPick={onPick} />
-          <CoinGroup title="Behind $CRYPTO" rows={behind} backed={backed} canPick={canPick} onPick={onPick} />
-          <p className="border-t border-white/[0.06] pt-4 text-xs text-muted">Only coins ahead of $CRYPTO at the close score. The pot is shared by stake and score.</p>
+          <CoinGroup title="Ahead of the benchmark" rows={ahead} backed={backed} canPick={canPick} onPick={onPick} />
+          <CoinGroup title="Behind the benchmark" rows={behind} backed={backed} canPick={canPick} onPick={onPick} />
+          <p className="border-t border-white/[0.06] pt-4 text-xs text-muted">Only coins ahead of the benchmark at the close score. The pot is shared by stake and score.</p>
         </>
       )}
     </section>
@@ -536,8 +530,8 @@ function BackPicker({ epoch, coins, now, backed, onPick, onClose }: { epoch: Epo
       <section role="dialog" aria-modal="true" aria-labelledby="back-title" onClick={(event) => event.stopPropagation()} className="relative flex max-h-[90vh] w-full max-w-md flex-col rounded-t-3xl border border-white/[0.08] bg-surface sm:rounded-3xl">
         <header className="flex items-start justify-between gap-4 px-6 pt-5">
           <div className="flex flex-col gap-1">
-            <h2 id="back-title" className="text-lg font-semibold">Choose a coin to back</h2>
-            <p className="text-xs text-muted">Moves against $CRYPTO since this round opened.</p>
+            <h2 id="back-title" className="text-lg font-semibold">Choose an asset</h2>
+            <p className="text-xs text-muted">Moves against the benchmark since this round opened.</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close" className="grid size-9 shrink-0 cursor-pointer place-items-center rounded-full text-muted transition-colors duration-150 hover:bg-white/10 hover:text-ink">
             <X size={16} aria-hidden="true" />
@@ -602,7 +596,7 @@ function TeamEditor({ epoch, coins, now, backed, mates, onSave, onClose }: { epo
         <header className="flex items-start justify-between gap-4 px-6 pt-5">
           <div className="flex flex-col gap-1">
             <h2 id="team-title" className="text-lg font-semibold">{excluding ? `Leave out ${leave} ${leave === 1 ? "coin" : "coins"}` : `Pick ${TEAMMATES} teammates`}</h2>
-            <p className="text-xs text-muted">Teammates behind $CRYPTO score zero, so they raise {backed}&apos;s share.</p>
+            <p className="text-xs text-muted">Teammates behind the benchmark score zero, so they raise {backed}&apos;s share.</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close" className="grid size-9 shrink-0 cursor-pointer place-items-center rounded-full text-muted transition-colors duration-150 hover:bg-white/10 hover:text-ink">
             <X size={16} aria-hidden="true" />
@@ -650,7 +644,7 @@ function TeamEditor({ epoch, coins, now, backed, mates, onSave, onClose }: { epo
   );
 }
 
-function EntryPanel(props: { epoch: Epoch; basket: string[]; now: number; decimals: number; fee: { bps: number; cap: string }; collaterals: Collateral[]; next: Epoch | null; backed: string | null; mates: string[]; anchored?: boolean; onBack: (id: string) => void; onMates: (mates: string[]) => void; onSelect: (address: string) => void; onSent: () => void; onClose?: () => void }) {
+function EntryPanel(props: { epoch: Epoch; basket: string[]; now: number; decimals: number; fee: { bps: number; cap: string }; collaterals: Collateral[]; next: Epoch | null; backed: string | null; mates: string[]; marketClosed: string | null; anchored?: boolean; onBack: (id: string) => void; onMates: (mates: string[]) => void; onSelect: (address: string) => void; onSent: () => void; onClose?: () => void }) {
   const { epoch, basket: coins, now, decimals, fee, backed, mates, collaterals } = props;
   const { owner } = useAccount();
   const [amount, setAmount] = useState("");
@@ -664,13 +658,13 @@ function EntryPanel(props: { epoch: Epoch; basket: string[]; now: number; decima
   const symbol = chosen?.symbol ?? COLLATERAL.symbol;
   const wallet = useWalletCollateral(chosen?.mint ?? null, decimals, sent);
   const stage = stageOf(epoch, now);
-  const open = stage === "open" && epoch.entriesOpen;
+  const open = stage === "open" && epoch.entriesOpen && props.marketClosed === null;
   const gross = amount.trim() === "" ? null : parseScaled(amount, decimals);
   const charge = gross !== null && gross > 0n ? feeOf(gross, fee.bps, BigInt(fee.cap)) : null;
   const basketIssue = backed ? basketProblem(coins, backed, mates) : null;
   const short = wallet !== null && gross !== null && Number(gross) / 10 ** decimals > wallet;
   const empty = amount.trim() === "";
-  const problem = !backed ? "Choose a coin first." : gross === null || gross <= 0n ? "Enter an amount above zero." : basketIssue ? basketIssue : short ? `Your wallet has ${formatAmount(wallet ?? 0, 2)} ${symbol}.` : null;
+  const problem = !backed ? "Choose an asset first." : gross === null || gross <= 0n ? "Enter an amount above zero." : basketIssue ? basketIssue : short ? `Your wallet has ${formatAmount(wallet ?? 0, 2)} ${symbol}.` : null;
   const collateralMint = collaterals.length > 1 && chosen ? chosen.mint : undefined;
   const intent: Intent | null = open && problem === null && gross !== null && backed !== null ? { operation: "epoch-entry", opensAt: epoch.opensAt, grossStake: gross.toString(), basket: entryBasket(coins, backed, mates), backedAsset: backed, collateralMint } : null;
   const show = (value: bigint | null) => {
@@ -685,7 +679,8 @@ function EntryPanel(props: { epoch: Epoch; basket: string[]; now: number; decima
   const other = props.next && props.next.address !== epoch.address ? props.next : null;
   const otherOpen = other !== null && stageOf(other, now) === "open" && other.entriesOpen;
   const closedReason =
-    stage === "upcoming"
+    props.marketClosed ??
+    (stage === "upcoming"
       ? `Entries open at ${utcTime(epoch.opensAt)} UTC.`
       : stage === "open"
         ? "This round is not taking entries right now."
@@ -693,7 +688,7 @@ function EntryPanel(props: { epoch: Epoch; basket: string[]; now: number; decima
           ? otherOpen
             ? `This round is closed. Entries are open in the ${windowText(other)} round.`
             : `This round is closed. The next one runs ${windowText(other)}.`
-          : "This round is closed. No other round is open or scheduled.";
+          : "This round is closed. No other round is open or scheduled.");
 
   const head = (
     <div className="flex min-h-9 items-center justify-between gap-3">
@@ -714,7 +709,7 @@ function EntryPanel(props: { epoch: Epoch; basket: string[]; now: number; decima
           <Clock size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
           {closedReason}
         </p>
-        {other && stage !== "upcoming" && stage !== "open" && (
+        {other && props.marketClosed === null && stage !== "upcoming" && stage !== "open" && (
           <button type="button" onClick={() => props.onSelect(other.address)} className={quiet}>
             {otherOpen ? "Go to the open round" : "Show the next round"} <ChevronRight size={14} aria-hidden="true" />
           </button>
@@ -731,8 +726,8 @@ function EntryPanel(props: { epoch: Epoch; basket: string[]; now: number; decima
         <button type="button" onClick={() => setChoosing(true)} aria-haspopup="dialog" className="flex cursor-pointer items-center gap-3 rounded-control bg-surface-2 p-3 text-left transition-colors duration-150 hover:bg-white/10">
           {backed ? <CoinIcon id={backed} size={28} /> : <span className="size-7 shrink-0 rounded-full border border-dashed border-white/20" />}
           <span className="flex min-w-0 flex-1 flex-col">
-            <span className="text-sm font-semibold">{backed ? `Back ${backed}` : "Choose a coin"}</span>
-            <span className="text-[11px] text-muted">{backed ? `In a team of ${EPOCH_BASKET_SIZE}, against $CRYPTO` : "The coin you think will lead this round"}</span>
+            <span className="text-sm font-semibold">{backed ? `${backed} performance` : "Choose an asset"}</span>
+            <span className="text-[11px] text-muted">{backed ? `In a basket of ${EPOCH_BASKET_SIZE}, against the benchmark` : "The asset you think will beat the benchmark"}</span>
           </span>
           <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-accent">
             {backed ? "Change" : "Choose"}
@@ -818,12 +813,14 @@ function EntryPanel(props: { epoch: Epoch; basket: string[]; now: number; decima
           </div>
         </dl>
 
+        <FundsHint />
+
         <SendButton
           intent={intent}
-          label={!backed ? "Choose a coin" : empty ? "Enter an amount" : `Back ${backed}`}
+          label={!backed ? "Choose an asset" : empty ? "Enter an amount" : `Trade ${backed} performance`}
           connectLabel="Connect wallet to continue"
           problem={empty || !backed ? "" : problem}
-          describe={`Back ${backed} with ${amount} ${symbol}`}
+          describe={`${backed} performance entry of ${amount} ${symbol}`}
           onDone={() => {
             setAmount("");
             setSent((count) => count + 1);
@@ -905,21 +902,30 @@ function EntryCard({ lot, epoch, now, decimals, program, collaterals, onSent }: 
   const paid = finalPayout(lot, epoch);
   const payout = paid === null ? null : units(paid, decimals);
   const owed = lot.state === "claimable" && paid !== null && paid > 0n;
+  const refundable = lot.refund !== null && lot.state !== "withdrawn";
+  const cancellable = !refundable && lot.state !== "withdrawn" && lot.execution !== null && epoch?.voidable === true;
   const result = payout !== null && !view.refund ? payout - gross : null;
-  const vaults = useEpochVaults(program, owed && epoch ? epoch.address : null, sent);
-  const source = owed && vaults !== undefined && paid !== null ? withdrawSource(collaterals.map((item) => item.mint), vaults, paid) : null;
+  const vaults = useEpochVaults(program, (owed || refundable) && epoch ? epoch.address : null, sent);
+  const mints = collaterals.map((item) => item.mint);
+  const source = owed && vaults !== undefined && paid !== null ? withdrawSource(mints, vaults, paid) : null;
+  const refundFrom = refundable && vaults !== undefined ? refundMint(mints, vaults, BigInt(lot.grossStake)) : null;
+  const done = () => {
+    setSent((count) => count + 1);
+    onSent();
+  };
   const sourceSymbol = source ? (collaterals[source.index]?.symbol ?? COLLATERAL.symbol) : COLLATERAL.symbol;
   const withdrawLabel = source?.amount ? `Withdraw ${formatAmount(units(source.amount, decimals), 2)} ${sourceSymbol}` : view.refund ? "Withdraw refund" : "Withdraw";
   const change = since.backed?.change ?? null;
   const line = lot.execution
     ? change !== null
-      ? `${change > 0 ? "Ahead of" : "Behind"} $CRYPTO by ${pct(Math.abs(change), 2).replace(/^[+−]/, "")} since ${utcTime(lot.execution.timestamp)} UTC${since.basis === "at close" ? " · final" : since.basis ? ` · ${since.basis}` : ""}`
+      ? `${change > 0 ? "Ahead of" : "Behind"} the benchmark by ${pct(Math.abs(change), 2).replace(/^[+−]/, "")} since ${utcTime(lot.execution.timestamp)} UTC${since.basis === "at close" ? " · final" : since.basis ? ` · ${since.basis}` : ""}`
       : `Counting from ${utcTime(lot.execution.timestamp)} UTC`
     : epoch && now >= epoch.closesAt
-      ? "Never executed, so it is refunded"
+      ? "Never executed, so your stake comes back in full"
       : "Waiting to execute";
-  const payoutText =
-    payout !== null
+  const payoutText = refundable
+    ? `${formatAmount(gross, 2)} ${COLLATERAL.symbol} refund`
+    : payout !== null
       ? `${formatAmount(payout, 2)} ${COLLATERAL.symbol}${view.refund ? " refund" : ""}`
       : lot.state === "withdrawn"
         ? "Withdrawn"
@@ -940,6 +946,7 @@ function EntryCard({ lot, epoch, now, decimals, program, collaterals, onSent }: 
         <span className={`shrink-0 rounded-pill px-2 py-0.5 text-[11px] ${STATUS_TONE[view.group]}`}>{view.label}</span>
       </div>
       <p className={`num text-xs ${change === null ? "text-muted" : change > 0 ? "text-up" : "text-down"}`}>{line}</p>
+      {cancellable && <p className="text-xs text-muted">This round missed its closing time. Cancel it to get your full stake back.</p>}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <dl className="flex gap-6 text-xs">
           <div className="flex flex-col">
@@ -954,15 +961,30 @@ function EntryCard({ lot, epoch, now, decimals, program, collaterals, onSent }: 
             </dd>
           </div>
         </dl>
-        {owed && epoch && source ? (
+        {refundable && epoch && refundFrom ? (
+          <SendButton
+            intent={{ operation: "epoch-refund", opensAt: epoch.opensAt, nonce: lot.nonce, collateralMint: refundFrom.mint }}
+            label="Get refund"
+            connectLabel="Connect wallet"
+            onDone={done}
+            className="h-9 rounded-pill bg-accent px-4 text-xs font-medium text-white"
+          />
+        ) : refundable ? (
+          <span className="text-[11px] text-muted">{vaults === undefined ? "Checking…" : "Not refundable yet"}</span>
+        ) : cancellable && epoch ? (
+          <SendButton
+            intent={{ operation: "epoch-void", opensAt: epoch.opensAt }}
+            label="Cancel round"
+            connectLabel="Connect wallet"
+            onDone={done}
+            className="h-9 rounded-pill bg-accent px-4 text-xs font-medium text-white"
+          />
+        ) : owed && epoch && source ? (
           <SendButton
             intent={{ operation: "epoch-withdraw", opensAt: epoch.opensAt, nonce: lot.nonce, amount: source.amount, collateralMint: source.mint }}
             label={withdrawLabel}
             connectLabel="Connect wallet"
-            onDone={() => {
-              setSent((count) => count + 1);
-              onSent();
-            }}
+            onDone={done}
             className="h-9 rounded-pill bg-accent px-4 text-xs font-medium text-white"
           />
         ) : owed ? (
@@ -1079,7 +1101,7 @@ export function EpochsView({ overview, roster, serverNow, staleSince = null }: {
   const rankedBasket = ranked ? epochBasket(ranked) : [];
   const rankedCoins = rankedBasket.length > 0 ? rankedBasket : [...roster];
   const stage: Stage | null = epoch ? stageOf(epoch, now) : null;
-  const open = stage === "open" && Boolean(epoch?.entriesOpen);
+  const open = stage === "open" && Boolean(epoch?.entriesOpen) && overview.configuration.lifecycle === "active";
   const next = epochs.find((item) => stageOf(item, now) === "open" && item.entriesOpen) ?? epochs.find((item) => stageOf(item, now) === "upcoming") ?? null;
   const collaterals = useMemo(() => collateralsOf(overview.configuration), [overview.configuration]);
 
@@ -1101,10 +1123,16 @@ export function EpochsView({ overview, roster, serverNow, staleSince = null }: {
         <h1 className="text-3xl font-semibold tracking-tight">Epoch</h1>
         <p className="text-sm text-muted">Your entry counts from its execution to the fixed Epoch close.</p>
       </div>
-      <ModeSwitch />
+      <TradeModes current="epoch" />
     </header>
   );
-  const notices = staleSince !== null && <Notice>Rounds could not be refreshed. Showing them as of {utcTime(staleSince)} UTC.</Notice>;
+  const marketClosed = marketClosedReason(overview.configuration);
+  const notices = (
+    <>
+      {marketClosed && <Notice>{marketClosed}</Notice>}
+      {staleSince !== null && <Notice>Rounds could not be refreshed. Showing them as of {utcTime(staleSince)} UTC.</Notice>}
+    </>
+  );
 
   if (!epoch || !stage) {
     return (
@@ -1124,6 +1152,7 @@ export function EpochsView({ overview, roster, serverNow, staleSince = null }: {
     fee: overview.configuration.entryFee,
     collaterals,
     next,
+    marketClosed,
     backed,
     mates,
     onBack: (id: string) => {
@@ -1159,7 +1188,7 @@ export function EpochsView({ overview, roster, serverNow, staleSince = null }: {
       {open && !sheet && (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/[0.06] bg-bg/95 p-3 xl:hidden">
           <button type="button" onClick={() => setSheet(true)} className={`${primary} cursor-pointer`}>
-            {backed ? `Back ${backed}` : "Choose a coin to back"} <ChevronRight size={16} aria-hidden="true" />
+            {backed ? `Trade ${backed} performance` : "Choose an asset"} <ChevronRight size={16} aria-hidden="true" />
           </button>
         </div>
       )}

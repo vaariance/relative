@@ -36,6 +36,8 @@ function done(built: UnsignedTransaction): { title: string; text: string } {
   if (built.operation === "refund") return { title: "Refund sent", text: "The money is on its way back to your wallet." };
   if (built.operation === "epoch-entry") return { title: "Entry placed", text: "It starts from the next price, within a few seconds." };
   if (built.operation === "epoch-withdraw") return { title: "Withdrawal sent", text: `The ${COLLATERAL.symbol} is on its way to your wallet.` };
+  if (built.operation === "epoch-refund") return { title: "Refund sent", text: "Your stake is on its way back to your wallet." };
+  if (built.operation === "epoch-void") return { title: "Round cancelled", text: "Every entry in it can now be refunded." };
   if (built.operation === "withdraw") return { title: "Withdrawal sent", text: `The ${COLLATERAL.symbol} is on its way to your wallet.` };
   return { title: "Order placed", text: "It fills at the next price update, usually within a minute." };
 }

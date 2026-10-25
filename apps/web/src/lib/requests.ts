@@ -15,7 +15,9 @@ export type Intent =
   | { operation: "refund"; requestId: string; collateralMint?: string }
   | { operation: "withdraw"; amount: string; collateralMint?: string }
   | { operation: "epoch-entry"; opensAt: number; grossStake: string; basket: string[]; backedAsset: string; collateralMint?: string }
-  | { operation: "epoch-withdraw"; opensAt: number; nonce: string; amount?: string; collateralMint?: string };
+  | { operation: "epoch-withdraw"; opensAt: number; nonce: string; amount?: string; collateralMint?: string }
+  | { operation: "epoch-refund"; opensAt: number; nonce: string; collateralMint?: string }
+  | { operation: "epoch-void"; opensAt: number };
 
 export type Outcome<T> = { ok: true; value: T } | { ok: false; code: string; message: string };
 

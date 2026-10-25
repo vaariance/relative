@@ -1,20 +1,20 @@
-import { EPOCH_BASKET_SIZE, type Epoch, type EpochLot, type EpochOverview } from "@eox/app-api";
+import { EPOCH_BASKET_SIZE, type Epoch, type EpochConfiguration, type EpochLot, type EpochOverview } from "@eox/app-api";
 
 export const SCORE_DIGITS = 12;
-export const CLOSING_GRACE_SECONDS = 86_400;
 const SCALE = 10n ** BigInt(SCORE_DIGITS);
 
-export type Stage = "upcoming" | "unopened" | "open" | "closing" | "expired" | "scoring" | "allocating" | "settled" | "voided";
+export type Stage = "upcoming" | "unopened" | "open" | "closing" | "expired" | "scoring" | "allocating" | "settled" | "voided" | "empty";
 
 export function stageOf(epoch: Epoch, now: number): Stage {
   if (epoch.phase === "voided") return "voided";
+  if (epoch.phase === "empty") return "empty";
   if (epoch.phase === "settled") return "settled";
   if (epoch.phase === "scoring") return "scoring";
   if (epoch.phase === "allocating") return "allocating";
   if (epoch.phase === "draft") return now < epoch.opensAt ? "upcoming" : "unopened";
   if (now < epoch.opensAt) return "upcoming";
   if (now < epoch.closesAt) return "open";
-  if (now > epoch.closesAt + CLOSING_GRACE_SECONDS) return "expired";
+  if (now > epoch.closingDeadline) return "expired";
   return "closing";
 }
 
@@ -110,12 +110,19 @@ export const STAGE_LABEL: Record<Stage, string> = {
   allocating: "Allocating payouts",
   settled: "Settled",
   voided: "Refunded",
+  empty: "No entries",
 };
+
+export function marketClosedReason(configuration: EpochConfiguration): string | null {
+  if (configuration.lifecycle === "preparing") return "Epoch is being set up. Entries open once it is ready.";
+  if (configuration.lifecycle === "archived") return "Epoch has closed and takes no new entries. You can still withdraw payouts and refunds.";
+  return null;
+}
 
 export const TIMELINE = ["Open", "Closing reference", "Scoring", "Allocating payouts", "Withdrawable"] as const;
 
 export function timelineStep(stage: Stage): number {
-  return { upcoming: -1, unopened: -1, open: 0, closing: 1, expired: -1, scoring: 2, allocating: 3, settled: 4, voided: -1 }[stage];
+  return { upcoming: -1, unopened: -1, open: 0, closing: 1, expired: -1, scoring: 2, allocating: 3, settled: 4, voided: -1, empty: -1 }[stage];
 }
 
 export interface Move {
@@ -182,6 +189,11 @@ export function finalPayout(lot: EpochLot, epoch: Epoch | null): bigint | null {
   return (BigInt(epoch.settlementPot) * (gross - BigInt(lot.fee)) * score) / total;
 }
 
+export function refundMint(mints: readonly string[], vaults: VaultBalances | null, owed: bigint): { mint?: string; index: number } | null {
+  const source = withdrawSource(mints, vaults, owed);
+  return source === null || source.amount !== undefined ? null : { mint: source.mint, index: source.index };
+}
+
 export interface VaultBalances {
   primary: bigint;
   secondary: bigint;
@@ -227,12 +239,14 @@ export interface LotView {
 export function lotView(lot: EpochLot, epoch: Epoch | null, now: number): LotView {
   const stage = epoch ? stageOf(epoch, now) : null;
   const afterClose = epoch !== null && now >= epoch.closesAt;
-  const refund = (stage !== null && refundStage(stage)) || epoch?.allZero === true || lot.execution === null;
+  const refund = lot.refund !== null || (stage !== null && refundStage(stage)) || epoch?.allZero === true || lot.execution === null;
   const owed = lot.claimable !== null && BigInt(lot.claimable) > 0n;
   if (lot.state === "withdrawn") return { group: "history", label: "Withdrawn", refund };
+  if (lot.refund !== null) return { group: "withdrawable", label: "Refund ready", refund: true };
   if (owed) return { group: "withdrawable", label: refund ? "Refund withdrawable" : "Payout withdrawable", refund };
   if (lot.state === "claimable") return { group: "history", label: "Settled · no payout", refund };
-  if (stage !== null && refundStage(stage)) return { group: "pending", label: "Awaiting refund", refund: true };
+  if (stage === "expired") return { group: "pending", label: "Round not closed", refund: true };
+  if (stage === "voided") return { group: "pending", label: "Awaiting refund", refund: true };
   if (lot.state === "pending") return afterClose ? { group: "pending", label: "Not executed · refund due", refund: true } : { group: "pending", label: "Awaiting execution", refund };
   if (lot.state === "scored") return { group: "active", label: "Scored", refund };
   return { group: "active", label: "Active", refund };

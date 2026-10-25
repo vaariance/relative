@@ -60,6 +60,10 @@ export async function buildTransaction(owner: string, intent: Intent): Promise<O
         return (await api.buildEpochEntry({ owner, opensAt: intent.opensAt, grossStake: intent.grossStake, basket: intent.basket, backedAsset: intent.backedAsset, collateralMint: intent.collateralMint })).data;
       case "epoch-withdraw":
         return (await api.buildEpochWithdraw({ owner, opensAt: intent.opensAt, nonce: intent.nonce, amount: intent.amount, collateralMint: intent.collateralMint })).data;
+      case "epoch-refund":
+        return (await api.buildEpochRefund({ owner, opensAt: intent.opensAt, nonce: intent.nonce, collateralMint: intent.collateralMint })).data;
+      case "epoch-void":
+        return (await api.buildEpochVoid({ owner, opensAt: intent.opensAt })).data;
       default:
         throw new CoxApiError("INVALID_REQUEST", "unknown operation", 0);
     }
