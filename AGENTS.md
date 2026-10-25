@@ -2050,3 +2050,10 @@ another agent needs to know.
 - **Verification:** Actual local first attempt captured the boundary but safely required rescheduling while the old market and accepted deposit continued. After the fix, the exact replacement boundary publication and full inclusion completed. Restart tests cover multiple missing closes followed by a later available boundary. No freshness window or 24-hour failure rule changed.
 - **Rules for agents:** Never replace an unavailable closing reference with a later price or permanently skip its round.
 - **Refs:** `apps/cox-publisher/README.md`; private `.cox/local-rehearsal/inclusion-attempt-1/`.
+
+### 2026-10-25 · Peter (Codex) · Grow expanded publication staging before price work
+
+- **Area:** Native chain reader, executor, instruction builder and tests.
+- **What:** The actual contract rejected the first post-inclusion publication because 33 classes require 16 KiB batch/publication accounts while their previous allocation was 8 KiB. Added bounded growth maintenance before new price work. Expanded-account sizes join the existing confirmed methodology batch read; no polling timer or additional RPC request is introduced. Both allocations enter the final signing guard. Growth uses the generated ABI’s writable permissions and is resumable, bounded to 8 KiB per account step, and forbidden during accepted Basic work.
+- **Verification:** Actual local growth of both accounts succeeded, followed by publication and older frozen-Epoch settlement. Unit coverage includes partial completion/restart, complete allocations, malformed oversizing, accepted-stage protection and maximum-class page bounds. No contract source, economic arithmetic or ABI changed.
+- **Refs:** `apps/cox-publisher/README.md`; private `.cox/local-rehearsal/publisher-frozen-close-final.log`.
