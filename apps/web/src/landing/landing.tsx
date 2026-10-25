@@ -391,18 +391,6 @@ const styles = stylex.create({
   },
   footButton: { padding: 0, borderWidth: 0, backgroundColor: "transparent", fontFamily: "inherit", textAlign: "left", cursor: "pointer" },
   footFact: { fontSize: 14, color: color.fg },
-  footNote: {
-    display: "flex",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    gap: 12,
-    paddingBlock: 24,
-    borderTopWidth: 1,
-    borderTopStyle: "solid",
-    borderTopColor: color.line,
-    fontSize: 12,
-    color: color.muted,
-  },
   footWord: { paddingTop: 24, paddingBottom: 32, color: color.fg },
   end: {
     display: "flex",
@@ -438,20 +426,20 @@ const ROSTER = ["BTC", "ETH", "SOL", "XRP", "BNB", "AVAX", "SUI", "NEAR"];
 const ROSTER_NARROW = 4;
 
 const questions: Question[] = [
-  { ask: "What is Relative?", answer: "A market where you back a coin to do better than the rest of crypto. You are not betting on the price going up. You are betting on your coin beating the others." },
+  { ask: "What is Relative?", answer: "A market where you trade a coin's performance against the rest of crypto. You are not betting on the price going up. You are betting on your coin beating the others." },
   { ask: "What is \"the market\"?", answer: "It is the average of every coin on the board, with each coin counted equally. Every coin is scored against that average." },
   { ask: "How do I win?", answer: "Your share grows when your coin does better than the market. A coin can fall in price and still win, as long as it falls less than the rest." },
   { ask: "Can I lose money?", answer: "Yes. If your coin falls behind the market, your share shrinks." },
   { ask: "Where do winnings come from?", answer: "From the other people in the pool. Everyone's money sits in one shared pool. When your coin pulls ahead, value moves to its backers from the coins that fell behind. Nothing is created from nowhere." },
-  { ask: "Do I own the coin I back?", answer: "No. You hold a share of the pool that follows how the coin does against the market. You never hold the coin itself." },
-  { ask: "Which coins can I back?", answer: "Every coin on the board, including Bitcoin, Ethereum, Solana and a set of newer names. Stablecoins are left out because their price is not meant to move." },
-  { ask: "How fast does an order fill?", answer: "At the next price, usually within about a minute. The price is not locked at the moment you tap, so the fill can differ a little from what you saw." },
-  { ask: "Where do prices come from?", answer: "From Kraken, once a minute. If Kraken had no trade for a coin in that minute, the price comes from Coinbase, then Bybit." },
+  { ask: "Do I own the coin I trade?", answer: "No. You hold a share of the pool that follows how the coin performs against the benchmark. You never hold the coin itself." },
+  { ask: "Which coins can I trade?", answer: "Every coin on the board, including Bitcoin, Ethereum, Solana and a set of newer names. Stablecoins are left out because their price is not meant to move." },
+  { ask: "How fast does an order fill?", answer: "At the next price, usually within seconds. The price is not locked at the moment you tap, so the fill can differ a little from what you saw." },
+  { ask: "Where do prices come from?", answer: "From Pyth, updated every second. Between settlements on chain, the app shows live estimates." },
   { ask: "Can I move from one coin to another?", answer: "Yes. You can move what you have behind one coin to another coin without cashing out first." },
-  { ask: "How do I cash out?", answer: "Choose cash out on any coin you back. It fills at the next price, and then you collect the USDC to your wallet." },
-  { ask: "Are there fees?", answer: "A small one: 0.02% of each trade, and never more than 2 USDC. Solana also charges its usual small network fee." },
-  { ask: "What do I need to start?", answer: "A Solana wallet set to devnet, a little devnet SOL for network fees, and devnet USDC. The Faucet page in the app links to both." },
-  { ask: "Is this real money?", answer: "Not yet. Relative runs on Solana devnet with devnet USDC, which has no real value." },
+  { ask: "How do I cash out?", answer: "Choose cash out on any position. It fills at the next price, and then you collect the USDC to your wallet." },
+  { ask: "Are there fees?", answer: "A small one: 0.02% of each trade, and never more than 0.20 USDC. Solana also charges its usual small network fee." },
+  { ask: "What do I need to start?", answer: "Log in with Google or a Solana wallet, then claim free rlUSD on the Faucet page. Wallets low on SOL also get a little devnet SOL for network fees. You can use devnet USDC from Circle too." },
+  { ask: "Is this real money?", answer: "Not yet. Relative runs on Solana devnet with devnet USDC and rlUSD, test dollars with no real value." },
 ];
 
 export async function Landing() {
@@ -508,7 +496,7 @@ export async function Landing() {
               <p {...stylex.props(styles.intro)}>Every coin is ranked by how it does against the whole market. {star.id} is leading.</p>
               <span {...stylex.props(styles.figure, up ? styles.ahead : styles.behind)}>{formatChange(star.lead)}</span>
               <p {...stylex.props(styles.muted)}>{up ? "ahead of" : "behind"} the market</p>
-              <Link href={`/assets/${star.id}`} {...stylex.props(styles.button)}>Back {star.id} →</Link>
+              <Link href={`/assets/${star.id}`} {...stylex.props(styles.button)}>Trade {star.id} →</Link>
             </div>
           </div>
         </section>
@@ -545,7 +533,7 @@ export async function Landing() {
             <div {...stylex.props(styles.aside)}>
               <p {...stylex.props(styles.label)}>The board</p>
               <h2 {...stylex.props(styles.stencil, styles.plainTitle)}>
-                <Stencil lines={["Rank it.", "Back it."]} align="start" />
+                <Stencil lines={["Rank it.", "Trade it."]} align="start" />
               </h2>
               <p {...stylex.props(styles.plainText)}>Every coin is measured against the market. Right of the line is ahead. Left is behind.</p>
               <Link href="/markets" {...stylex.props(styles.textLink)}>See all {board.count} coins</Link>
@@ -593,7 +581,7 @@ export async function Landing() {
             </div>
             <div {...stylex.props(styles.trioItem)}>
               <span {...stylex.props(styles.trioNumber)}>02</span>
-              <h3 {...stylex.props(styles.trioName)}>Back it</h3>
+              <h3 {...stylex.props(styles.trioName)}>Trade it</h3>
               <p {...stylex.props(styles.trioText)}>Put USDC behind it. Your share grows when it beats the market.</p>
             </div>
             <div {...stylex.props(styles.trioItem)}>
@@ -620,7 +608,7 @@ export async function Landing() {
               <span {...stylex.props(styles.footLogo)}>
                 <Stencil lines={["RELATIVE"]} align="start" />
               </span>
-              <p {...stylex.props(styles.footText)}>Back the coin your analysis says will do better than the rest of crypto.</p>
+              <p {...stylex.props(styles.footText)}>Trade the performance of the coin your analysis says will beat the rest of crypto.</p>
               <Link href="/markets" {...stylex.props(styles.button)}>Open app →</Link>
               <a href="https://x.com/getrelativ" target="_blank" rel="noopener noreferrer" {...stylex.props(styles.footLink)}>X · @getrelativ</a>
             </div>
@@ -641,9 +629,9 @@ export async function Landing() {
             <div {...stylex.props(styles.footColumn)}>
               <p {...stylex.props(styles.label)}>Status</p>
               <span {...stylex.props(styles.footFact)}>Solana devnet</span>
-              <span {...stylex.props(styles.footFact)}>Devnet USDC only</span>
+              <span {...stylex.props(styles.footFact)}>Devnet USDC and rlUSD</span>
               <span {...stylex.props(styles.footFact)}>{board ? `${board.count} coins ranked` : "Coins ranked live"}</span>
-              <span {...stylex.props(styles.footFact)}>Prices every minute</span>
+              <span {...stylex.props(styles.footFact)}>Prices every second</span>
             </div>
             <nav aria-label="Legal" {...stylex.props(styles.footColumn)}>
               <p {...stylex.props(styles.label)}>Legal</p>
@@ -651,10 +639,6 @@ export async function Landing() {
               <Link href="/privacy" {...stylex.props(styles.footLink)}>Privacy Policy</Link>
               <CookieSettingsButton className={stylex.props(styles.footLink, styles.footButton).className} />
             </nav>
-          </div>
-          <div {...stylex.props(styles.footNote)}>
-            <span>Relative is a test product. Devnet USDC has no real value.</span>
-            <span>Nothing on this page is financial advice.</span>
           </div>
           <div aria-hidden="true" {...stylex.props(styles.footWord)}>
             <Stencil lines={["RELATIVE"]} fill />

@@ -303,7 +303,7 @@ export function Features({ data }: { data: FeatureData }) {
         </div>
         <div {...stylex.props(styles.body)}>
           <h3 {...stylex.props(styles.title)}>Live scores</h3>
-          <p {...stylex.props(styles.text)}>Every coin is measured against the market and updated every minute.</p>
+          <p {...stylex.props(styles.text)}>Every coin is measured against the market and updated every second.</p>
         </div>
       </article>
 
@@ -335,8 +335,8 @@ export function Features({ data }: { data: FeatureData }) {
           </div>
         </div>
         <div {...stylex.props(styles.body)}>
-          <h3 {...stylex.props(styles.title)}>Back it in one step</h3>
-          <p {...stylex.props(styles.text)}>Choose an amount and confirm. Your order fills at the next price, about a minute later.</p>
+          <h3 {...stylex.props(styles.title)}>Trade it in one step</h3>
+          <p {...stylex.props(styles.text)}>Choose an amount and confirm. Your order fills at the next price, usually within seconds.</p>
         </div>
       </article>
 
