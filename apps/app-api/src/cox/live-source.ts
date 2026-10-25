@@ -99,7 +99,10 @@ export class PoolMethodologyChanged extends Error {
 function marketGeneration(pool: Pool, address: PublicKey, epochConfig: PublicKey | null): MarketGeneration | null {
   if (pool.lifecycleVersion === 0) return null;
   const id = Uint8Array.from(pool.generation);
-  if (id.every((byte) => byte === 0) || pool.assetRegistry.equals(PublicKey.default)) throw new Error("PoolGenerationMissing");
+  const unnamed = id.every((byte) => byte === 0);
+  const unregistered = pool.assetRegistry.equals(PublicKey.default);
+  if (unnamed && unregistered) return null;
+  if (unnamed || unregistered) throw new Error("PoolGenerationMissing");
   const key = epochConfig ? marketGenerationKey({ generation: id, assetRegistry: pool.assetRegistry, basicPool: address, epochConfig }) : null;
   return { id: Buffer.from(id).toString("hex"), assetRegistry: pool.assetRegistry.toBase58(), epochConfig: epochConfig?.toBase58() ?? null, key };
 }

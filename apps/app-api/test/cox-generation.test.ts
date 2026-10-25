@@ -36,7 +36,13 @@ let dir = "";
 
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-async function open(phase: Phase) {
+function zero(data: Buffer, value: Uint8Array): void {
+  const at = data.indexOf(Buffer.from(value));
+  if (at < 0 || data.indexOf(Buffer.from(value), at + 1) >= 0) throw new Error("value must occur once");
+  data.fill(0, at, at + value.length);
+}
+
+async function open(phase: Phase, legacy = false) {
   dir = mkdtempSync(join(tmpdir(), "cox-generation-"));
   const fixture = JSON.parse(readFileSync(join(root, "packages", "cox", "fixtures", "generation", `${phase}.json`), "utf8")) as {
     accounts: { address: string; dataHex: string; name: string; owner: string }[];
@@ -45,6 +51,12 @@ async function open(phase: Phase) {
   for (const account of fixture.accounts) connection.set(account.address, new PublicKey(account.owner), Buffer.from(account.dataHex, "hex"));
   const program = loadProgram(connection as unknown as Connection, idlPath);
   const poolKey = fixture.accounts.find((a) => a.name === "pool")!.address;
+  const fresh = decodeAccount(program, "pool", connection.accounts.get(poolKey)!);
+  if (legacy) {
+    const data = connection.accounts.get(poolKey)!.data;
+    zero(data, Uint8Array.from(fresh.generation));
+    zero(data, fresh.assetRegistry.toBytes());
+  }
   const pool = decodeAccount(program, "pool", connection.accounts.get(poolKey)!);
   const mint = Buffer.alloc(82);
   mint[44] = 6;
@@ -88,5 +100,11 @@ describe("fresh market generations", () => {
     });
     await expect(transactions.deposit({ owner: "HgC4Jn7XMLzNsDjVdsr1x7BDuGBb2SBvx5TFLSUYaEyU", toClass: "CRYPTO", amount: "1000000", minimumUnits: "0", expiryBatch: Math.floor(Date.now() / 1000) - source.manifest.origin + 5, expectedFeeVersion: pool.feeVersion.toString() }))
       .rejects.toBeInstanceOf(TradingClosedError);
+  });
+  it("reads a legacy pool archived in place, with a lifecycle but no generation, as legacy and archived", async () => {
+    const { source } = await open("archived", true);
+    expect((await source.deployment()).generation).toBeNull();
+    await source.tick();
+    expect((await source.status(Math.floor(Date.now() / 1000))).trading).toMatchObject({ open: false, gate: "archived", lifecycle: "archived" });
   });
 });
