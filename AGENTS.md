@@ -2087,3 +2087,14 @@ another agent needs to know.
 - **Rules for agents:** Do not treat a lifecycle marker as proof of a fresh generation; read the generation id and registry.
 - **Open:** Pause B: pool 3 and Epoch config 3 identities from Peter, then their `pool-3/` prefixes.
 - **Refs:** commits `9a91900`, `199a047`.
+
+### 2026-10-25 · Joel (Claude Code) · Pause B prepared; live APIs not switched
+
+- **Area:** `apps/app-api` (`src/cox/epoch-source.ts`); Cloud Run `cox-app-api-live`, dev VM; Firestore `cox-app-api`; local branch `pause-b-pool-3`.
+- **What:** Peter's 2026-10-25 Pause B request for Basic pool 3 `Dwkxra6m…ETZT` and Epoch config 3 `GrCCt9M2…aPhs`.
+  - **Preparation fix:** the Epoch program lets anyone prepare a round while its configuration is Preparing and refuses only Archived. The API refused anything but Active, so it could not build the 16:00 round's preparation before admission opens. It now refuses only Archived (`62a64e8`). The Preparing fixture builds a preparation; an Archived configuration is still refused. 148 tests pass.
+  - **Deployed:** Cloud Run `cox-app-api-live-00032-vn6` (image `cox-app-api:8d9a3f6`) and the VM at `8d9a3f6`, both still on archived pool 2.
+  - **Staged, not applied:** the VM switch to pool 3 is commit `102f4a1` on local branch `pause-b-pool-3`, not pushed, so no deploy from `working` can switch early. It sets pool 3, Epoch config 3, the three `pool-3/` prefixes and the new state directory `/opt/eox/state/cox-app-api-live-pool-3`. On Cloud Run the switch is `COX_POOL_ID=3`, `COX_EPOCH_CONFIG`, the three `pool-3/` prefixes and `APP_API_HISTORY_GCS=gs://colosseum-cox-app-api-history-dev/pool-3/`; RPC and secrets stay the same.
+  - **Isolation:** both `pool-3/` storage prefixes are empty. Submissions go to Firestore `coxSubmissionsPool3`, whose expiry policy is now set.
+- **Rules for agents:** Do not switch either API to pool 3 before Peter's initialization-ready message; the accounts do not exist yet, and the API would fail at start.
+- **Open:** Peter: the ready message with the methodology and registry-version addresses and digests.
