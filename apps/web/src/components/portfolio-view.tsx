@@ -1,27 +1,52 @@
 "use client";
 
 import type { CoxStatus } from "@eox/app-api";
-import { ArrowDownToLine, Clock, Undo2, Wallet } from "lucide-react";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { ArrowDownToLine, Clock, Coins, Undo2, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { shortAddress } from "@/lib/address";
-import { COLLATERAL } from "@/lib/config";
+import { COLLATERAL, TEST_COLLATERAL } from "@/lib/config";
 import { costBasis, paidFor } from "@/lib/basis";
 import { direction, formatAmount, formatSigned } from "@/lib/format";
 import { expiryAfter } from "@/lib/market";
 import { CRYPTO_CLASS, type ClassView, nameOf, positionName, toNumber, unitDigits } from "@/lib/view";
 import { useAccount } from "./account";
+import { type Balances, readBalances } from "./funds-hint";
 import { useLive } from "./live";
 import { useOpenBatch } from "./open-batch";
+import { ProfileCard } from "./profile-card";
 import { RequestList } from "./request-list";
 import { SendButton } from "./send-button";
 import { Figure, StatCard } from "./stat-card";
+
+function useWalletBalances(owner: string | null): Balances | null {
+  const { connection } = useConnection();
+  const [held, setHeld] = useState<{ owner: string; balances: Balances } | null>(null);
+  useEffect(() => {
+    if (!owner) return;
+    let current = true;
+    const load = () =>
+      readBalances(connection, owner)
+        .then((balances) => current && setHeld({ owner, balances }))
+        .catch(() => undefined);
+    void load();
+    const focus = () => void load();
+    window.addEventListener("focus", focus);
+    return () => {
+      current = false;
+      window.removeEventListener("focus", focus);
+    };
+  }, [connection, owner]);
+  return owner && held?.owner === owner ? held.balances : null;
+}
 
 export function PortfolioView({ classes, status, decimals }: { classes: ClassView[]; status: CoxStatus; decimals: number }) {
   const { portfolio, owner, live, loading, market } = useAccount();
   const { wallet } = useLive();
   const [receive, setReceive] = useState<string | null>(null);
+  const balances = useWalletBalances(live ? owner : null);
   const receiveIn = market.collaterals.find((item) => item.mint === receive) ?? market.collaterals.find((item) => item.primary) ?? null;
   const router = useRouter();
   const open = useOpenBatch(status.currentBatch);
@@ -62,9 +87,24 @@ export function PortfolioView({ classes, status, decimals }: { classes: ClassVie
         <h1 className="font-display text-title font-semibold tracking-tight">Portfolio</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted">
           {who}
-        </p>      </div>
+        </p>
+      </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {live && <ProfileCard />}
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <StatCard icon={Coins} title="Wallet balance" value={<Figure text={balances ? formatAmount(balances.usdc, 2) : owner && live ? "…" : "—"} unit={COLLATERAL.symbol} />}>
+          <dl className="mt-3 flex flex-col gap-1 text-xs">
+            <div className="flex justify-between">
+              <dt className="text-muted">{TEST_COLLATERAL.symbol}</dt>
+              <dd className="num">{balances ? formatAmount(balances.testUsdc, 2) : "—"}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-muted">Devnet SOL</dt>
+              <dd className="num">{balances ? balances.sol.toFixed(4) : "—"}</dd>
+            </div>
+          </dl>
+        </StatCard>
         {cards.map((card) => (
           <StatCard key={card.label} icon={card.icon} title={card.label} value={<Figure text={formatAmount(card.value, 4)} unit={COLLATERAL.symbol} />} caption={card.note} />
         ))}
