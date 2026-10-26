@@ -163,20 +163,24 @@ publication archives or monitor state. Those require separate backup and restore
 
 ## Publisher archive backups
 
-The Rust publisher archives confirmed pool 2 publication records at
-`/var/lib/cox-publisher/basic-2-adaptive/publications/<sequence>.json` before
-overwriting the reusable on-chain account. V2 records retain confirmed provenance;
+The current Rust publisher archives Basic pool 3 records under its isolated
+`/var/lib/cox-publisher/generations/<generation>/publications/<sequence>.json`.
+Legacy pool-2 state and cloud history remain preserved; do not restart the old
+runtime against archived instances. V2 records retain confirmed provenance;
 backup does not make them finalized.
 
-`cox-publisher-backup.timer` invokes the native `backup` command every minute.
-API records are exported to
-`gs://colosseum-cox-publication-archives-dev/pool-2/history/<sequence>/<sha256>.json`.
-Recovery objects/manifests are separate under `basic-2/native`. The old TypeScript
-backup script has been removed. Preserve historical pool 0/1 cloud objects.
+`cox-publisher-backup.timer` invokes native incremental backup every minute.
+Current API records use
+`gs://colosseum-cox-publication-archives-dev/pool-3/history/<sequence>/<sha256>.json`;
+recovery objects/manifests use `pool-3/native`. Publication history, immutable
+recovery objects and legacy-generation archives are not covered by deletion
+rules. The lifecycle template adds seven-day expiry only for current preview,
+chain-notification and recovery-manifest prefixes; applying that updated template
+requires release approval. Preserve historical pool 0/1/2 cloud objects.
 
 See the [native backup and restore instructions](../../apps/cox-publisher/README.md#native-backup-and-restore)
-for private configuration, workload identity, integrity checks and isolated restore.
-Incremental uploads and explicit retention remain follow-up work. Check failures:
+for workload identity, create-only integrity, 36-hour local prices, bounded local
+publication retention and isolated restore. Check failures:
 
 ```sh
 systemctl status cox-publisher-backup.timer

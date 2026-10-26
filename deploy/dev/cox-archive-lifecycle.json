@@ -8,7 +8,9 @@
         "age": 7,
         "matchesPrefix": [
           "pool-2/preview/",
-          "pool-2/chain-changes/"
+          "pool-2/chain-changes/",
+          "pool-3/preview/",
+          "pool-3/chain-changes/"
         ]
       }
     },
@@ -19,7 +21,8 @@
       "condition": {
         "age": 7,
         "matchesPrefix": [
-          "basic-2/native/manifests/"
+          "basic-2/native/manifests/",
+          "pool-3/native/manifests/"
         ]
       }
     }
