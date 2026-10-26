@@ -2148,3 +2148,11 @@ another agent needs to know.
   - **Verified:** a devnet simulation of an entry on the live sealed 16:00 round (31 assets, configuration `active`) succeeded at 56,671 compute units, the same as Peter's measurement. Both APIs then built that entry (HTTP 200, nonce 0). Nothing was signed or sent.
 - **Rules for agents:** Any new Epoch transaction builder must start with the 256 KB heap request; the program fails to read its accounts on the default heap.
 - **Refs:** commits `7ce2c40`, `5e7c690`.
+
+### 2026-10-25 · Peter (Codex) · Fresh reset target and committed release preparation
+
+- **Area:** Ignored fresh-generation preparation, inventory and release artifacts; no live protocol mutation.
+- **What:** Peter requested tomorrow noon for the new benchmark/reference origin. Recorded 26 October 2026 12:00 UTC (13:00 Lagos), with the first Epoch 12:00–16:00 UTC using existing scheduling. The target remains unarmed pending readiness; an elapsed boundary requires explicit rescheduling. Joel was emailed the target and unchanged Pause B requirement.
+- **Verification:** Rebuilt committed `ef3c861` Basic/Epoch artifacts with pinned Agave 2.2.1/platform-tools v1.48 and locked dependencies. Separate production and devnet compiled runtime suites pass: Basic 60 production and 63 devnet; Epoch/combined 22. Initial test-artifact/feature mismatch was corrected before complete reruns. The separate Linux publisher Docker build is in progress on the VM; no installation/restart occurred.
+- **Open:** Latest inventory retains the same three approved owners, economic request records and custody bytes, but routine publications changed backing and rounding balances. The discard/archive step is held for Peter's required economic-inventory review. No archival, collateral movement, live upgrade or admission occurred. Preserve the unrelated uncommitted Alchemy entry.
+- **Refs:** Private `.cox/fresh-generation-preparation.json`, `.cox/fresh-release-ef3c861/contract-build.json`; Joel email `1a174a4ce99cb89f`.
