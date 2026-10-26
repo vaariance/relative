@@ -1,5 +1,5 @@
 import { getAssets, getPublications } from "@/lib/data";
-import { standings } from "@/lib/view";
+import { latest, levelSeries, standings } from "@/lib/view";
 
 const DAY = 86400;
 const TOP = 3;
@@ -21,6 +21,8 @@ export interface Board {
   star: BoardRow;
   bottom: BoardRow[];
   spark: number[];
+  level: number | null;
+  levelSpark: number[];
 }
 
 function sample(values: number[], size: number): number[] {
@@ -45,7 +47,10 @@ export async function loadBoard(): Promise<Board | null> {
     const end = series[series.length - 1].cutoff;
     const day = series.filter((point) => point.cutoff >= end - DAY);
     const spark = sample(day.map((point) => point.value / day[0].value - 1), SPARK);
-    return { rows, top, count: ranked.length, scale, star, bottom: ranked.slice(-3), spark };
+    const levels = levelSeries(publications);
+    const levelDay = levels.filter((point) => point.cutoff >= end - DAY);
+    const levelSpark = sample(levelDay.map((point) => point.value / levelDay[0].value - 1), SPARK);
+    return { rows, top, count: ranked.length, scale, star, bottom: ranked.slice(-3), spark, level: latest(levels), levelSpark };
   } catch {
     return null;
   }

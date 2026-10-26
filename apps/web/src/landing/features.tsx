@@ -40,7 +40,20 @@ const bob = stylex.keyframes({
 });
 
 const styles = stylex.create({
-  grid: { display: "grid", gridTemplateColumns: { default: "repeat(2, minmax(0, 1fr))", [NARROW]: "minmax(0, 1fr)" }, gap: 18 },
+  grid: { display: "grid", gridTemplateColumns: { default: "repeat(3, minmax(0, 1fr))", [NARROW]: "minmax(0, 1fr)" }, gap: 18 },
+  wide: { gridColumn: { default: "1 / -1", [NARROW]: "auto" }, flexDirection: { default: "row", [NARROW]: "column" } },
+  wideArt: {
+    flexGrow: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    borderBottomWidth: { default: 0, [NARROW]: 1 },
+    borderRightWidth: { default: 1, [NARROW]: 0 },
+    borderRightStyle: "solid",
+    borderRightColor: color.line,
+  },
+  wideBody: { flexBasis: { default: "34%", [NARROW]: "auto" }, justifyContent: "flex-end" },
+  status: { position: "absolute", top: 16, right: 18, display: "flex", alignItems: "center", gap: 8, fontSize: 10, letterSpacing: "0.16em", textTransform: "uppercase", color: color.muted },
+  statusDot: { width: 6, height: 6, borderRadius: "50%", backgroundColor: color.accent },
   card: {
     display: "flex",
     flexDirection: "column",
@@ -170,7 +183,7 @@ const styles = stylex.create({
   toastTitle: { margin: 0, fontSize: 15, fontWeight: 600 },
   toastText: { margin: 0, marginTop: 4, fontSize: 13, color: color.muted, lineHeight: 1.5 },
   close: { color: color.muted, fontSize: 16, lineHeight: 1 },
-  note: { position: "absolute", top: 14, right: 16, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: color.muted },
+  note: { position: "absolute", top: 16, left: 18, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: color.muted },
 
   pile: { display: "flex", flexDirection: "column", alignItems: "center", gap: 18, rotate: "-24deg" },
   coins: { display: "flex", alignItems: "center" },
@@ -207,7 +220,7 @@ const styles = stylex.create({
   live: { width: 7, height: 7, borderRadius: "50%", backgroundColor: color.accent },
 });
 
-function Chart({ values }: { values: number[] }) {
+export function Chart({ values, fade = "feature-fade" }: { values: number[]; fade?: string }) {
   const width = 380;
   const height = 130;
   const low = Math.min(0, ...values);
@@ -221,12 +234,12 @@ function Chart({ values }: { values: number[] }) {
   return (
     <svg aria-hidden="true" viewBox={`0 0 ${width} ${height}`} {...stylex.props(styles.chart)}>
       <defs>
-        <linearGradient id="feature-fade" x1="0" x2="0" y1="0" y2="1">
+        <linearGradient id={fade} x1="0" x2="0" y1="0" y2="1">
           <stop offset="0" stopColor="#FFFFFF" stopOpacity="0.2" />
           <stop offset="1" stopColor="#FFFFFF" stopOpacity="0" />
         </linearGradient>
       </defs>
-      <path d={`${line} L${lastX.toFixed(1)} ${height} L0 ${height} Z`} fill="url(#feature-fade)" {...stylex.props(styles.area)} />
+      <path d={`${line} L${lastX.toFixed(1)} ${height} L0 ${height} Z`} fill={`url(#${fade})`} {...stylex.props(styles.area)} />
       <line x1="0" x2={width} y1={y(0)} y2={y(0)} stroke="rgba(255, 255, 255, 0.25)" strokeDasharray="3 5" />
       <path d={line} pathLength={1} fill="none" stroke="#F4F4F5" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" {...stylex.props(styles.stroke)} />
       <circle cx={lastX} cy={lastY} r="5" fill="#F4F4F5" {...stylex.props(styles.pulse)} />
@@ -273,6 +286,15 @@ function Flow({ from, to }: { from: string[]; to: string[] }) {
   );
 }
 
+function Status({ text }: { text: string }) {
+  return (
+    <span {...stylex.props(styles.status)}>
+      <span {...stylex.props(styles.statusDot)} />
+      {text}
+    </span>
+  );
+}
+
 export interface FeatureData {
   leader: string;
   lead: string;
@@ -287,8 +309,9 @@ export function Features({ data }: { data: FeatureData }) {
   const pile = [...new Set([...data.top, "BTC", "ETH", "SOL", "XRP", "SUI"])].slice(0, 5);
   return (
     <div {...stylex.props(styles.grid)}>
-      <article {...stylex.props(styles.card)}>
-        <div {...stylex.props(styles.art)}>
+      <article {...stylex.props(styles.card, styles.wide)}>
+        <div {...stylex.props(styles.art, styles.wideArt)}>
+          <Status text="Live · every second" />
           <div {...stylex.props(styles.screen)}>
             <div {...stylex.props(styles.screenTop)}>
               <span>{data.leader} against the market</span>
@@ -301,7 +324,7 @@ export function Features({ data }: { data: FeatureData }) {
             <Chart values={data.spark} />
           </div>
         </div>
-        <div {...stylex.props(styles.body)}>
+        <div {...stylex.props(styles.body, styles.wideBody)}>
           <h3 {...stylex.props(styles.title)}>Live scores</h3>
           <p {...stylex.props(styles.text)}>Every coin is measured against the market and updated every second.</p>
         </div>
@@ -309,6 +332,7 @@ export function Features({ data }: { data: FeatureData }) {
 
       <article {...stylex.props(styles.card)}>
         <div {...stylex.props(styles.art)}>
+          <Status text="Closed pool" />
           <Flow from={data.bottom} to={data.top} />
         </div>
         <div {...stylex.props(styles.body)}>
@@ -320,6 +344,7 @@ export function Features({ data }: { data: FeatureData }) {
       <article {...stylex.props(styles.card)}>
         <div {...stylex.props(styles.art)}>
           <span {...stylex.props(styles.note)}>Example</span>
+          <Status text="Filled" />
           <div {...stylex.props(styles.stack)}>
             <span {...stylex.props(styles.ghost, styles.ghostFar)} />
             <span {...stylex.props(styles.ghost)} />
@@ -328,7 +353,7 @@ export function Features({ data }: { data: FeatureData }) {
               <span {...stylex.props(styles.check)}>✓</span>
               <div>
                 <p {...stylex.props(styles.toastTitle)}>Order filled</p>
-                <p {...stylex.props(styles.toastText)}>250 USDC is now backing {data.leader}.</p>
+                <p {...stylex.props(styles.toastText)}>250 USDC now trades {data.leader}&apos;s performance.</p>
               </div>
               <span {...stylex.props(styles.close)}>×</span>
             </div>
@@ -342,6 +367,7 @@ export function Features({ data }: { data: FeatureData }) {
 
       <article {...stylex.props(styles.card)}>
         <div {...stylex.props(styles.art)}>
+          <Status text={`${data.count} ranked`} />
           <div {...stylex.props(styles.pile)}>
             <div {...stylex.props(styles.coins)}>
               {pile.map((id, index) => (

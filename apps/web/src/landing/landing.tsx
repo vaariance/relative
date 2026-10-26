@@ -8,6 +8,7 @@ import { getLogos } from "@/lib/data";
 import { Coin } from "./coin";
 import { Faq, type Question } from "./faq";
 import { Features } from "./features";
+import { Products } from "./products";
 import { HeroBackdrop } from "./hero-backdrop";
 import { Stencil } from "./stencil";
 import { color, font } from "./tokens.stylex";
@@ -296,6 +297,9 @@ const styles = stylex.create({
   late: { animationDelay: "-1.6s" },
   later: { animationDelay: "-3.2s" },
 
+  productBlock: { paddingTop: { default: 110, [NARROW]: 64 } },
+  blockHead: { display: "flex", flexDirection: "column", gap: 20, marginBottom: { default: 48, [NARROW]: 32 } },
+  blockTitle: { fontSize: { default: "clamp(2rem, 4.4vw, 3.6rem)", [NARROW]: "1.8rem" } },
   featureBlock: { paddingBlock: { default: 96, [NARROW]: 64 } },
   plain: {
     display: "grid",
@@ -460,6 +464,7 @@ export async function Landing() {
           <div {...stylex.props(styles.links)}>
             <a href="#board" {...stylex.props(styles.link)}>Board</a>
             <a href="#how" {...stylex.props(styles.link)}>How it works</a>
+            <a href="#products" {...stylex.props(styles.link)}>Products</a>
             <a href="#faq" {...stylex.props(styles.link)}>FAQ</a>
           </div>
           <Link href="/markets" {...stylex.props(styles.button)}>Open app</Link>
@@ -513,8 +518,34 @@ export async function Landing() {
       </section>
 
       <div {...stylex.props(styles.wrap)}>
+        <section id="products" {...stylex.props(styles.productBlock)}>
+          <div {...stylex.props(styles.blockHead)}>
+            <p {...stylex.props(styles.label)}>Products</p>
+            <h2 {...stylex.props(styles.stencil, styles.blockTitle)}>
+              <Stencil lines={["Three ways", "to trade"]} align="start" tones={[undefined, "#4A4B51"]} />
+            </h2>
+          </div>
+          <Products
+            data={{
+              leader: star.id,
+              lead: formatChange(star.lead),
+              ahead: up,
+              spark: board?.spark ?? [0, 0],
+              count: total,
+              top: board?.top.map((row) => row.id) ?? picks,
+              level: board?.level ?? null,
+              levelSpark: board?.levelSpark ?? [],
+            }}
+          />
+        </section>
         {board && (
           <section {...stylex.props(styles.featureBlock)}>
+            <div {...stylex.props(styles.blockHead)}>
+              <p {...stylex.props(styles.label)}>Features</p>
+              <h2 {...stylex.props(styles.stencil, styles.blockTitle)}>
+                <Stencil lines={["One market", "one benchmark"]} align="start" tones={[undefined, "#4A4B51"]} />
+              </h2>
+            </div>
             <Features
               data={{
                 leader: star.id,
@@ -615,6 +646,7 @@ export async function Landing() {
             <nav aria-label="App" {...stylex.props(styles.footColumn)}>
               <p {...stylex.props(styles.label)}>App</p>
               <Link href="/markets" {...stylex.props(styles.footLink)}>Markets</Link>
+              <Link href="/epochs" {...stylex.props(styles.footLink)}>Epoch</Link>
               <Link href="/portfolio" {...stylex.props(styles.footLink)}>Portfolio</Link>
               <Link href="/swap" {...stylex.props(styles.footLink)}>Swap</Link>
               <Link href="/faucet" {...stylex.props(styles.footLink)}>Faucet</Link>
@@ -623,6 +655,7 @@ export async function Landing() {
               <p {...stylex.props(styles.label)}>Learn</p>
               <a href="#board" {...stylex.props(styles.footLink)}>The board</a>
               <a href="#how" {...stylex.props(styles.footLink)}>How it works</a>
+              <a href="#products" {...stylex.props(styles.footLink)}>Products</a>
               <a href="#faq" {...stylex.props(styles.footLink)}>Questions</a>
               <a href="#top" {...stylex.props(styles.footLink)}>Back to top</a>
             </nav>
