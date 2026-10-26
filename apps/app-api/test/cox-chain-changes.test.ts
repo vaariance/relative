@@ -173,4 +173,37 @@ describe("chain change feed", () => {
     expect(signals).toEqual([null]);
     expect(feed.state()).toEqual({ healthy: false, revision: null, observedAt: null });
   });
+  it("asks for the baseline read once, however many empty, invalid or failing ticks follow", async () => {
+    const empty = harness();
+    for (let i = 0; i < 10; i += 1) {
+      empty.at(T + i * 1_000);
+      await empty.feed.tick();
+    }
+    expect(empty.signals).toEqual([null]);
+    expect(empty.feed.state().healthy).toBe(false);
+
+    const invalid = harness();
+    for (let i = 0; i < 10; i += 1) {
+      invalid.at(T + i * 1_000);
+      invalid.store.put(T + i * 1_000, notification(T + i * 1_000, change("1"), { program: "11111111111111111111111111111111" }));
+      await invalid.feed.tick();
+    }
+    expect(invalid.signals).toEqual([null]);
+    expect(invalid.errors).toHaveLength(10);
+
+    const failing = harness();
+    failing.store.failList = true;
+    for (let i = 0; i < 10; i += 1) {
+      failing.at(T + i * 1_000);
+      await failing.feed.tick();
+    }
+    expect(failing.signals).toEqual([null]);
+    expect(failing.errors).toHaveLength(10);
+
+    failing.store.failList = false;
+    failing.store.put(T + 10_000, notification(T + 10_000, change("3")));
+    failing.at(T + 10_000);
+    await failing.feed.tick();
+    expect(failing.signals).toEqual([null, 103]);
+  });
 });

@@ -119,6 +119,7 @@ export class ChainChangeFeed {
   private streamHealthy = false;
   private listingFailed = false;
   private wasHealthy = false;
+  private caughtUp = false;
   private timer: NodeJS.Timeout | null = null;
   private running = false;
   private readonly listeners = new Set<(observedSlot: number | null) => void>();
@@ -158,7 +159,8 @@ export class ChainChangeFeed {
     if (this.running) return;
     this.running = true;
     const nowMs = this.options.nowMs();
-    let catchUp = this.cursor === null;
+    let catchUp = !this.caughtUp;
+    this.caughtUp = true;
     let changed = false;
     let observedSlot: number | null = null;
     try {
