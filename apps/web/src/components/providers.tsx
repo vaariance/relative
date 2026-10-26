@@ -1,7 +1,6 @@
 "use client";
 
 import { PrivyProvider } from "@privy-io/react-auth";
-import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
 import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react";
 import { clusterApiUrl } from "@solana/web3.js";
 import type { FeeTerms, Portfolio, Preview } from "@eox/app-api";
@@ -23,10 +22,9 @@ function Signing({ children }: { children: ReactNode }) {
     <PrivyProvider
       appId={privyAppId}
       config={{
-        loginMethods: ["google", "wallet"],
-        appearance: { theme: "dark", accentColor: "#F2622E", walletChainType: "solana-only", walletList: ["phantom", "solflare", "backpack", "detected_solana_wallets"] },
-        embeddedWallets: { solana: { createOnLogin: "users-without-wallets" }, ethereum: { createOnLogin: "off" }, showWalletUIs: false },
-        externalWallets: { solana: { connectors: toSolanaWalletConnectors() } },
+        loginMethods: ["google"],
+        appearance: { theme: "dark", accentColor: "#F2622E", walletChainType: "solana-only" },
+        embeddedWallets: { solana: { createOnLogin: "all-users" }, ethereum: { createOnLogin: "off" }, showWalletUIs: false },
       }}
     >
       <PrivySigner>{children}</PrivySigner>
@@ -37,7 +35,7 @@ function Signing({ children }: { children: ReactNode }) {
 export function Providers({ live, demo, apiUrl, sequence, fee, market, preview, logos, children }: { live: boolean; demo: Portfolio | null; apiUrl: string; sequence: number | null; fee: FeeTerms | null; market: Market; preview: Preview | null; logos: Record<string, string>; children: ReactNode }) {
   return (
     <ConnectionProvider endpoint={endpoint}>
-      <WalletProvider wallets={wallets} autoConnect={!privyAppId}>
+      <WalletProvider wallets={wallets} autoConnect>
         <Signing>
           <SnackbarProvider>
             <AccountProvider live={live} demo={demo} apiUrl={apiUrl} sequence={sequence} fee={fee} market={market} preview={preview}>
