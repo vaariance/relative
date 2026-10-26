@@ -516,7 +516,7 @@ export class EpochSource {
     const payer = owner(input.owner);
     const basic = this.options.basic;
     if (this.account.assetRegistry.equals(PublicKey.default) || !basic) throw new TradingClosedError("rounds of this Epoch configuration are prepared by its operator");
-    if (marketLifecycle(this.account) !== "active") throw new TradingClosedError("this Epoch market is not active");
+    if (marketLifecycle(this.account) === "archived") throw new TradingClosedError("this Epoch market is archived");
     const { opensAt } = currentEpochWindow(BigInt(this.now()));
     const selection: EpochSelection = { config: this.options.config, opensAt };
     const address = this.pdas.epoch(selection);

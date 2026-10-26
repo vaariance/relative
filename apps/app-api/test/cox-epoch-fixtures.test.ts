@@ -87,12 +87,21 @@ async function load(name: string, configFrom?: string, named = 256, onUnnamedAss
 }
 
 describe("Epoch generation fixtures", () => {
-  it("preparing: reads a registry-bound configuration as preparing and prepares no round", async () => {
-    const { source, expected } = await load("preparing");
+  it("preparing: a registry-bound configuration still being prepared lets anyone prepare the current round", async () => {
+    const { source, expected, fixture } = await load("preparing");
     expect(expected.lifecycle).toBe("Preparing");
     expect(source.configuration()).toMatchObject({ lifecycle: "preparing" });
     expect(source.configuration().assetRegistry).not.toBeNull();
-    await expect(source.prepare({ owner: PAYER })).rejects.toBeInstanceOf(TradingClosedError);
+    const prepared = await source.prepare({ owner: PAYER });
+    expect(prepared.opensAt).toBe(fixture.unixTimestamp - (fixture.unixTimestamp % 14_400));
+    expect(prepared.transaction.operation).toBe("epoch-prepare");
+    expect(prepared.remainingInstructions).toBe(0);
+    expect(prepared.transaction.transaction.length).toBeGreaterThan(0);
+  });
+
+  it("archived: no round is prepared on an archived configuration", async () => {
+    const { source } = await load("active", "archived");
+    await expect(source.prepare({ owner: PAYER })).rejects.toThrow("archived");
   });
 
   it("active: reads the sealed round with its frozen registry version and roster", async () => {
