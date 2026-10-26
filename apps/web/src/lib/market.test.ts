@@ -49,5 +49,9 @@ describe("trading gate", () => {
     expect(closedLabel({ open: false, gate: "before-opening", lifecycle: "active", opensAt: NOW + 86400 }, NOW)).toBe("Opens at 23 Oct, 12:00 UTC");
     expect(closedLabel({ open: false, gate: "retired", lifecycle: "active", opensAt: null }, NOW)).toBe("Market retired");
     expect(closedNote({ open: false, gate: "not-initialized", lifecycle: "active", opensAt: null }, NOW)).toBe("This market has not opened yet.");
+    expect(closedLabel({ open: false, gate: "preparing", lifecycle: "preparing", opensAt: NOW + 7200 }, NOW)).toBe("Opens at 14:00 UTC");
+    expect(closedNote({ open: false, gate: "preparing", lifecycle: "preparing", opensAt: NOW + 7200 }, NOW)).toBe("This market is being set up. Trading opens at 14:00 UTC.");
+    expect(closedNote({ open: false, gate: "preparing", lifecycle: "preparing", opensAt: NOW - 60 }, NOW)).toBe("This market is being set up. Trading opens once it is ready.");
+    expect(closedLabel({ open: false, gate: "archived", lifecycle: "archived", opensAt: null }, NOW)).toBe("Market closed");
   });
 });

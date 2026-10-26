@@ -47,7 +47,7 @@ export function expiryAfter(target: number, interval: number): number {
   return target + batchesFor(interval) - 1;
 }
 
-function clock(unixSeconds: number, now: number): string {
+export function clock(unixSeconds: number, now: number): string {
   const date = new Date(unixSeconds * 1000);
   const time = date.toISOString().slice(11, 16);
   const sameDay = new Date(now * 1000).toISOString().slice(0, 10) === date.toISOString().slice(0, 10);
@@ -65,6 +65,8 @@ export function closedLabel(trading: TradingStatus | null, now: number): string 
   if (trading.gate === "before-opening" && trading.opensAt !== null) return `Opens at ${clock(trading.opensAt, now)}`;
   if (trading.gate === "retired") return "Market retired";
   if (trading.gate === "not-initialized") return "Not open yet";
+  if (trading.gate === "preparing") return trading.opensAt !== null && trading.opensAt > now ? `Opens at ${clock(trading.opensAt, now)}` : "Opening soon";
+  if (trading.gate === "archived") return "Market closed";
   return "Trading paused";
 }
 
@@ -73,5 +75,11 @@ export function closedNote(trading: TradingStatus | null, now: number): string |
   if (trading.gate === "before-opening" && trading.opensAt !== null) return `Trading opens at ${clock(trading.opensAt, now)}.`;
   if (trading.gate === "retired") return "This market is retired. Earlier positions were paid out to their owners.";
   if (trading.gate === "not-initialized") return "This market has not opened yet.";
+  if (trading.gate === "preparing") {
+    return trading.opensAt !== null && trading.opensAt > now
+      ? `This market is being set up. Trading opens at ${clock(trading.opensAt, now)}.`
+      : "This market is being set up. Trading opens once it is ready.";
+  }
+  if (trading.gate === "archived") return "This market has closed and takes no new trades. You can still withdraw what is ready.";
   return "Trading is paused. You can still withdraw what is ready.";
 }
