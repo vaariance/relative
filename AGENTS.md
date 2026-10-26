@@ -2378,3 +2378,12 @@ another agent needs to know.
 - **Rules for agents:** Never restart or exit the API to pick up a new asset list. Godwin: the web app needs wording for the new `unavailable` gate.
 - **Open:** Peter's 31→61 inclusion is not scheduled yet; check adoption live on both APIs when it happens.
 - **Refs:** commits `fc4e431`, `4657282`, `apps/app-api/README.md` (Pools that add assets).
+
+### 2026-10-26 · Joel (Claude Code) · Pool 4 switch staged, not applied
+
+- **Area:** `deploy/dev` (local branch `pause-b-pool-4`); Firestore `cox-app-api`.
+- **What:** Peter's 2026-10-26 generation-4 identities: Basic pool 4 `45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi` (checked as the program's pool 4 address), Epoch config 4 `BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ`, registry `EozvAzsy…GMM2n`, generation `f0130bd0…ebf1`, origin 1793077200 (27 Oct 05:00 UTC).
+  - **VM:** commit `331907c` on local branch `pause-b-pool-4`, not pushed, sets pool 4, Epoch config 4, the three `pool-4/` prefixes and the new state directory `/opt/eox/state/cox-app-api-live-pool-4`.
+  - **Cloud Run:** the switch is `COX_POOL_ID=4`, `COX_EPOCH_CONFIG=BnSKCuZQ…UJ`, the three `pool-4/` prefixes and `APP_API_HISTORY_GCS=gs://colosseum-cox-app-api-history-dev/pool-4/`, with RPC and secrets unchanged.
+  - **Isolation:** both `pool-4/` storage prefixes are empty, and Firestore `coxSubmissionsPool4` has its expiry policy.
+- **Rules for agents:** Do not switch either API to pool 4 before Peter's initialization-ready message; the accounts do not exist yet.
