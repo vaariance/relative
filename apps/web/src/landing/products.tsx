@@ -167,7 +167,7 @@ interface Product {
   facts: Fact[];
   href: string;
   action: string;
-  status: string;
+  status?: string;
   art: React.ReactNode;
 }
 
@@ -231,7 +231,6 @@ function products(data: ProductData): Product[] {
       ],
       href: "/markets",
       action: "Open Basic",
-      status: "Live · every second",
       art: (
         <div {...stylex.props(styles.screen)}>
           <div {...stylex.props(styles.screenTop)}>
@@ -347,10 +346,12 @@ export function Products({ data }: { data: ProductData }) {
               <Link href={product.href} {...stylex.props(styles.action)}>{product.action} →</Link>
             </div>
             <div {...stylex.props(styles.art, flip && styles.artStart)}>
-              <span {...stylex.props(styles.status)}>
-                <span {...stylex.props(styles.dot)} />
-                {product.status}
-              </span>
+              {product.status && (
+                <span {...stylex.props(styles.status)}>
+                  <span {...stylex.props(styles.dot)} />
+                  {product.status}
+                </span>
+              )}
               {product.art}
             </div>
           </article>
