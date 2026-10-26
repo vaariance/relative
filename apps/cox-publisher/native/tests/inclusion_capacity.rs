@@ -249,7 +249,7 @@ fn full_capacity_wide_identity_payloads_fit_explicit_operational_limits() {
         schedule: request.schedule.clone(),
         capture_request: request.captured.request.clone(),
     };
-    approved.validate().unwrap();
+    assert!(approved.validate().is_err());
     let prepared = inclusion_pipeline::build_successor(request).unwrap();
     let request_bytes = serde_json::to_vec(&prepared.request).unwrap().len();
     let prepared_bytes = serde_json::to_vec(&prepared).unwrap().len();
@@ -279,9 +279,8 @@ fn full_capacity_wide_identity_payloads_fit_explicit_operational_limits() {
         serde_json::to_vec(&prepared.request).unwrap(),
     )
     .unwrap();
-    let result =
-        inclusion_pipeline::prepare_file(&request_path, &directory.join("prepared.json")).unwrap();
-    assert_eq!(result, prepared);
+    assert!(inclusion_pipeline::prepare_file(&request_path, &directory.join("prepared.json")).is_err());
+    assert!(!directory.join("prepared.json").exists());
     let journal_path = directory.join("journal.json");
     relative_publisher::journal::atomic_write(&journal_path, &stored).unwrap();
     assert_eq!(

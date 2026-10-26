@@ -193,6 +193,15 @@ pub fn validate_admission(
     }
     Ok(())
 }
+pub fn validate_execution_capacity(preparation: &Preparation) -> Result<usize, Error> {
+    let mut prices = preparation.request.next_bindings.iter().map(|binding| crate::transactions::EpochPrice {
+        asset_id: binding.epoch_asset_id,
+        feed_id: binding.epoch_feed_id,
+        value: 1,
+    }).collect::<Vec<_>>();
+    prices.sort_by_key(|price| price.asset_id);
+    crate::epoch_stage::validate_atomic_entry_capacity(&prices).map_err(|_| Error::Admission)
+}
 pub fn build_successor(request: Request) -> Result<Prepared, Error> {
     if request.schema != "relative.inclusion-successor-request/v1" {
         return Err(Error::Admission);
@@ -326,7 +335,8 @@ pub fn persist(output: &Path, value: &Prepared) -> Result<(), Error> {
     preparation::persist(output, value).map_err(|_| Error::Storage)
 }
 pub fn prepare_file(input: &Path, output: &Path) -> Result<Prepared, Error> {
-    let request = preparation::read_request(input).map_err(|_| Error::Admission)?;
+    let request: Request = preparation::read_request(input).map_err(|_| Error::Admission)?;
+    validate_execution_capacity(&request.preparation)?;
     let value = build_successor(request)?;
     persist(output, &value)?;
     Ok(value)

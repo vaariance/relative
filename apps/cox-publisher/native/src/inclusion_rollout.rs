@@ -451,6 +451,8 @@ pub fn plan(
             ));
         }
     }
+    inclusion_pipeline::validate_execution_capacity(&prepared.request.preparation)
+        .map_err(|_| Error::Capacity)?;
     Ok(transact(
         Phase::Activate,
         cox::instruction::ActivateUniverse {}.data(),

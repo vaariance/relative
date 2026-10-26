@@ -9,6 +9,49 @@ use anchor_lang::AnchorSerialize;
 use serde::{Deserialize, Serialize};
 use solana_address::Address;
 use solana_instruction::Instruction;
+pub fn validate_atomic_entry_capacity(prices: &[EpochPrice]) -> Result<usize, worker::Error> {
+    if prices.is_empty() || prices.len() > 255 {
+        return Err(worker::Error::Snapshot);
+    }
+    let operator = Address::new_from_array([27; 32]);
+    let accounts = EpochAccounts::derive(
+        Address::new_from_array(relative_epoch::ID.to_bytes()),
+        Address::new_from_array([28; 32]),
+        0,
+    )
+    .map_err(|_| worker::Error::Snapshot)?;
+    let target = 144 + prices.len() * 50;
+    if target.saturating_sub(relative_epoch::INITIAL_SPACE) > 8_192 {
+        return Err(worker::Error::Snapshot);
+    }
+    let mut instructions = vec![accounts
+        .initialize_snapshot(operator, 1, 1, 1, prices.len() as u16)
+        .map_err(|_| worker::Error::Snapshot)?];
+    if target > relative_epoch::INITIAL_SPACE {
+        instructions.push(accounts
+            .grow_snapshot(operator, 1, (target - relative_epoch::INITIAL_SPACE) as u32)
+            .map_err(|_| worker::Error::Snapshot)?);
+    }
+    for page in prices.chunks(8) {
+        instructions.push(accounts.append_snapshot_prices(operator, 1, page)
+            .map_err(|_| worker::Error::Snapshot)?);
+    }
+    instructions.push(accounts.seal_snapshot(operator, 1));
+    instructions.push(accounts.execute(operator, 0, 1));
+    instructions.push(accounts.close_snapshot(operator, 1));
+    let transaction = crate::transactions::compile(
+        operator,
+        solana_hash::Hash::new_from_array([29; 32]),
+        &instructions,
+        &[accounts.program],
+        crate::transactions::Budget {
+            compute_units: 1_400_000,
+            priority_fee_lamports: 100,
+            heap_bytes: Some(262_144),
+        },
+    ).map_err(|_| worker::Error::Snapshot)?;
+    Ok(transaction.unsigned_transaction.len())
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Stage {
@@ -121,7 +164,7 @@ impl Stage {
                     )
                     .map_err(|_| worker::Error::Snapshot)?,
             );
-            if prices.len() > 61 {
+            if validate_atomic_entry_capacity(prices).is_err() {
                 return Ok(instructions);
             }
             (0, relative_epoch::INITIAL_SPACE, 144)
@@ -137,7 +180,7 @@ impl Stage {
                     )
                     .map_err(|_| worker::Error::Snapshot)?,
             );
-            if prices.len() > 61 {
+            if validate_atomic_entry_capacity(prices).is_err() {
                 return Ok(instructions);
             }
         }
@@ -260,6 +303,18 @@ mod tests {
                 .validate(key(2), key(3), key(7), &stage.anchor)
                 .is_err());
         }
+    }
+    #[test]
+    fn entry_capacity_is_derived_from_wire_bytes_and_rejects_resumable_only_snapshots() {
+        for count in [31, 61, 62] {
+            let (_, _, prices, _) = fixture(count);
+            let bytes = validate_atomic_entry_capacity(&prices).unwrap();
+            assert!(bytes <= crate::transactions::MAX_TRANSACTION_BYTES);
+        }
+        let (stage, accounts, prices, _) = fixture(255);
+        assert_eq!(validate_atomic_entry_capacity(&prices), Err(worker::Error::Snapshot));
+        let plan = stage.plan(&accounts, key(7), None, &prices).unwrap();
+        assert_eq!(plan.len(), 1);
     }
     #[test]
     fn complete_31_and_61_price_snapshots_execute_within_one_v1_packet() {

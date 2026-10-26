@@ -254,6 +254,18 @@ fn full_capacity_growth_is_bounded_and_corrupted_uploads_or_cursors_cannot_resum
 }
 
 #[test]
+fn activation_rejects_account_valid_rosters_without_atomic_entry_capacity() {
+    let mut f = Fixture::new(255);
+    f.registered(true, true);
+    f.allocation = f.prepared.receipt.canonical.len() + 512;
+    f.pool_bytes = 32768;
+    f.persisted = true;
+    let previous = f.pool.methodology;
+    assert_eq!(f.plan(None).unwrap_err(), Error::Capacity);
+    assert_eq!(f.pool.methodology, previous);
+    assert_eq!(f.pool.classes.len(), 31);
+}
+#[test]
 fn rollout_requires_the_new_attestor_to_match_current_confirmed_registry_authority() {
     let mut f = Fixture::new(31);
     let current_operator = anchor_lang::prelude::Pubkey::new_unique();

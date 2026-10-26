@@ -44,6 +44,7 @@ impl Approved {
         let view = crate::universe_runtime::view(&self.previous_canonical)
             .map_err(|_| worker::Error::Snapshot)?;
         inclusion_pipeline::validate_admission(&self.preparation, &self.policy).map_err(err)?;
+        inclusion_pipeline::validate_execution_capacity(&self.preparation).map_err(err)?;
         self.capture_request.validate().map_err(err)?;
         let schedule = self
             .schedule

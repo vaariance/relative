@@ -200,6 +200,31 @@ fn invalid_admission_never_creates_hold_or_cutoff_and_no_approval_means_no_local
     std::fs::remove_dir_all(directory).unwrap();
 }
 #[test]
+fn unsupported_execution_capacity_rejects_candidate_without_holding_the_current_market() {
+    let directory = directory();
+    let request = support::request_with_count(255);
+    let value = Approved {
+        schema: "relative.inclusion-approved/v1".into(),
+        preparation: request.preparation,
+        policy: request.policy,
+        previous_canonical: request.previous_canonical,
+        schedule: request.schedule,
+        capture_request: request.captured.request,
+    };
+    assert!(value.validate().is_err());
+    journal::atomic_write(&directory.join("inclusion-approved.json"), &value).unwrap();
+    let shared = Controller::open(&directory).unwrap();
+    assert!(shared.lock().unwrap().refresh_file().is_err());
+    assert!(!directory.join("inclusion-execution.json").exists());
+    assert!(!directory.join("inclusion-preview-cutoff.json").exists());
+    let mut work = vec![Work::Entry { id: "basic:1".into(), pool: Pool::Basic, eligible_after_ms: 0 }];
+    let expected = work.clone();
+    inclusion_execution::filter_work(&shared, u64::MAX, &mut work).unwrap();
+    assert_eq!(work, expected);
+    assert_eq!(shared.lock().unwrap().wake_ms(0), None);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+#[test]
 fn malformed_candidate_is_rejected_but_corrupt_accepted_journal_fails_closed_as_storage() {
     use relative_publisher::worker;
     let directory = directory();
