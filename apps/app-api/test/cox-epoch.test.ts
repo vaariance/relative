@@ -165,7 +165,8 @@ describe("Epoch transactions", () => {
     const keys = tx.message.staticAccountKeys;
     expect(tx.message.header.numRequiredSignatures).toBe(1);
     expect(keys[0]!.equals(wallet)).toBe(true);
-    const [instruction] = tx.message.compiledInstructions;
+    const [heapFrame, instruction] = tx.message.compiledInstructions;
+    expect(tx.message.staticAccountKeys[heapFrame!.programIdIndex]!.equals(ComputeBudgetProgram.programId)).toBe(true);
     expect(keys[instruction!.programIdIndex]!.equals(PROGRAM)).toBe(true);
     expect(Buffer.from(instruction!.data).subarray(0, 8).equals(discriminator("global", "queue"))).toBe(true);
     expect(instruction!.accountKeyIndexes.map((i) => keys[i]!.toBase58())).toContain(associatedTokenAddress(wallet, TEST_MINT).toBase58());
@@ -197,8 +198,8 @@ describe("Epoch transactions", () => {
     const data = tx.message.compiledInstructions.map((i) => Buffer.from(i.data).subarray(0, 8));
     expect(tx.message.header.numRequiredSignatures).toBe(1);
     expect(tx.message.staticAccountKeys[0]!.equals(wallet)).toBe(true);
-    expect(data[1]!.equals(discriminator("global", "refund"))).toBe(true);
-    expect(data[2]!.equals(discriminator("global", "withdraw"))).toBe(true);
+    expect(data[2]!.equals(discriminator("global", "refund"))).toBe(true);
+    expect(data[3]!.equals(discriminator("global", "withdraw"))).toBe(true);
     await expect(source.refund({ owner: wallet.toBase58(), opensAt: OPEN, nonce: "1" })).rejects.toThrow("cannot be refunded");
     t.now = OPEN + 14_400 + 86_401;
     expect((await source.epoch(OPEN))!.voidable).toBe(true);
@@ -219,8 +220,8 @@ describe("Epoch transactions", () => {
     expect(full).toMatchObject({ operation: "epoch-withdraw", amount: "1500000", nonce: "0" });
     const tx = VersionedTransaction.deserialize(Buffer.from(full.transaction, "base64"));
     const programs = tx.message.compiledInstructions.map((i) => tx.message.staticAccountKeys[i.programIdIndex]!.toBase58());
-    expect(programs).toEqual(["ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", PROGRAM.toBase58()]);
-    expect(Buffer.from(tx.message.compiledInstructions[1]!.data).subarray(0, 8).equals(discriminator("global", "withdraw"))).toBe(true);
+    expect(programs).toEqual([ComputeBudgetProgram.programId.toBase58(), "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", PROGRAM.toBase58()]);
+    expect(Buffer.from(tx.message.compiledInstructions[2]!.data).subarray(0, 8).equals(discriminator("global", "withdraw"))).toBe(true);
     const partial = await source.withdraw({ owner: wallet.toBase58(), opensAt: OPEN, nonce: "0", amount: "500000" });
     expect(partial.amount).toBe("500000");
     await expect(source.withdraw({ owner: wallet.toBase58(), opensAt: OPEN, nonce: "1" })).rejects.toThrow("nothing to withdraw");

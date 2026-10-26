@@ -458,7 +458,7 @@ export class EpochSource {
     return unsignedTransaction(this.options.connection, {
       operation: "epoch-entry",
       owner: wallet,
-      instructions: [this.instructions.queue(selection, { nonce, owner: wallet, collateralAccount: associatedTokenAddress(wallet, mint), grossStake, basket, backedAsset: backed })],
+      instructions: [heap(), this.instructions.queue(selection, { nonce, owner: wallet, collateralAccount: associatedTokenAddress(wallet, mint), grossStake, basket, backedAsset: backed })],
       details: { requestId: lot.toBase58(), nonce: nonce.toString(), amount: grossStake.toString() },
     });
   }
@@ -480,6 +480,7 @@ export class EpochSource {
       operation: "epoch-withdraw",
       owner: wallet,
       instructions: [
+        heap(),
         createTokenAccountIdempotent(wallet, wallet, mint),
         amount === null ? this.instructions.withdraw(wallet, destination, selection, nonce) : this.instructions.withdrawPartial(wallet, destination, selection, nonce, amount),
       ],
@@ -506,6 +507,7 @@ export class EpochSource {
       operation: "epoch-refund",
       owner: wallet,
       instructions: [
+        heap(),
         createTokenAccountIdempotent(wallet, wallet, mint),
         this.instructions.refund(selection, nonce),
         this.instructions.withdraw(wallet, destination, selection, nonce),
