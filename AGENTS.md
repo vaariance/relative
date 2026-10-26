@@ -2098,3 +2098,21 @@ another agent needs to know.
   - **Isolation:** both `pool-3/` storage prefixes are empty. Submissions go to Firestore `coxSubmissionsPool3`, whose expiry policy is now set.
 - **Rules for agents:** Do not switch either API to pool 3 before Peter's initialization-ready message; the accounts do not exist yet, and the API would fail at start.
 - **Open:** Peter: the ready message with the methodology and registry-version addresses and digests.
+
+### 2026-10-26 · Godwin (Claude Code) · Web app tidy-up from Peter's review; landing product cards
+
+- **Area:** `apps/web` (navigation, charts, Epoch page, landing page).
+- **What:** At Godwin's request, following Peter's review notes.
+  - **Wording:** `$CRYPTO` is shown as "the benchmark" (`CRYPTO_NAME = "Benchmark"`), and "back a coin" is now "trade an asset's performance". The class id sent to the API is still `CRYPTO`.
+  - **Navigation:** the sidebar has a Trade tab (Markets, assets and Epochs, with a Basic / Epoch switch). Swap and Faucet moved to the sidebar footer, and the logo is the only link home. A hint links to the Faucet when the wallet holds nothing (`funds-hint.tsx`). The Circle USDC and Solana faucet links no longer need a wallet.
+  - **Charts:** candles are the default; the on-chain settlement dots are removed, since adaptive publication makes them either sparse or crowded.
+  - **Epoch:** uses the API's `closingDeadline`, `refund`, the `empty` phase and the configuration `lifecycle`, and the `epoch-refund` and `epoch-void` builders.
+  - **Landing:**
+    - Out-of-date claims are corrected: Pyth prices every second, fills within seconds, a 0.20 USDC fee cap, Google login and rlUSD.
+    - The footer's test-product and not-financial-advice lines are removed at Godwin's request.
+    - A new Products section shows Basic, Epoch and the benchmark as stacked sticky cards.
+    - The feature grid now has one wide card and three below it, with status labels.
+  - **Verified:** 136 web tests and the type check pass. The landing page was checked in a browser at 1440px only.
+- **Rules for agents:** Do not tell users they can hold the benchmark; the landing page no longer says so. The Epoch product card's countdown, pot and entry count are labelled example figures, not live data.
+- **Open:** the Swap page, the Benchmark page's swap card and "pay with benchmark" on Buy still offer benchmark entry; whether to remove them is Godwin's decision. The landing cards have not been checked at phone width.
+- **Refs:** commits `c31b076`..`1677dc6`.
