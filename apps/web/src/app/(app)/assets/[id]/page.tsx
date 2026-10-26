@@ -11,7 +11,7 @@ import { StatCard } from "@/components/stat-card";
 import { TradeForm } from "@/components/trade-form";
 import { getAssets, getDeployment, getPublications, getStatus } from "@/lib/data";
 import { formatAmount } from "@/lib/format";
-import { CRYPTO_CLASS, classViews, currentOf, decimalsOf, findClass, latest, levelSeries, priceDigits, priceSeries, referenceSeries, standingOf } from "@/lib/view";
+import { CRYPTO_CLASS, classViews, currentOf, decimalsOf, findClass, latest, priceDigits, priceSeries, referenceSeries, standingOf } from "@/lib/view";
 
 const SPARK = 60;
 
@@ -37,7 +37,6 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
 
   const price = priceSeries(publications, asset.assetId);
   const reference = referenceSeries(publications, asset.assetId);
-  const level = levelSeries(publications);
   const relative = current ? standingOf(reference) : null;
   const priceNow = latest(price);
   const charted = price.length > 0 || reference.length > 0;
@@ -90,7 +89,6 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               series={[
                 { id: "reference", label: "Relative reference", points: reference, digits: 4, baseline: 100, live: { kind: "reference", id: asset.assetId } },
                 { id: "price", label: "Price", points: price, digits: priceDigits(priceNow), live: { kind: "price", id: asset.assetId } },
-                { id: "crypto", label: "Benchmark", points: level, digits: 4, baseline: 100, live: { kind: "level" } },
               ]}
             />
           ) : (
