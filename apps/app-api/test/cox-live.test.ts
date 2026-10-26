@@ -11,7 +11,7 @@ import { createCoxApiClient, type Publication, type UnsignedTransaction } from "
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChainChangeFeed } from "../src/cox/chain-changes.js";
 import { loadProgram } from "../src/cox/chain.js";
-import { LiveCoxSource, PoolMethodologyChanged } from "../src/cox/live-source.js";
+import { LiveCoxSource, PoolMethodologyRejected } from "../src/cox/live-source.js";
 import { directorySource, gcsSource, PublicationArchive, PublicationArchiveMissing } from "../src/cox/publication-archive.js";
 import { directorySegments, PublicationHistory } from "../src/cox/publication-history.js";
 import { FileSubmissionStore } from "../src/cox/submission-store.js";
@@ -239,7 +239,7 @@ describe("live COX source on the compiled-program account fixtures", () => {
 });
 
 describe("dynamic request classes", () => {
-  it("stops with PoolMethodologyChanged when the pool moves to another methodology", async () => {
+  it("keeps its view and rejects a pool that moves to a methodology it cannot read", async () => {
     await seed(originEntry());
     const source = await open();
     await source.tick();
@@ -252,7 +252,8 @@ describe("dynamic request classes", () => {
     const data = Buffer.alloc(connection.accounts.get(POOL)!.data.length);
     Buffer.concat([coder.accountDiscriminator("pool"), body.subarray(0, length)]).copy(data);
     connection.set(POOL, program.programId, data);
-    await expect(source.tick()).rejects.toThrow(PoolMethodologyChanged);
+    await expect(source.tick()).rejects.toThrow();
+    expect(source.manifest.digest).toBe(MANIFEST);
   });
 
   it("reads a schema 3 request's classes from its 16-bit ids, with 65535 as no class", async () => {
@@ -293,7 +294,7 @@ describe("change-driven chain reads", () => {
     await vi.waitFor(() => expect(refreshed).toBe(1));
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(connection.viewReads).toBe(1);
-    expect((await source.status(1_792_700_000)).chain).toEqual({ readAt: 1_792_700_000, slot: 1, feed: "healthy" });
+    expect((await source.status(1_792_700_000)).chain).toMatchObject({ readAt: 1_792_700_000, slot: 1, feed: "healthy", methodology: { adoption: "current" } });
 
     connection.programReads = 0;
     await Promise.all([source.portfolio(OWNER), source.portfolio(OWNER)]);

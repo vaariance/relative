@@ -43,7 +43,7 @@ export interface CoxApiServerOptions {
   epochs?: EpochSource | null;
   preview?: PreviewFeed | null;
   previewHistory?: PreviewHistory | null;
-  classes?: readonly string[];
+  classes?: readonly string[] | (() => readonly string[]);
   faucet?: CoxFaucet | null;
   faucetForward?: string | null;
   gatewaySecret?: string | null;
@@ -354,7 +354,7 @@ export function createCoxApiServer(options: CoxApiServerOptions): Server {
       const preview = latestPreview();
       const [portfolio, status] = await Promise.all([source.portfolio(wallet), source.status(now())]);
       if (!portfolio) throw new ApiError(404, "UNKNOWN_WALLET", "wallet has no positions or requests");
-      return send(res, previewPortfolio(preview, portfolio, status.latestSequence, options.classes ?? []));
+      return send(res, previewPortfolio(preview, portfolio, status.latestSequence, typeof options.classes === "function" ? options.classes() : options.classes ?? []));
     }
     if (path.length === 3 && a === "publications" && b === "stream") return stream(req, url, res);
     if (path.length === 3 && a === "publications") return publication(res, b!);

@@ -24,7 +24,7 @@ export type ClassId = string;
 export type PriceVenue = "kraken" | "coinbase" | "bybit" | "pyth";
 export type FallbackStep = 0 | 1 | 2 | 3 | 4;
 export type PoolMode = "minute" | "adaptive";
-export type TradingGate = "open" | "paused" | "not-initialized" | "before-opening" | "retired" | "preparing" | "archived";
+export type TradingGate = "open" | "paused" | "not-initialized" | "before-opening" | "retired" | "preparing" | "archived" | "unavailable";
 
 export type MarketLifecycle = "preparing" | "active" | "archived";
 
@@ -225,6 +225,7 @@ export interface ChainReadStatus {
   readAt: UnixSeconds | null;
   slot: number | null;
   feed: "healthy" | "unhealthy" | "polling";
+  methodology?: { digest: string; adoption: "current" | "rejected"; reason: string | null };
 }
 
 export interface VaultReconciliation {

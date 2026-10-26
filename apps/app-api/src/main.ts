@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { loadProgram } from "./cox/chain.js";
 import { EpochSource } from "./cox/epoch-source.js";
 import { CoxFixtureSource } from "./cox/fixture-source.js";
-import { LiveCoxSource, PoolMethodologyChanged } from "./cox/live-source.js";
+import { LiveCoxSource, PoolMethodologyRejected } from "./cox/live-source.js";
 import { ChainChangeFeed, gcsChainChangeStore } from "./cox/chain-changes.js";
 import { gcsPreviewStore, PreviewFeed } from "./cox/preview.js";
 import { PreviewHistory } from "./cox/preview-history.js";
@@ -136,8 +136,10 @@ async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transaction
     : new FileSubmissionStore(join(stateDir, `submissions-${poolId}.json`));
   const epochConfig = process.env.COX_EPOCH_CONFIG;
   if (epochConfig !== undefined && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(epochConfig)) throw new Error(`invalid COX_EPOCH_CONFIG: ${epochConfig}`);
+  let liveSource: LiveCoxSource | null = null;
+  const unavailable = (): string | null => liveSource?.unavailable() ?? "the market is still loading";
   const epochs = epochConfig
-    ? await EpochSource.open({ connection, program: loadProgram(connection, process.env.COX_EPOCH_IDL_PATH ?? join(here, "..", "..", "..", "packages", "cox-epoch", "idl", "epoch.json")), config: new PublicKey(epochConfig), basic: program, onUnnamedAsset: (id) => console.warn(`cox epoch asset ${id} has no name in the pool methodology`) })
+    ? await EpochSource.open({ connection, program: loadProgram(connection, process.env.COX_EPOCH_IDL_PATH ?? join(here, "..", "..", "..", "packages", "cox-epoch", "idl", "epoch.json")), config: new PublicKey(epochConfig), basic: program, onUnnamedAsset: (id) => console.warn(`cox epoch asset ${id} has no name in the pool methodology`), unavailable })
     : null;
   const poolAddress = addresses(program.programId).pool(poolId);
   const archive = source ? new PublicationArchive(source, program, poolAddress, genesis) : null;
@@ -152,23 +154,27 @@ async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transaction
     : null;
   if (changes) epochs?.cacheUntilInvalidated();
   const options = { connection, program, poolId, network, epochConfig: epochConfig ? new PublicKey(epochConfig) : null, history: { path: join(stateDir, `publications-${poolId}.jsonl`), store: segments }, pollMs, archive, changes, onError: (error: unknown) => {
-    if (error instanceof PoolMethodologyChanged) {
-      console.error("cox pool methodology changed; restarting to load the new roster");
-      process.exit(1);
+    if (error instanceof PoolMethodologyRejected) {
+      console.error(`cox pool methodology not adopted, keeping the last consistent view: ${error.reason}`);
+      return;
     }
     console.error("cox indexer tick failed", error);
   } };
   for (;;) {
     try {
       const source = await LiveCoxSource.open(options);
-      const epochAssets = new Map(source.manifest.assets.flatMap((asset) => (asset.epochId === null ? [] : [[asset.epochId, asset.assetId] as const])));
-      if (epochAssets.size > 0) epochs?.nameAssets(epochAssets);
+      liveSource = source;
+      const nameEpochAssets = (manifest: typeof source.manifest) => {
+        const epochAssets = new Map(manifest.assets.flatMap((asset) => (asset.epochId === null ? [] : [[asset.epochId, asset.assetId] as const])));
+        if (epochAssets.size > 0) epochs?.nameAssets(epochAssets);
+      };
+      nameEpochAssets(source.manifest);
       source.onChainRefresh?.(() => epochs?.invalidate().catch((error: unknown) => console.error("cox epoch configuration refresh failed", error)));
       source.start();
       changes?.start();
       const transactions = new CoxTransactions({
         connection, program, poolId, pool: source.poolAddress, vault: source.vaultAddress, mint: source.collateralMint, testVault: source.testVaultAddress, testMint: source.secondaryMint,
-        origin: source.manifest.origin, interval: source.interval, acceptanceDeadline: source.acceptanceDeadline, classes: source.classes, dynamic: source.manifest.dynamic,
+        origin: source.manifest.origin, interval: source.interval, acceptanceDeadline: source.acceptanceDeadline, classes: source.classes, methodology: source.methodologyAddress, unavailable, dynamic: source.manifest.dynamic,
       });
       const submissions = new CoxSubmissions({ connection, programId: program.programId, epochProgramId: epochs?.programId ?? null, store, feeVersion: () => transactions.feeVersion() });
       const previewGcs = process.env.COX_PREVIEW_GCS;
@@ -198,8 +204,14 @@ async function live(): Promise<Pick<CoxApiServerOptions, "source" | "transaction
         preview.onRecord((record) => previewHistory.add(record));
         void previewHistory.backfill().catch((error: unknown) => console.error("cox preview history backfill failed", error));
       }
+      source.onAdopt((manifest, methodology) => {
+        transactions.adopt(methodology, manifest.classes);
+        nameEpochAssets(manifest);
+        Object.assign(previewIdentity, { methodologyDigest: manifest.digest, assets: manifest.assets.map((asset) => asset.assetId), classes: manifest.classes });
+        console.log(`cox pool methodology ${manifest.digest} adopted with ${manifest.assets.length} assets`);
+      });
       preview?.start();
-      return { source, transactions, submissions, epochs, preview, previewHistory, classes: source.classes, faucet };
+      return { source, transactions, submissions, epochs, preview, previewHistory, classes: () => source.classes, faucet };
     } catch (error) {
       if (!(error instanceof Error) || !["CoxAccountNotFound", "PoolMethodologyNotSealed"].includes(error.message)) throw error;
       console.log(`cox pool ${poolId} is not active on ${network} yet (${error.message}); checking again in ${POOL_WAIT_MS / 1000} s`);

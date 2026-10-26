@@ -21,12 +21,13 @@ import {
   type Publication,
   type ReceiptStatus,
   type RequestState,
+  type SystemState,
   type TradingStatus,
   type VaultReconciliation,
 } from "@eox/app-api";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { ChainChangeFeed } from "./chain-changes.js";
-import { batchOf, classIds, feeConfiguration, parseManifest, toPublication, type ChainPublication, type Manifest } from "./chain.js";
+import { adoptionProblem, batchOf, classIds, feeConfiguration, parseManifest, toPublication, type ChainPublication, type Manifest } from "./chain.js";
 import { PublicationArchiveMissing, type PublicationArchive } from "./publication-archive.js";
 
 const RETIRED_POOL_SCHEMA = 3;
@@ -90,9 +91,9 @@ function tokenAmount(info: AccountInfo<Buffer> | null, mint: PublicKey): bigint 
 
 export const feesMigrated = (pool: Pool): boolean => pool.schemaVersion === 2 || adaptivePool(pool);
 
-export class PoolMethodologyChanged extends Error {
-  constructor() {
-    super("PoolMethodologyChanged");
+export class PoolMethodologyRejected extends Error {
+  constructor(readonly reason: string) {
+    super(`PoolMethodologyRejected: ${reason}`);
   }
 }
 
@@ -136,17 +137,20 @@ export class LiveCoxSource implements CoxSource {
   private pending = false;
   private pendingSlot: number | null = null;
   private unsubscribeChanges: (() => void) | null = null;
+  private readonly adoptionListeners = new Set<(manifest: Manifest, methodology: PublicKey) => void>();
+  private adopting: Promise<void> | null = null;
+  private rejected: { methodology: PublicKey; reason: string } | null = null;
   readonly onChainRefresh?: (listener: () => void) => () => void;
 
   private constructor(
     private readonly options: LiveCoxSourceOptions,
-    readonly manifest: Manifest,
+    private current: Manifest,
     readonly collateralMint: PublicKey,
     readonly collateralDecimals: number,
     readonly secondaryMint: PublicKey | null,
     readonly tradingOpensAt: number | null,
     private readonly log: PublicationHistory,
-    private readonly methodologyKey: PublicKey,
+    private methodologyKey: PublicKey,
     readonly market: { lifecycle: MarketLifecycle; generation: MarketGeneration | null },
   ) {
     this.reader = new CoxReader(options.program);
@@ -177,6 +181,49 @@ export class LiveCoxSource implements CoxSource {
     if (adaptive !== (manifest.mode === "adaptive")) throw new Error("PoolManifestMismatch");
     const opensAt = adaptive ? Number(pool.tradingOpensAt.toString()) : null;
     return new LiveCoxSource(options, manifest, pool.collateralMint, mint.data[MINT_DECIMALS_OFFSET]!, adaptive ? pool.testCollateralMint : null, opensAt, log, pool.methodology, { lifecycle: marketLifecycle(pool), generation });
+  }
+
+  get manifest(): Manifest {
+    return this.current;
+  }
+
+  get methodologyAddress(): PublicKey {
+    return this.methodologyKey;
+  }
+
+  onAdopt(listener: (manifest: Manifest, methodology: PublicKey) => void): () => void {
+    this.adoptionListeners.add(listener);
+    return () => this.adoptionListeners.delete(listener);
+  }
+
+  private adopt(pool: Pool): Promise<void> {
+    this.adopting ??= this.adoptFrom(pool).finally(() => {
+      this.adopting = null;
+    });
+    return this.adopting;
+  }
+
+  private async adoptFrom(pool: Pool): Promise<void> {
+    const key = pool.methodology;
+    if (key.equals(this.methodologyKey)) return;
+    if (this.rejected?.methodology.equals(key)) throw new PoolMethodologyRejected(this.rejected.reason);
+    const methodology = await this.reader.methodology(key);
+    const next = parseManifest(methodology);
+    const generation = marketGeneration(pool, this.poolKey, this.options.epochConfig ?? null);
+    const reason = adoptionProblem(this.current, next)
+      ?? (next.classes.length !== pool.classes.length ? "the new methodology does not match the pool's classes" : null)
+      ?? (pool.cryptoClass !== next.cryptoClass ? "the pool's CRYPTO class does not match the new methodology" : null)
+      ?? (generation?.id !== this.market.generation?.id ? "the pool moved to another generation" : null);
+    if (reason) {
+      this.rejected = { methodology: key, reason };
+      throw new PoolMethodologyRejected(reason);
+    }
+    this.manifests.set(this.current.digest, this.current);
+    this.current = next;
+    this.methodologyKey = key;
+    this.rejected = null;
+    this.portfolios.clear();
+    for (const listener of this.adoptionListeners) listener(next, key);
   }
 
   private async manifestFor(digest: string): Promise<Manifest> {
@@ -311,7 +358,7 @@ export class LiveCoxSource implements CoxSource {
     if (pool.poolId.toString() !== this.options.poolId.toString() || !pool.registry.equals(registryKey) || !pool.vault.equals(this.vaultKey) || !pool.collateralMint.equals(this.collateralMint)) {
       throw new Error("PoolIdentityMismatch");
     }
-    if (!pool.methodology.equals(this.methodologyKey)) throw new PoolMethodologyChanged();
+    if (!pool.methodology.equals(this.methodologyKey)) await this.adopt(pool);
     if (adaptivePool(pool) && (pool.testCollateralMint?.toBase58() ?? null) !== (this.secondaryMint?.toBase58() ?? null)) throw new Error("PoolCollateralMismatch");
     const vault = tokenAmount(vaultInfo ?? null, this.collateralMint) + (this.secondaryMint ? tokenAmount(testVaultInfo ?? null, this.secondaryMint) : 0n);
     const publication = publicationInfo ? checkedPublication(program.programId, this.poolKey, decodeAccount(program, "publication", publicationInfo)) : null;
@@ -388,19 +435,36 @@ export class LiveCoxSource implements CoxSource {
       latestCutoff: latest?.identity.cutoff ?? null,
       ageSeconds: latest ? now - latest.identity.cutoff : null,
       missedCutoffs,
-      state: systemState(missedCutoffs, view?.registry.paused ?? false, reconciliation !== null && !reconciliation.covered),
+      state: this.state(systemState(missedCutoffs, view?.registry.paused ?? false, reconciliation !== null && !reconciliation.covered)),
       executing: view?.pool.stage !== null && view?.pool.stage !== undefined,
       monitor: null,
       reconciliation,
       fees: view ? this.fees(view.pool) : null,
       currentBatch: current,
-      trading: view ? tradingStatus(view.pool, view.registry, now) : { open: false, gate: "not-initialized", lifecycle: this.market.lifecycle, opensAt: this.tradingOpensAt },
+      trading: this.trading(view, now),
       chain: {
         readAt: view?.readAt ?? null,
         slot: view?.slot ?? null,
         feed: this.options.changes ? (this.options.changes.state().healthy ? "healthy" : "unhealthy") : "polling",
+        methodology: { digest: this.current.digest, adoption: this.rejected ? "rejected" : "current", reason: this.rejected?.reason ?? null },
       },
     };
+  }
+
+  private state(value: SystemState): SystemState {
+    return value === "fresh" && this.unavailable() ? "delayed" : value;
+  }
+
+  unavailable(): string | null {
+    if (this.rejected) return `the market's new asset list was not adopted: ${this.rejected.reason}`;
+    const changes = this.options.changes;
+    if (changes && !changes.state().healthy) return "the publisher is not reporting chain changes, so new requests would not be filled";
+    return null;
+  }
+
+  private trading(view: ChainView | null, now: number): TradingStatus {
+    const status: TradingStatus = view ? tradingStatus(view.pool, view.registry, now) : { open: false, gate: "not-initialized", lifecycle: this.market.lifecycle, opensAt: this.tradingOpensAt };
+    return (status.open || this.rejected) && this.unavailable() ? { ...status, open: false, gate: "unavailable" } : status;
   }
 
   async assets(): Promise<CoxAsset[]> {

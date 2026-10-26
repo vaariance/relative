@@ -193,6 +193,24 @@ export function classIds(manifest: Manifest): string[] {
   return manifest.classes;
 }
 
+export function adoptionProblem(current: Manifest, next: Manifest): string | null {
+  if (!next.sealed) return "the new methodology is not sealed";
+  if (next.mode !== current.mode || next.dynamic !== current.dynamic) return "the new methodology changes the pool mode";
+  if (next.origin !== current.origin) return "the new methodology changes the origin";
+  if (next.cryptoClass !== current.cryptoClass) return "the new methodology moves CRYPTO";
+  if (next.assets.length <= current.assets.length) return "the new methodology adds no assets";
+  for (const [i, asset] of current.assets.entries()) {
+    const kept = next.assets[i]!;
+    if (kept.assetId !== asset.assetId || kept.classIndex !== asset.classIndex || kept.epochId !== asset.epochId || kept.pythFeedId !== asset.pythFeedId) return `the new methodology changes ${asset.assetId}`;
+  }
+  if (current.classes.some((id, i) => next.classes[i] !== id)) return "the new methodology reorders the classes";
+  const ids = new Set(next.assets.map((asset) => asset.assetId));
+  if (ids.size !== next.assets.length) return "the new methodology repeats an asset";
+  const epochIds = next.assets.flatMap((asset) => (asset.epochId === null ? [] : [asset.epochId]));
+  if (new Set(epochIds).size !== epochIds.length) return "the new methodology repeats an Epoch asset id";
+  return null;
+}
+
 function venue(code: number): PriceVenue {
   const value = VENUES[code];
   if (!value) throw new Error("PublicationVenueInvalid");

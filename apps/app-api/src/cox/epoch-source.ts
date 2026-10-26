@@ -125,6 +125,7 @@ export interface EpochSourceOptions {
   assetIds?: ReadonlyMap<number, string>;
   now?: () => number;
   onUnnamedAsset?: (id: number) => void;
+  unavailable?: () => string | null;
 }
 
 const text = (value: Integer): string => value.toString();
@@ -433,6 +434,8 @@ export class EpochSource {
     const wallet = owner(input.owner);
     const selection = this.selection(input.opensAt);
     const grossStake = integer(input.grossStake, "grossStake", U64_MAX, true);
+    const unavailable = this.options.unavailable?.();
+    if (unavailable) throw new TradingClosedError(unavailable);
     if (!Array.isArray(input.basket) || input.basket.length !== EPOCH_BASKET_SIZE) throw new TransactionInputError(`basket must list ${EPOCH_BASKET_SIZE} assets`);
     const mint = this.collateral(input.collateralMint);
     const { address, account } = await this.state(selection);

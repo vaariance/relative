@@ -75,6 +75,8 @@ export interface CoxTransactionContext {
   interval?: number;
   acceptanceDeadline?: number;
   classes: readonly string[];
+  methodology?: PublicKey | null;
+  unavailable?: () => string | null;
   dynamic?: boolean;
 }
 
@@ -165,10 +167,20 @@ export class CoxTransactions {
     private readonly now: () => number = () => Math.floor(Date.now() / 1000),
   ) {
     this.instructions = new CoxInstructions(context.program);
+    this.classes = context.classes;
+    this.methodology = context.methodology ?? null;
+  }
+
+  private classes: readonly string[];
+  private methodology: PublicKey | null;
+
+  adopt(methodology: PublicKey, classes: readonly string[]): void {
+    this.classes = classes;
+    this.methodology = methodology;
   }
 
   private classIndex(value: unknown, name: string): number {
-    const index = typeof value === "string" ? this.context.classes.indexOf(value) : -1;
+    const index = typeof value === "string" ? this.classes.indexOf(value) : -1;
     if (index < 0) throw new TransactionInputError(`${name} is not a class of this pool`);
     return index;
   }
@@ -204,6 +216,9 @@ export class CoxTransactions {
     if (lifecycle === "archived") throw new TradingClosedError("this market is archived and accepts no new requests");
     if (lifecycle === "preparing") throw new TradingClosedError("this market is still being prepared");
     if (!pool.initialized) throw new TradingClosedError("this pool has not published its first prices yet");
+    if (this.methodology && !pool.methodology.equals(this.methodology)) throw new TradingClosedError("the market's asset list is being updated; try again shortly");
+    const unavailable = this.context.unavailable?.();
+    if (unavailable) throw new TradingClosedError(unavailable);
     if (pool.schemaVersion === 4 || pool.schemaVersion === 5) {
       const opensAt = Number(pool.tradingOpensAt.toString());
       if (this.now() < opensAt) throw new TradingClosedError(`trading opens at ${new Date(opensAt * 1000).toISOString()}`);
@@ -265,7 +280,7 @@ export class CoxTransactions {
         this.context.dynamic ? this.instructions.depositV2(keys, to, amount, minimumUnits, expiry, fee!)
           : fee === null ? this.instructions.deposit(keys, to, amount, minimumUnits, expiry) : this.instructions.depositWithFee(keys, to, amount, minimumUnits, expiry, fee),
       ],
-      details: { requestId: keys.request.toBase58(), nonce: nonce.toString(), targetBatch: target, expiryBatch: Number(expiry), toClass: this.context.classes[to]!, amount: amount.toString(), minimumUnits: minimumUnits.toString(), feeTerms: feeTerms(pool) },
+      details: { requestId: keys.request.toBase58(), nonce: nonce.toString(), targetBatch: target, expiryBatch: Number(expiry), toClass: this.classes[to]!, amount: amount.toString(), minimumUnits: minimumUnits.toString(), feeTerms: feeTerms(pool) },
     });
   }
 
@@ -289,7 +304,7 @@ export class CoxTransactions {
         this.context.dynamic ? this.instructions.switchV2(keys, from, to, units, minimumUnits, expiry, fee!)
           : fee === null ? this.instructions.switch(keys, from, to, units, minimumUnits, expiry) : this.instructions.switchWithFee(keys, from, to, units, minimumUnits, expiry, fee),
       ],
-      details: { requestId: keys.request.toBase58(), nonce: nonce.toString(), targetBatch: target, expiryBatch: Number(expiry), fromClass: this.context.classes[from]!, toClass: this.context.classes[to]!, units: units.toString(), minimumUnits: minimumUnits.toString(), feeTerms: feeTerms(pool) },
+      details: { requestId: keys.request.toBase58(), nonce: nonce.toString(), targetBatch: target, expiryBatch: Number(expiry), fromClass: this.classes[from]!, toClass: this.classes[to]!, units: units.toString(), minimumUnits: minimumUnits.toString(), feeTerms: feeTerms(pool) },
     });
   }
 
@@ -311,7 +326,7 @@ export class CoxTransactions {
         this.context.dynamic ? this.instructions.redeemV2(keys, from, units, minimumProceeds, expiry, fee!)
           : fee === null ? this.instructions.redeem(keys, from, units, minimumProceeds, expiry) : this.instructions.redeemWithFee(keys, from, units, minimumProceeds, expiry, fee),
       ],
-      details: { requestId: keys.request.toBase58(), nonce: nonce.toString(), targetBatch: target, expiryBatch: Number(expiry), fromClass: this.context.classes[from]!, units: units.toString(), minimumProceeds: minimumProceeds.toString(), feeTerms: feeTerms(pool) },
+      details: { requestId: keys.request.toBase58(), nonce: nonce.toString(), targetBatch: target, expiryBatch: Number(expiry), fromClass: this.classes[from]!, units: units.toString(), minimumProceeds: minimumProceeds.toString(), feeTerms: feeTerms(pool) },
     });
   }
 
@@ -367,8 +382,8 @@ export class CoxTransactions {
     if (read.sequence.toString() !== pool.sequence.toString()) throw new TransactionRejectedError("the pool advanced while quoting; quote again", []);
     return {
       operation,
-      fromClass: from === this.noClass ? null : this.context.classes[from]!,
-      toClass: to === this.noClass ? null : this.context.classes[to]!,
+      fromClass: from === this.noClass ? null : this.classes[from]!,
+      toClass: to === this.noClass ? null : this.classes[to]!,
       amount: operation === "deposit" ? amount.toString() : null,
       units: operation === "deposit" ? null : units.toString(),
       gross: gross.toString(),

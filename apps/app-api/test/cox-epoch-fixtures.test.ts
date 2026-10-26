@@ -216,4 +216,21 @@ describe("Epoch generation fixtures", () => {
     await expect(source.entry({ owner: WALLET, opensAt: opensAt("epoch"), basket: ids.slice(0, 31), backedAsset: ids[0]!, grossStake: "1000000" })).rejects.toThrow("basket must list 30 assets");
     await expect(source.entry({ owner: WALLET, opensAt: opensAt("epoch"), basket: [...ids.slice(0, 29), ids[0]!], backedAsset: ids[0]!, grossStake: "1000000" })).rejects.toThrow("must not repeat");
   });
+  it("asset adoption: a sealed 31-asset round keeps its frozen roster when names for 61 assets arrive", async () => {
+    const { source, opensAt } = await load("sealed-frozen-31");
+    source.nameAssets(new Map(Array.from({ length: 61 }, (_, id) => [id, `A${id}`] as const)));
+    const epoch = (await source.epoch(opensAt("epoch")))!;
+    expect(epoch.universe.map((asset) => asset.assetId)).toEqual(Array.from({ length: 31 }, (_, id) => `A${id}`));
+    expect(epoch.registry?.originBenchmarks).toHaveLength(31);
+  });
+
+  it("asset adoption: the Epoch entry builder refuses while the market is unavailable", async () => {
+    const { fixture, opensAt } = await load("active");
+    const connection = new FixtureConnection();
+    for (const account of fixture.accounts) connection.set(account.address, new PublicKey(account.owner), Buffer.from(account.dataHex, "hex"));
+    const program = loadProgram(connection as unknown as Connection, join(root, "packages", "cox-epoch", "idl", "epoch.json"));
+    const config = new PublicKey(fixture.accounts.find((a) => a.name === "config")!.address);
+    const source = await EpochSource.open({ connection: connection as unknown as Connection, program, config, now: () => fixture.unixTimestamp, unavailable: () => "the publisher is not reporting chain changes, so new requests would not be filled" });
+    await expect(source.entry({ owner: WALLET, opensAt: opensAt("epoch"), basket: [], backedAsset: "A0", grossStake: "1000000" })).rejects.toThrow("publisher is not reporting");
+  });
 });
