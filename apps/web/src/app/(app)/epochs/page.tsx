@@ -1,7 +1,7 @@
 import { Timer } from "lucide-react";
 import { EpochsLive } from "@/components/epochs-view";
 import { epochsEnabled } from "@/lib/config";
-import { getAssets, getEpochs } from "@/lib/data";
+import { getAssets, getEpochs, getStatus } from "@/lib/data";
 
 function ComingSoon() {
   return (
@@ -19,6 +19,10 @@ function ComingSoon() {
 export default async function EpochsPage() {
   if (!epochsEnabled()) return <ComingSoon />;
 
-  const [read, roster] = await Promise.all([getEpochs(), getAssets().then((assets) => assets.map((asset) => asset.assetId)).catch(() => [])]);
-  return <EpochsLive read={read} roster={roster} serverNow={Math.floor(Date.now() / 1000)} />;
+  const [read, roster, marketOpensAt] = await Promise.all([
+    getEpochs(),
+    getAssets().then((assets) => assets.map((asset) => asset.assetId)).catch(() => []),
+    getStatus().then((status) => (status.trading && !status.trading.open ? status.trading.opensAt : null)).catch(() => null),
+  ]);
+  return <EpochsLive read={read} roster={roster} serverNow={Math.floor(Date.now() / 1000)} marketOpensAt={marketOpensAt} />;
 }

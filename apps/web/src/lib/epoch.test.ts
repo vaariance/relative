@@ -1,7 +1,7 @@
 import type { Epoch, EpochLot } from "@eox/app-api";
 import { describe, expect, it } from "vitest";
 import settled from "../../test/fixtures/epoch-2026-10-23-0800.json";
-import { basketProblem, basketScore, byMove, defaultTeam, entryBasket, heroRounds, leaveOutCount, latestEpochs, leavesOut, mateLocked, toggleMate, epochBasket, countdown, executionReferences, feeOf, finalPayout, finalScore, lotView, marketClosedReason, moves, refundMint, stageOf, timelineStep, withdrawSource } from "./epoch";
+import { TEAMMATES, basketProblem, basketScore, byMove, defaultTeam, entryBasket, heroRounds, leaveOutCount, latestEpochs, leavesOut, mateLocked, basketMode, startingTeam, withToken, toggleMate, epochBasket, countdown, executionReferences, feeOf, finalPayout, finalScore, lotView, marketClosedReason, moves, refundMint, stageOf, timelineStep, withdrawSource } from "./epoch";
 
 const epoch = (phase: Epoch["phase"], extra: Partial<Epoch> = {}): Epoch => ({ address: "x", opensAt: 1000, closesAt: 2000, phase, sealed: true, entriesOpen: false, universe: [], nextNonce: null, lots: null, totalWeight: null, settlementPot: null, allZero: null, closingReferences: [], closingDeadline: 88_400, voidable: false, terminal: false, ledger: null, registry: null, ...extra });
 const lot = (extra: Partial<EpochLot>): EpochLot => ({ address: "l", epochOpensAt: 1000, nonce: "0", owner: "o", grossStake: "100000000", fee: "20000", admittedAt: 1100, basket: [], backedAsset: "ETH", execution: { timestamp: 1101, references: [] }, state: "executed", score: null, weight: null, claimable: null, refund: null, ...extra });
@@ -198,11 +198,11 @@ describe("Epoch basket", () => {
   it("only allows a team of exactly 30 coins from the round, the backed coin included", () => {
     const universe = [...thirty, "LIT"];
     expect(basketProblem([], "C0", [])).toBe("This Epoch's asset list is not available yet.");
-    expect(basketProblem(universe, "C0", thirty.slice(1, 28))).toBe("Add 2 more to your team.");
-    expect(basketProblem(universe, "C0", [...thirty.slice(1), "LIT"])).toBe("Remove 1 from your team.");
-    expect(basketProblem(universe, "C0", [...thirty.slice(1, 29), "C0"])).toBe("Your team has a coin that is not in this round.");
-    expect(basketProblem(universe, "C0", [...thirty.slice(1, 29), "DOGE"])).toBe("Your team has a coin that is not in this round.");
-    expect(basketProblem(universe, "DOGE", thirty.slice(1))).toBe("Your team has a coin that is not in this round.");
+    expect(basketProblem(universe, "C0", thirty.slice(1, 28))).toBe("Add 2 more coins to your basket.");
+    expect(basketProblem(universe, "C0", [...thirty.slice(1), "LIT"])).toBe("Leave out 1 more coin.");
+    expect(basketProblem(universe, "C0", [...thirty.slice(1, 29), "C0"])).toBe("Your basket has a coin that is not in this round.");
+    expect(basketProblem(universe, "C0", [...thirty.slice(1, 29), "DOGE"])).toBe("Your basket has a coin that is not in this round.");
+    expect(basketProblem(universe, "DOGE", thirty.slice(1))).toBe("Your basket has a coin that is not in this round.");
   });
 });
 
@@ -355,5 +355,48 @@ describe("refunds and market lifecycle", () => {
     expect(marketClosedReason(configuration("active"))).toBeNull();
     expect(marketClosedReason(configuration("preparing"))).toMatch(/being set up/);
     expect(marketClosedReason(configuration("archived"))).toMatch(/takes no new entries/);
+  });
+});
+
+describe("basket steps", () => {
+  const round = (size: number) => Array.from({ length: size }, (_, index) => `C${index}`);
+  it("asks for nothing when the round has exactly 30 coins", () => {
+    expect(basketMode(round(30))).toBe("fixed");
+    const team = startingTeam(round(30), "C0");
+    expect(team).toHaveLength(TEAMMATES);
+    expect(basketProblem(round(30), "C0", team)).toBeNull();
+  });
+  it("starts with every coin and asks to leave the extra ones out", () => {
+    const universe = round(31);
+    expect(basketMode(universe)).toBe("leave-out");
+    const team = startingTeam(universe, "C0");
+    expect(team).toHaveLength(30);
+    expect(basketProblem(universe, "C0", team)).toBe("Leave out 1 more coin.");
+    const trimmed = toggleMate(universe, "C0", team, "C7");
+    expect(basketProblem(universe, "C0", trimmed)).toBeNull();
+    expect(mateLocked(universe, trimmed, "C8")).toBe(true);
+  });
+  it("starts empty and asks for 29 picks in rounds of 60 or more", () => {
+    expect(basketMode(round(60))).toBe("pick");
+    expect(startingTeam(round(60), "C0")).toEqual([]);
+  });
+});
+
+describe("changing the token", () => {
+  const universe = Array.from({ length: 31 }, (_, index) => `C${index}`);
+  it("keeps the starting basket until the user edits it", () => {
+    expect(withToken(universe, null, null, "C1")).toEqual({ backed: "C1", mates: null });
+  });
+  it("moves the old token back into an edited basket and takes the new one out", () => {
+    const edited = universe.filter((id) => id !== "C1" && id !== "C9");
+    const next = withToken(universe, "C1", edited, "C2");
+    expect(next.backed).toBe("C2");
+    expect(next.mates).toContain("C1");
+    expect(next.mates).not.toContain("C2");
+    expect(basketProblem(universe, "C2", next.mates ?? [])).toBeNull();
+  });
+  it("clears the entry when the token is removed", () => {
+    expect(withToken(universe, "C1", ["C2"], "C1")).toEqual({ backed: null, mates: null });
+    expect(withToken(universe, "C1", ["C2"], null)).toEqual({ backed: null, mates: null });
   });
 });

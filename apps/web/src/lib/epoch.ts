@@ -78,15 +78,35 @@ export function mateLocked(universe: readonly string[], draft: readonly string[]
   return !on && draft.length >= TEAMMATES;
 }
 
+export type BasketMode = "fixed" | "leave-out" | "pick";
+
+export function basketMode(universe: readonly string[]): BasketMode {
+  if (universe.length === EPOCH_BASKET_SIZE) return "fixed";
+  return leavesOut(universe) ? "leave-out" : "pick";
+}
+
+export function startingTeam(universe: readonly string[], backed: string): string[] {
+  return basketMode(universe) === "pick" ? [] : universe.filter((id) => id !== backed);
+}
+
+export function withToken(universe: readonly string[], backed: string | null, mates: readonly string[] | null, id: string | null): { backed: string | null; mates: string[] | null } {
+  if (id === null || id === backed) return { backed: null, mates: null };
+  if (!universe.includes(id)) return { backed, mates: mates ? [...mates] : null };
+  if (mates === null) return { backed: id, mates: null };
+  const kept = mates.filter((item) => item !== id);
+  const restored = backed !== null && basketMode(universe) !== "pick" && !kept.includes(backed) ? [...kept, backed] : kept;
+  return { backed: id, mates: restored };
+}
+
 export function entryBasket(universe: readonly string[], backed: string, mates: readonly string[]): string[] {
   return universe.filter((id) => id === backed || mates.includes(id));
 }
 
 export function basketProblem(universe: readonly string[], backed: string, mates: readonly string[]): string | null {
   if (universe.length < EPOCH_BASKET_SIZE) return "This Epoch's asset list is not available yet.";
-  if (!universe.includes(backed) || mates.some((id) => id === backed || !universe.includes(id)) || new Set(mates).size !== mates.length) return "Your team has a coin that is not in this round.";
-  if (mates.length < TEAMMATES) return `Add ${TEAMMATES - mates.length} more to your team.`;
-  if (mates.length > TEAMMATES) return `Remove ${mates.length - TEAMMATES} from your team.`;
+  if (!universe.includes(backed) || mates.some((id) => id === backed || !universe.includes(id)) || new Set(mates).size !== mates.length) return "Your basket has a coin that is not in this round.";
+  if (mates.length < TEAMMATES) return `Add ${TEAMMATES - mates.length} more ${TEAMMATES - mates.length === 1 ? "coin" : "coins"} to your basket.`;
+  if (mates.length > TEAMMATES) return `Leave out ${mates.length - TEAMMATES} more ${mates.length - TEAMMATES === 1 ? "coin" : "coins"}.`;
   return null;
 }
 
