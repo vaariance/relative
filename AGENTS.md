@@ -2342,3 +2342,10 @@ another agent needs to know.
 - **What:** Transient signer transport/408/429/5xx failures retain bounded retry behavior. Auth/policy/malformed-signature failures quarantine financial publication with explicit unhealthy feed status, while validated Pyth ingestion, benchmark calculation and preview/archive production continue. Quarantine performs no further financial RPC/sign/send work and requires operator intervention; genuine storage corruption remains fail-closed.
 - **Rules for agents:** Never describe a quarantined financial worker as healthy because its process or price stream is alive. Do not broaden signer permissions or silently retry policy denials. Preserve event-driven wakeups and the shared20-minute safety reconciliation; no rapid idle HTTP fallback was added.
 - **Refs:** Runtime/signing regression tests and existing publisher README;235-test suite includes continuing ingestion/adoption with zero RPC and unchanged quarantine status across the safety boundary.
+
+### 2026-10-26 · Peter (Codex) · Disabled fresh-four signer handoff prepared
+
+- **Area:** `apps/signer/config/dev-dynamic.json`, generation-linkage tests and private initialization helpers.
+- **What:** Updated the disabled release template to fresh Basic4/Epoch4 targets while carrying the already-operated Basic/Epoch instruction rules and their existing writable ceilings. No admin/upgrade role, key, caller or policy scope was added.94 signer tests and type checking pass; private preparation verifies39 state-machine guards and38 wire/policy cases.
+- **Rules for agents:** This is a source template, not a deployed signer. Prebind and verify a separate fresh4-genesis revision/tag before origin; leave the current generation-three endpoint intact. Require approved committed source before release. Never transfer the local admin or upgrade key to the VM. Production initialization must use the exact signed05:00 capture and remain closed until the deployed API gate passes.
+- **Refs:** Private `.cox/fresh-reset-20261027/source-signer-review.json`, `preparation-checklist.json`; existing signer configuration/tests.
