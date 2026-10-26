@@ -2387,3 +2387,15 @@ another agent needs to know.
   - **Cloud Run:** the switch is `COX_POOL_ID=4`, `COX_EPOCH_CONFIG=BnSKCuZQ…UJ`, the three `pool-4/` prefixes and `APP_API_HISTORY_GCS=gs://colosseum-cox-app-api-history-dev/pool-4/`, with RPC and secrets unchanged.
   - **Isolation:** both `pool-4/` storage prefixes are empty, and Firestore `coxSubmissionsPool4` has its expiry policy.
 - **Rules for agents:** Do not switch either API to pool 4 before Peter's initialization-ready message; the accounts do not exist yet.
+
+### 2026-10-26 · Godwin (Claude Code) · Browser wallets connect directly; Privy is Google only
+
+- **Area:** `apps/web` (`signer.tsx`, `providers.tsx`, `wallet-button.tsx`); Vercel project `cox-web`.
+- **What:** Peter reported that connecting an external wallet got stuck. Privy's Solana wallet login failed with "Could not log in with wallet" and Phantom never showed a sign prompt.
+  - **Cause:** Privy's sign-in message always contains `Chain ID: mainnet` (checked in 3.47.0 and 3.51.0; it can't be configured). Phantom in Testnet Mode refuses to show it, with "the chain ID does not match the provided chain ID for verification".
+  - **Fix:** Privy now offers Google only (`loginMethods: ["google"]`, Solana wallet `createOnLogin: "all-users"`). The Log in dialog shows Continue with Google, then the installed browser wallets, which connect through wallet-adapter with no sign-in message.
+  - **Old sessions:** a leftover Privy session without Google, from the old wallet login, is logged out automatically, so the button no longer waits for a wallet that never connects.
+  - **Verified:** type check and 142 web tests pass. Phantom connected directly on devnet locally and on <https://getrelative.trade>; Godwin confirmed Continue with Google still logs in.
+  - **Deployed:** `5a2ab66` to production (`cox-9cuz5ieft-gef-228639f6`).
+- **Rules for agents:** Do not route Solana browser wallets through Privy's wallet login while the app runs on devnet. The Privy dashboard still has Solana wallet login enabled, which logs a harmless console warning; turning it off is Godwin's call.
+- **Refs:** commit `5a2ab66`.
