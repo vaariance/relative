@@ -186,8 +186,8 @@ export function BasketView({ overview, roster, serverNow }: { overview: EpochOve
     mode === "fixed"
       ? `${backed} is compared against the other ${TEAMMATES} coins in this round.`
       : mode === "leave-out"
-        ? `Your basket is ${backed} and every other coin except the ${leave === 1 ? "one" : leave} you leave out. Coins behind the benchmark at the close score zero, which raises ${backed}'s share.`
-        : `Choose the ${TEAMMATES} coins ${backed} is compared against. Coins behind the benchmark at the close score zero, which raises ${backed}'s share.`;
+        ? `Your basket is ${backed} and every other coin except the ${leave === 1 ? "one" : leave} you leave out.`
+        : `Choose the ${TEAMMATES} coins ${backed} is compared against.`;
 
   return (
     <div className="flex flex-col gap-5 pb-24 xl:pb-0">
