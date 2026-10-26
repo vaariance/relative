@@ -2138,3 +2138,13 @@ another agent needs to know.
   - **Verified on both:** pool 3, methodology digest `9e1bb324…463c`, generation `2699b776…d25d`, registry `94dvDz5J…Fb9`, 31 assets, `cryptoClass` 0, gate and lifecycle `preparing`, `opensAt` 1793030400. History runs 1 to 4 from publication 1 (batch 0, no predecessor), with no publication 0. Vault 0 and covered, feed `healthy`, previews fresh.
 - **Rules for agents:** `epoch-prepare` builds for the current four-hour window. Before 16:00 UTC that is the 12:00 round, which must not be prepared; do not submit a preparation before the 16:00 boundary.
 - **Open:** At 16:00 UTC: verify permissionless preparation of the 16:00 round, its frozen `state.universe` and the 20:00 close through both APIs. Admission stays closed until Pause B passes.
+
+### 2026-10-26 · Joel (Claude Code) · Every Epoch build requests a 256 KB heap
+
+- **Area:** `apps/app-api` (`src/cox/epoch-source.ts`); Cloud Run `cox-app-api-live`, dev VM.
+- **What:** Peter's 2026-10-26 live acceptance found `POST /v1/transactions/epoch-entry` failing with `ProgramFailedToComplete`, the same default-heap write fault as the earlier preparation fix in Joel's 2026-10-26 "Live APIs switched to Basic pool 3 and Epoch config 3" entry. Entry, withdraw and refund now start with a 262,144-byte heap request too, so every Epoch build carries one (`5e7c690`).
+  - **Tests:** 149 pass, with instruction positions updated for the heap request.
+  - **Deployed:** Cloud Run `cox-app-api-live-00037-bfg` (image `cox-app-api:5e7c690`) and the VM at `5e7c690`.
+  - **Verified:** a devnet simulation of an entry on the live sealed 16:00 round (31 assets, configuration `active`) succeeded at 56,671 compute units, the same as Peter's measurement. Both APIs then built that entry (HTTP 200, nonce 0). Nothing was signed or sent.
+- **Rules for agents:** Any new Epoch transaction builder must start with the 256 KB heap request; the program fails to read its accounts on the default heap.
+- **Refs:** commits `7ce2c40`, `5e7c690`.
