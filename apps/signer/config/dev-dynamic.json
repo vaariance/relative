@@ -93,8 +93,11 @@
             "enabled": false,
             "allowTransactionV1": true,
             "discriminators": [
-              "8ffbe191766f819b",
+              "097c914b05705fde",
+              "cd0a687363c23323",
               "f600437e0f1f85f5",
+              "4cde221b031c8096",
+              "8ffbe191766f819b",
               "45b3a143b2f735f7",
               "dc3189c2ed6f87bc",
               "4c8b6e4f972af398",
@@ -113,14 +116,28 @@
             ],
             "instructions": [
               {
-                "discriminator": "8ffbe191766f819b",
+                "discriminator": "097c914b05705fde",
                 "accounts": {
                   "0": "$signer",
-                  "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
-                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4"
+                  "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC"
                 },
                 "v1WritableAccounts": [
-                  4
+                  2
+                ]
+              },
+              {
+                "discriminator": "cd0a687363c23323",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi",
+                  "2": "9kJcQrsvxuWPRt8saKxW97s6z42YKocRt1x6mUL16MJL",
+                  "3": "BVtZM77N34gB1McyqPhBZt9exf99NjZ45F3KBYRBmJjv",
+                  "4": "11111111111111111111111111111111"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  2,
+                  3
                 ]
               },
               {
@@ -128,7 +145,8 @@
                 "accounts": {
                   "0": "$signer",
                   "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
-                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+                  "2": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi",
+                  "3": "EozvAzsyQBHiwLWC3H1BK8Qj3p3UJSRKGxaVdZQGMM2n",
                   "6": "11111111111111111111111111111111"
                 },
                 "v1WritableAccounts": [
@@ -137,11 +155,36 @@
                 ]
               },
               {
+                "discriminator": "4cde221b031c8096",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "2": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi",
+                  "4": "EozvAzsyQBHiwLWC3H1BK8Qj3p3UJSRKGxaVdZQGMM2n"
+                },
+                "v1WritableAccounts": [
+                  4,
+                  5,
+                  6
+                ]
+              },
+              {
+                "discriminator": "8ffbe191766f819b",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "2": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi"
+                },
+                "v1WritableAccounts": [
+                  4
+                ]
+              },
+              {
                 "discriminator": "45b3a143b2f735f7",
                 "accounts": {
                   "0": "$signer",
                   "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
-                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+                  "2": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi",
                   "6": "11111111111111111111111111111111"
                 },
                 "v1WritableAccounts": [
@@ -154,7 +197,7 @@
                 "accounts": {
                   "0": "$signer",
                   "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
-                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4"
+                  "2": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi"
                 },
                 "v1WritableAccounts": [
                   5
@@ -165,7 +208,7 @@
                 "accounts": {
                   "0": "$signer",
                   "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
-                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4"
+                  "2": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi"
                 },
                 "v1WritableAccounts": [
                   5
@@ -176,13 +219,17 @@
                 "accounts": {
                   "0": "$signer",
                   "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
-                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
-                  "5": "2zUiyJ5MqYaXMGf5VXn4BBqHijDRKzPdeBhL6Qzm5ugW",
-                  "7": "3fenKNEvu9EyZhbSrntkVRPBP9PY2RjphuHuqMEztGAs"
+                  "2": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi",
+                  "5": "12vxmqAgaMiGTCzewBgS5oGiUVVHLJEyuW4upgNpreae",
+                  "7": "EvS3jTGbsj5kKhDCMU2xG7HfnvAqzycUtSAco2h6Y86m",
+                  "8": "EozvAzsyQBHiwLWC3H1BK8Qj3p3UJSRKGxaVdZQGMM2n"
                 },
                 "v1WritableAccounts": [
                   2,
-                  6
+                  6,
+                  8,
+                  9,
+                  10
                 ]
               },
               {
@@ -190,7 +237,7 @@
                 "accounts": {
                   "0": "$signer",
                   "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
-                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+                  "2": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi",
                   "4": "11111111111111111111111111111111"
                 },
                 "v1WritableAccounts": [
@@ -205,11 +252,11 @@
                   "0": "$signer",
                   "1": "$signer",
                   "2": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
-                  "3": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
-                  "5": "EfTufvuaHEUiEPsYVUGfaivJUcAXHgodzLArLgRs5ws2",
-                  "6": "2zUiyJ5MqYaXMGf5VXn4BBqHijDRKzPdeBhL6Qzm5ugW",
+                  "3": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi",
+                  "5": "9kJcQrsvxuWPRt8saKxW97s6z42YKocRt1x6mUL16MJL",
+                  "6": "12vxmqAgaMiGTCzewBgS5oGiUVVHLJEyuW4upgNpreae",
                   "7": "11111111111111111111111111111111",
-                  "8": "3fenKNEvu9EyZhbSrntkVRPBP9PY2RjphuHuqMEztGAs"
+                  "8": "EvS3jTGbsj5kKhDCMU2xG7HfnvAqzycUtSAco2h6Y86m"
                 },
                 "v1WritableAccounts": [
                   0,
@@ -223,8 +270,8 @@
                 "accounts": {
                   "0": "$signer",
                   "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
-                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
-                  "4": "EfTufvuaHEUiEPsYVUGfaivJUcAXHgodzLArLgRs5ws2"
+                  "2": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi",
+                  "4": "9kJcQrsvxuWPRt8saKxW97s6z42YKocRt1x6mUL16MJL"
                 },
                 "v1WritableAccounts": [
                   1,
@@ -237,8 +284,8 @@
                 "accounts": {
                   "0": "$signer",
                   "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
-                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
-                  "4": "EfTufvuaHEUiEPsYVUGfaivJUcAXHgodzLArLgRs5ws2"
+                  "2": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi",
+                  "4": "9kJcQrsvxuWPRt8saKxW97s6z42YKocRt1x6mUL16MJL"
                 },
                 "v1WritableAccounts": [
                   1,
@@ -251,8 +298,8 @@
                 "accounts": {
                   "0": "$signer",
                   "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
-                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
-                  "4": "EfTufvuaHEUiEPsYVUGfaivJUcAXHgodzLArLgRs5ws2"
+                  "2": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi",
+                  "4": "9kJcQrsvxuWPRt8saKxW97s6z42YKocRt1x6mUL16MJL"
                 },
                 "v1WritableAccounts": [
                   4
@@ -263,8 +310,8 @@
                 "accounts": {
                   "0": "$signer",
                   "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
-                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
-                  "4": "EfTufvuaHEUiEPsYVUGfaivJUcAXHgodzLArLgRs5ws2"
+                  "2": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi",
+                  "4": "9kJcQrsvxuWPRt8saKxW97s6z42YKocRt1x6mUL16MJL"
                 },
                 "v1WritableAccounts": [
                   4
@@ -274,10 +321,10 @@
                 "discriminator": "b3d38eb76c6814d6",
                 "accounts": {
                   "0": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
-                  "1": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
-                  "2": "EfTufvuaHEUiEPsYVUGfaivJUcAXHgodzLArLgRs5ws2",
-                  "5": "2zUiyJ5MqYaXMGf5VXn4BBqHijDRKzPdeBhL6Qzm5ugW",
-                  "6": "3fenKNEvu9EyZhbSrntkVRPBP9PY2RjphuHuqMEztGAs"
+                  "1": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi",
+                  "2": "9kJcQrsvxuWPRt8saKxW97s6z42YKocRt1x6mUL16MJL",
+                  "5": "12vxmqAgaMiGTCzewBgS5oGiUVVHLJEyuW4upgNpreae",
+                  "6": "EvS3jTGbsj5kKhDCMU2xG7HfnvAqzycUtSAco2h6Y86m"
                 },
                 "v1WritableAccounts": [
                   0,
@@ -291,10 +338,10 @@
                 "discriminator": "00980e338855a9cd",
                 "accounts": {
                   "0": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
-                  "1": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
-                  "2": "EfTufvuaHEUiEPsYVUGfaivJUcAXHgodzLArLgRs5ws2",
-                  "5": "2zUiyJ5MqYaXMGf5VXn4BBqHijDRKzPdeBhL6Qzm5ugW",
-                  "6": "3fenKNEvu9EyZhbSrntkVRPBP9PY2RjphuHuqMEztGAs"
+                  "1": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi",
+                  "2": "9kJcQrsvxuWPRt8saKxW97s6z42YKocRt1x6mUL16MJL",
+                  "5": "12vxmqAgaMiGTCzewBgS5oGiUVVHLJEyuW4upgNpreae",
+                  "6": "EvS3jTGbsj5kKhDCMU2xG7HfnvAqzycUtSAco2h6Y86m"
                 },
                 "v1WritableAccounts": [
                   0,
@@ -308,10 +355,10 @@
                 "discriminator": "82ddf29a0dc1bd1d",
                 "accounts": {
                   "0": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
-                  "1": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
-                  "2": "EfTufvuaHEUiEPsYVUGfaivJUcAXHgodzLArLgRs5ws2",
-                  "5": "2zUiyJ5MqYaXMGf5VXn4BBqHijDRKzPdeBhL6Qzm5ugW",
-                  "6": "3fenKNEvu9EyZhbSrntkVRPBP9PY2RjphuHuqMEztGAs"
+                  "1": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi",
+                  "2": "9kJcQrsvxuWPRt8saKxW97s6z42YKocRt1x6mUL16MJL",
+                  "5": "12vxmqAgaMiGTCzewBgS5oGiUVVHLJEyuW4upgNpreae",
+                  "6": "EvS3jTGbsj5kKhDCMU2xG7HfnvAqzycUtSAco2h6Y86m"
                 },
                 "v1WritableAccounts": [
                   0,
@@ -325,10 +372,10 @@
                 "discriminator": "b0a00549cafec750",
                 "accounts": {
                   "0": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
-                  "1": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
-                  "2": "EfTufvuaHEUiEPsYVUGfaivJUcAXHgodzLArLgRs5ws2",
-                  "3": "2zUiyJ5MqYaXMGf5VXn4BBqHijDRKzPdeBhL6Qzm5ugW",
-                  "4": "3fenKNEvu9EyZhbSrntkVRPBP9PY2RjphuHuqMEztGAs"
+                  "1": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi",
+                  "2": "9kJcQrsvxuWPRt8saKxW97s6z42YKocRt1x6mUL16MJL",
+                  "3": "12vxmqAgaMiGTCzewBgS5oGiUVVHLJEyuW4upgNpreae",
+                  "4": "EvS3jTGbsj5kKhDCMU2xG7HfnvAqzycUtSAco2h6Y86m"
                 },
                 "v1WritableAccounts": [
                   0,
@@ -341,12 +388,12 @@
                 "accounts": {
                   "0": "$signer",
                   "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
-                  "2": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
-                  "3": "EfTufvuaHEUiEPsYVUGfaivJUcAXHgodzLArLgRs5ws2",
-                  "5": "HGwDZLLiCKvrbeRmCgJeZZo91mtXeJY73gaxTr1YK2f",
-                  "6": "2zUiyJ5MqYaXMGf5VXn4BBqHijDRKzPdeBhL6Qzm5ugW",
+                  "2": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi",
+                  "3": "9kJcQrsvxuWPRt8saKxW97s6z42YKocRt1x6mUL16MJL",
+                  "5": "BVtZM77N34gB1McyqPhBZt9exf99NjZ45F3KBYRBmJjv",
+                  "6": "12vxmqAgaMiGTCzewBgS5oGiUVVHLJEyuW4upgNpreae",
                   "7": "11111111111111111111111111111111",
-                  "8": "3fenKNEvu9EyZhbSrntkVRPBP9PY2RjphuHuqMEztGAs"
+                  "8": "EvS3jTGbsj5kKhDCMU2xG7HfnvAqzycUtSAco2h6Y86m"
                 },
                 "v1WritableAccounts": [
                   0,
@@ -359,8 +406,8 @@
             ],
             "linkage": {
               "kind": "cox-dynamic-v1",
-              "poolId": "2",
-              "pool": "HPnHZGLeQ8oisu3V8ZEBfPRT2Sai8XWnpfQmcZ8sTZE4",
+              "poolId": "4",
+              "pool": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi",
               "operator": "GNmM11ZMFqEu3FYewGNDunpSSJBw8KnkDxzCGpSbpGj6",
               "sourceMethodologyDigest": "2b8360bed080095ebd1a0a8ca81479010580d24d771881b59b6b86557964bdba",
               "testCollateralMint": "5rpGrekfBLHdF8PD8eKLzXQPPmhyF7FCKeE1VA5CwV3X"
@@ -371,6 +418,11 @@
             "enabled": false,
             "allowTransactionV1": true,
             "discriminators": [
+              "9b26673dea5ef635",
+              "a17fd3c7ad3147a9",
+              "4e04503b308246fc",
+              "0e382798d6879c92",
+              "077a6b992f6c30d8",
               "782f329d2d28ecc7",
               "adc170b08cc5d6c9",
               "0df00b5ff45d5430",
@@ -387,10 +439,76 @@
             ],
             "instructions": [
               {
+                "discriminator": "9b26673dea5ef635",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ",
+                  "2": "EozvAzsyQBHiwLWC3H1BK8Qj3p3UJSRKGxaVdZQGMM2n",
+                  "5": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+                  "6": "5rpGrekfBLHdF8PD8eKLzXQPPmhyF7FCKeE1VA5CwV3X",
+                  "10": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                  "11": "11111111111111111111111111111111"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  7,
+                  8,
+                  9
+                ]
+              },
+              {
+                "discriminator": "a17fd3c7ad3147a9",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ",
+                  "2": "EozvAzsyQBHiwLWC3H1BK8Qj3p3UJSRKGxaVdZQGMM2n",
+                  "6": "11111111111111111111111111111111"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  5
+                ]
+              },
+              {
+                "discriminator": "4e04503b308246fc",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ",
+                  "2": "EozvAzsyQBHiwLWC3H1BK8Qj3p3UJSRKGxaVdZQGMM2n",
+                  "6": "11111111111111111111111111111111"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  5
+                ]
+              },
+              {
+                "discriminator": "0e382798d6879c92",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ",
+                  "2": "EozvAzsyQBHiwLWC3H1BK8Qj3p3UJSRKGxaVdZQGMM2n",
+                  "6": "11111111111111111111111111111111"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  5
+                ]
+              },
+              {
+                "discriminator": "077a6b992f6c30d8",
+                "accounts": {
+                  "0": "BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ"
+                },
+                "v1WritableAccounts": [
+                  1
+                ]
+              },
+              {
                 "discriminator": "782f329d2d28ecc7",
                 "accounts": {
                   "0": "$signer",
-                  "1": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9",
+                  "1": "BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ",
                   "3": "11111111111111111111111111111111"
                 },
                 "v1WritableAccounts": [
@@ -402,7 +520,7 @@
                 "discriminator": "adc170b08cc5d6c9",
                 "accounts": {
                   "0": "$signer",
-                  "1": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9",
+                  "1": "BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ",
                   "3": "11111111111111111111111111111111"
                 },
                 "v1WritableAccounts": [
@@ -414,7 +532,7 @@
                 "discriminator": "0df00b5ff45d5430",
                 "accounts": {
                   "0": "$signer",
-                  "1": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9",
+                  "1": "BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ",
                   "3": "11111111111111111111111111111111"
                 },
                 "v1WritableAccounts": [
@@ -426,7 +544,7 @@
                 "discriminator": "532bf43755150cb5",
                 "accounts": {
                   "0": "$signer",
-                  "1": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9",
+                  "1": "BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ",
                   "3": "11111111111111111111111111111111"
                 },
                 "v1WritableAccounts": [
@@ -438,7 +556,7 @@
                 "discriminator": "ddd1e2577d4840a3",
                 "accounts": {
                   "0": "$signer",
-                  "1": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9",
+                  "1": "BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ",
                   "3": "11111111111111111111111111111111"
                 },
                 "v1WritableAccounts": [
@@ -450,7 +568,7 @@
                 "discriminator": "0a878d38017ba2ba",
                 "accounts": {
                   "0": "$signer",
-                  "1": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9"
+                  "1": "BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ"
                 },
                 "v1WritableAccounts": [
                   0,
@@ -461,7 +579,7 @@
                 "discriminator": "82ddf29a0dc1bd1d",
                 "accounts": {
                   "0": "$signer",
-                  "1": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9"
+                  "1": "BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ"
                 },
                 "v1WritableAccounts": [
                   2,
@@ -473,7 +591,7 @@
                 "discriminator": "2a02cccf5b597cfc",
                 "accounts": {
                   "0": "$signer",
-                  "1": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9"
+                  "1": "BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ"
                 },
                 "v1WritableAccounts": [
                   2,
@@ -483,7 +601,7 @@
               {
                 "discriminator": "8e437f70db450de1",
                 "accounts": {
-                  "0": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9"
+                  "0": "BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ"
                 },
                 "v1WritableAccounts": [
                   1,
@@ -493,7 +611,7 @@
               {
                 "discriminator": "4026bd81189d5288",
                 "accounts": {
-                  "0": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9"
+                  "0": "BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ"
                 },
                 "v1WritableAccounts": [
                   1,
@@ -503,7 +621,7 @@
               {
                 "discriminator": "0260b7fb3fd02e2e",
                 "accounts": {
-                  "0": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9"
+                  "0": "BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ"
                 },
                 "v1WritableAccounts": [
                   1,
@@ -513,7 +631,7 @@
               {
                 "discriminator": "5cb709d32eab131d",
                 "accounts": {
-                  "0": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9"
+                  "0": "BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ"
                 },
                 "v1WritableAccounts": [
                   1
@@ -522,7 +640,7 @@
               {
                 "discriminator": "5449e5c9e02429cb",
                 "accounts": {
-                  "0": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9"
+                  "0": "BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ"
                 },
                 "v1WritableAccounts": [
                   1
@@ -531,12 +649,17 @@
             ],
             "linkage": {
               "kind": "epoch-v1",
-              "configId": "2",
-              "config": "61LyZqtLHzdqDKZ5qsK7c6xU5R9F5HaNbpaX77kRyiq9",
+              "configId": "4",
+              "config": "BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ",
               "admin": "4rCo36GY63kyZpCae2ccfhJEk3TLqKMybhT42YhCPp9N",
               "operator": "GNmM11ZMFqEu3FYewGNDunpSSJBw8KnkDxzCGpSbpGj6",
               "methodologyDigest": "2b8360bed080095ebd1a0a8ca81479010580d24d771881b59b6b86557964bdba",
-              "allowStagedSnapshots": true
+              "allowStagedSnapshots": true,
+              "registry": {
+                "programId": "G6iQGoupNSfduw1QJxQ9vcVi9FnCC6cbippXsi4QQzJF",
+                "assetRegistry": "EozvAzsyQBHiwLWC3H1BK8Qj3p3UJSRKGxaVdZQGMM2n",
+                "generation": "f0130bd0b06ec441c72f5a748ff1c2316f92e1ce4c0f2f3f668588627065ebf1"
+              }
             }
           }
         ]

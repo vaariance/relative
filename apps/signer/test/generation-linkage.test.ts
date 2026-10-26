@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { PublicKey, SystemProgram, TransactionMessage, VersionedTransaction, type TransactionInstruction } from "@solana/web3.js";
 import { checkProtocolLinkage } from "../src/protocol-linkage.js";
 import { checkSolanaPolicy } from "../src/policy.js";
-import type { RoleBindings } from "../src/config.js";
+import { loadSignerConfig, type RoleBindings } from "../src/config.js";
 import { poolFields, universe } from "../src/dynamic-linkage.js";
 import type { ChainAccount } from "../src/cox-linkage.js";
 import type { DynamicCoxLinkage, EpochLinkage, SolanaProgramBinding } from "../src/config.js";
@@ -68,7 +68,7 @@ test("disabled release policy permits only the bound operator's registry version
   const discriminator = Buffer.from(instruction.data.subarray(0, 8)).toString("hex");
   const rule = program.instructions!.find(value => value.discriminator === discriminator);
   assert.ok(rule);
-  const rebound = { ...program, enabled: true, programId: f.binding.programId, instructions: [{ ...rule, accounts: { ...rule.accounts, "1": f.root.key.toBase58(), "2": f.pool.key.toBase58() } }] };
+  const rebound = { ...program, enabled: true, programId: f.binding.programId, instructions: [{ ...rule, accounts: { ...rule.accounts, "1": f.root.key.toBase58(), "2": f.pool.key.toBase58(), "3": f.registry.key.toBase58() } }] };
   const bindings: RoleBindings = { ...configured, solana: { ...configured.solana!, programs: [rebound] } };
   const transaction = f.transaction(instruction);
   checkSolanaPolicy("oracle-operator", bindings, transaction, f.operator);
@@ -106,4 +106,68 @@ test("sole operator can prepare a registry-bound round without administrator aut
   await assert.rejects(checkProtocolLinkage(binding, linkage, f.transaction(sdk.setConfigLifecycle(f.admin, config, "active")), f.fetch), /sole operator|not Epoch runtime/);
   root[183] = 2;
   await assert.rejects(checkProtocolLinkage(binding, linkage, f.transaction(initialize), f.fetch), /not available/);
+});
+
+test("fresh-four release stays disabled with the already operated runtime instruction and writable boundaries", () => {
+  const config = loadSignerConfig(new URL("../config/dev-dynamic.json", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+  const programs = config.bindings["oracle-operator"]!.solana!.programs;
+  const expected = [
+    ["seal_genesis_methodology", "initialize_dynamic_staging", "register_asset_registry_version", "activate_asset_registry_version", "seal_dynamic_methodology", "register_scheduled_methodology", "upload_scheduled_methodology", "seal_scheduled_methodology", "activate_universe", "grow_dynamic_account", "begin_dynamic_publication", "append_dynamic_prices", "seal_dynamic_publication", "prepare_dynamic_revaluation", "finish_dynamic_revaluation", "evaluate", "safety", "execute", "seal_evaluation", "finalize"],
+    ["initialize_current_epoch", "grow_current_epoch", "copy_registry_assets", "seal_current_epoch", "finalize_empty", "publish_snapshot", "initialize_snapshot", "grow_snapshot", "append_prices", "seal_snapshot", "close_snapshot", "execute", "begin_close", "score", "allocate", "refund", "finalize_scores", "void_epoch"],
+  ];
+  const overrides: Record<string, number[]>[] = [
+    { append_dynamic_prices: [1, 2, 4], seal_dynamic_publication: [1, 2, 4], evaluate: [0, 1, 2, 3, 4], safety: [0, 1, 2, 3, 4], execute: [0, 1, 2, 3, 4], seal_evaluation: [0, 1, 2] },
+    { execute: [2, 3, 6], begin_close: [2, 5] },
+  ];
+  assert.equal(programs.length, 2);
+  for (const [index, program] of programs.entries()) {
+    const path = index === 0 ? "../../../packages/cox/idl/cox.json" : "../../../packages/cox-epoch/idl/epoch.json";
+    const idl = JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8"));
+    assert.equal(program.enabled, false);
+    assert.equal(program.programId, idl.address);
+    assert.deepEqual(program.discriminators, expected[index]!.map(name => createHash("sha256").update(`global:${name}`).digest().subarray(0, 8).toString("hex")));
+    assert.equal(program.instructions!.length, expected[index]!.length);
+    for (const [position, name] of expected[index]!.entries()) {
+      const definition = idl.instructions.find((instruction: { name: string }) => instruction.name === name);
+      const rule = program.instructions![position]!;
+      assert.equal(rule.discriminator, program.discriminators[position]);
+      const declared = definition.accounts.flatMap((account: { writable?: boolean }, accountIndex: number) => account.writable ? [accountIndex] : []);
+      assert.deepEqual(rule.v1WritableAccounts, overrides[index]![name] ?? declared, name);
+      assert(!definition.accounts.some((account: { name: string }) => account.name === "admin"));
+      for (const [accountIndex, account] of definition.accounts.entries()) {
+        if (account.signer) assert.equal(rule.accounts[String(accountIndex)], "$signer", name);
+      }
+    }
+  }
+});
+
+test("fresh-four policy pins the new generation and refuses legacy pool and Epoch targets", () => {
+  const config = loadSignerConfig(new URL("../config/dev-dynamic.json", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+  const binding = config.bindings["oracle-operator"]!;
+  const programs = binding.solana!.programs;
+  const basic = programs[0]!, epoch = programs[1]!;
+  assert(basic.linkage?.kind === "cox-dynamic-v1");
+  assert(epoch.linkage?.kind === "epoch-v1");
+  assert.equal(basic.linkage.poolId, "4");
+  assert.equal(basic.linkage.pool, "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi");
+  assert.equal(epoch.linkage.configId, "4");
+  assert.equal(epoch.linkage.config, "BnSKCuZQ8ao6mpMKY7SSBTckkAmpiPD7pM2dnb8AT1UJ");
+  assert.deepEqual(epoch.linkage.registry, { programId: basic.programId, assetRegistry: "EozvAzsyQBHiwLWC3H1BK8Qj3p3UJSRKGxaVdZQGMM2n", generation: "f0130bd0b06ec441c72f5a748ff1c2316f92e1ce4c0f2f3f668588627065ebf1" });
+  const operator = new PublicKey(basic.linkage.operator), generation = Buffer.from(epoch.linkage.registry!.generation, "hex");
+  const basicProgram = new anchor.Program(JSON.parse(readFileSync(new URL("../../../packages/cox/idl/cox.json", import.meta.url), "utf8")), { connection: {} });
+  const epochProgram = new anchor.Program(JSON.parse(readFileSync(new URL("../../../packages/cox-epoch/idl/epoch.json", import.meta.url), "utf8")), { connection: {} });
+  const sdk = new CoxInstructions(basicProgram), epochs = new EpochInstructions(epochProgram);
+  const pool = sdk.pdas.pool(4n), digest = Buffer.alloc(32, 7), registry = sdk.pdas.assetRegistry(generation);
+  const register = sdk.registerAssetRegistryVersion(operator, pool, generation, digest);
+  const transaction = (instruction: TransactionInstruction) => new VersionedTransaction(new TransactionMessage({ payerKey: operator, recentBlockhash: SystemProgram.programId.toBase58(), instructions: [instruction] }).compileToV0Message());
+  assert.throws(() => checkSolanaPolicy("oracle-operator", binding, transaction(register), operator), /not enabled/);
+  const enabled: RoleBindings = { solana: { ...binding.solana!, programs: programs.map(program => ({ ...program, enabled: true })) } };
+  checkSolanaPolicy("oracle-operator", enabled, transaction(register), operator);
+  assert.throws(() => checkSolanaPolicy("oracle-operator", enabled, transaction(sdk.registerAssetRegistryVersion(operator, sdk.pdas.pool(3n), generation, digest)), operator), /account/);
+  const mint = new PublicKey("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"), testMint = new PublicKey(basic.linkage.testCollateralMint!);
+  const selection = { config: new PublicKey(epoch.linkage.config), opensAt: 1793088000n };
+  const registryBinding = { assetRegistry: registry, registryVersion: sdk.pdas.assetRegistryVersion(registry, digest), methodology: sdk.pdas.methodology(digest) };
+  checkSolanaPolicy("oracle-operator", enabled, transaction(epochs.initializeCurrentEpoch(operator, mint, selection, registryBinding, testMint)), operator);
+  const oldSelection = { ...selection, config: epochs.pdas.config(new PublicKey(epoch.linkage.admin), 3n) };
+  assert.throws(() => checkSolanaPolicy("oracle-operator", enabled, transaction(epochs.initializeCurrentEpoch(operator, mint, oldSelection, registryBinding, testMint)), operator), /account/);
 });
