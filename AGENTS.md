@@ -2259,3 +2259,10 @@ another agent needs to know.
 - **Rules for agents:** Joel must apply the existing preparation heap treatment to entry and check all Epoch builders, test the real sealed31-asset account, then deploy both consumers. Preserve the unchanged exact20UTC close; do not bypass the API to claim its acceptance passed, alter the contract, restart the publisher or substitute later closing data. No runtime source change is required by the diagnosis. PauseB producer/reader/preparation checks passed; this is the subsequent active-entry acceptance blocker.
 - **Open:** Await Joel's deployed builder fix before the two acceptance entries. Closing/payout/withdrawal/successor and restart-free inclusion acceptance remain unfinished.
 - **Refs:** Private `.cox/section5-20261026/epoch-entry-diagnostics.json`, `diagnose-epoch-entry.mts`; actionable email sent to Joel only.
+
+### 2026-10-26 · Peter (Codex) · Generation-three retention template prepared
+
+- **Area:** `deploy/dev/cox-archive-lifecycle.json`, existing publisher/deployment READMEs.
+- **What:** Live bucket lifecycle still expires only legacy pool2 previews/notifications and basic2 native manifests after seven days. Prepared the same seven-day policy for pool3 preview/notification and native-manifest prefixes, preserving every existing rule. Current deployment docs now distinguish the active fresh generation and verified Basic API roundtrip from unfinished Epoch acceptance. No new plan/document file was introduced.
+- **Rules for agents:** Template is not applied yet; request scoped commit/push and retention rollout approval. Never expire durable publication history, recovery objects or legacy-generation account/state archives through these rules. Existing Alchemy records remain uncommitted. Use the business identity with explicit colosseum-eox billing/quota context; a default unrelated quota project is not an IAM-expansion requirement.
+- **Refs:** Private `.cox/section5-20261026/live-bucket-lifecycle.json`; existing lifecycle JSON and READMEs. Financial services need no rebuild/restart for this bucket policy update.
