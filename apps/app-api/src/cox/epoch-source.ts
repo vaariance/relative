@@ -1,6 +1,6 @@
 import anchor, { type Program } from "@coral-xyz/anchor";
 import { addresses, currentEpochWindow, decodeAccount, decodeEpochAccount, discriminator, epochRoster, isEpochTerminal, type EpochRoundAccount, EPOCH_FEE_BPS, EPOCH_FEE_CAP, EpochInstructions, epochAddresses, marketLifecycle, readDynamicManifest, type EpochPreparationProgress, type EpochRegistryBinding as ChainRegistryBinding, type EpochSelection, type LifecycleValue } from "@cox/client";
-import { PublicKey, TransactionInstruction, TransactionMessage, VersionedTransaction, type AccountInfo, type Connection } from "@solana/web3.js";
+import { ComputeBudgetProgram, PublicKey, TransactionInstruction, TransactionMessage, VersionedTransaction, type AccountInfo, type Connection } from "@solana/web3.js";
 import {
   EPOCH_BASKET_SIZE,
   EPOCH_SECONDS,
@@ -37,6 +37,8 @@ const LOT_OWNER_OFFSET = 98;
 const CACHE_LIMIT = 1_000;
 const REFERENCE_SCALE = "1000000000000";
 const PACKET_BYTES = 1_232;
+const HEAP_BYTES = 262_144;
+const heap = (): TransactionInstruction => ComputeBudgetProgram.requestHeapFrame({ bytes: HEAP_BYTES });
 const REGISTRY_HISTORY_LIMIT = 16;
 const DEFAULT_ASSET_IDS: ReadonlyMap<number, string> = new Map(PROTOCOL_ASSET_IDS.map((id, index) => [index, id]));
 const PHASES: Record<string, EpochPhase> = { open: "open", scoring: "scoring", allocating: "allocating", settled: "settled", voided: "voided" };
@@ -537,8 +539,8 @@ export class EpochSource {
     if (progress.sealed) throw new NothingToDoError("the current Epoch round is already prepared");
     const all = this.instructions.prepareCurrentEpoch(payer, this.account.mint, selection, version, progress, this.account.testMint ?? this.account.mint);
     let count = 1;
-    while (count < all.length && fits(payer, all.slice(0, count + 1))) count += 1;
-    const transaction = await unsignedTransaction(this.options.connection, { operation: "epoch-prepare", owner: payer, instructions: all.slice(0, count), details: { requestId: address.toBase58() } });
+    while (count < all.length && fits(payer, [heap(), ...all.slice(0, count + 1)])) count += 1;
+    const transaction = await unsignedTransaction(this.options.connection, { operation: "epoch-prepare", owner: payer, instructions: [heap(), ...all.slice(0, count)], details: { requestId: address.toBase58() } });
     return { opensAt: Number(opensAt), remainingInstructions: all.length - count, transaction };
   }
 
@@ -568,7 +570,7 @@ export class EpochSource {
     if (variant(state.phase, PHASES).name === "voided") throw new NothingToDoError("this Epoch is already voided");
     if (variant(state.phase, PHASES).name !== "open" || state.closingSnapshot) throw new TransactionInputError("this Epoch is closing or closed");
     if (this.now() <= input.opensAt + EPOCH_SECONDS + CLOSING_GRACE_SECONDS) throw new TransactionInputError("this Epoch can still be closed");
-    return unsignedTransaction(this.options.connection, { operation: "epoch-void", owner: payer, instructions: [this.instructions.voidEpoch(selection)], details: { requestId: address.toBase58() } });
+    return unsignedTransaction(this.options.connection, { operation: "epoch-void", owner: payer, instructions: [heap(), this.instructions.voidEpoch(selection)], details: { requestId: address.toBase58() } });
   }
 
   async finalizeEmpty(input: EpochFinalizeEmptyInput): Promise<UnsignedTransaction> {
@@ -577,6 +579,6 @@ export class EpochSource {
     if (this.now() < input.opensAt + EPOCH_SECONDS) throw new TransactionInputError("this Epoch has not ended yet");
     const { address, account } = await this.state(selection);
     if (account.emptyFinalized) throw new NothingToDoError("this Epoch is already finalized as empty");
-    return unsignedTransaction(this.options.connection, { operation: "epoch-finalize-empty", owner: payer, instructions: [this.instructions.finalizeEmpty(selection)], details: { requestId: address.toBase58() } });
+    return unsignedTransaction(this.options.connection, { operation: "epoch-finalize-empty", owner: payer, instructions: [heap(), this.instructions.finalizeEmpty(selection)], details: { requestId: address.toBase58() } });
   }
 }

@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import anchor from "@coral-xyz/anchor";
 import { decodeAccount, discriminator, epochAddresses } from "@cox/client";
-import { Keypair, PublicKey, VersionedTransaction, type AccountInfo, type Connection } from "@solana/web3.js";
+import { ComputeBudgetProgram, Keypair, PublicKey, VersionedTransaction, type AccountInfo, type Connection } from "@solana/web3.js";
 import { describe, expect, it } from "vitest";
 import { loadProgram } from "../src/cox/chain.js";
 import { EpochSource } from "../src/cox/epoch-source.js";
@@ -335,7 +335,8 @@ describe("permissionless Epoch round preparation", () => {
     const tx = VersionedTransaction.deserialize(Buffer.from(first.transaction.transaction, "base64"));
     expect(tx.serialize().length).toBeLessThanOrEqual(1_232);
     expect(tx.message.staticAccountKeys[0]!.equals(payer)).toBe(true);
-    const names = tx.message.compiledInstructions.map((i) => name(i.data));
+    expect(tx.message.staticAccountKeys[tx.message.compiledInstructions[0]!.programIdIndex]!.equals(ComputeBudgetProgram.programId)).toBe(true);
+    const names = tx.message.compiledInstructions.slice(1).map((i) => name(i.data));
     expect(names[0]).toBe("initialize_current_epoch");
     expect(first.remainingInstructions).toBe(1 + 8 + 4 + 1 - names.length);
     const partial = Buffer.alloc(2_048 + 8_192);
@@ -348,7 +349,7 @@ describe("permissionless Epoch round preparation", () => {
     }).copy(partial);
     t.connection.set(t.sealed, partial);
     const resumed = await source.prepare({ owner: payer.toBase58() });
-    const resumedNames = VersionedTransaction.deserialize(Buffer.from(resumed.transaction.transaction, "base64")).message.compiledInstructions.map((i) => name(i.data));
+    const resumedNames = VersionedTransaction.deserialize(Buffer.from(resumed.transaction.transaction, "base64")).message.compiledInstructions.slice(1).map((i) => name(i.data));
     expect(resumedNames[0]).toBe("grow_current_epoch");
     expect(resumed.remainingInstructions).toBe(7 + 3 + 1 - resumedNames.length);
     await t.encodeEpoch(t.sealed, OPEN, t.state);
@@ -395,7 +396,7 @@ describe("permissionless Epoch round preparation", () => {
     t.now = OPEN + 14_400;
     const built = await source.finalizeEmpty({ owner: payer.toBase58(), opensAt: OPEN });
     const tx = VersionedTransaction.deserialize(Buffer.from(built.transaction, "base64"));
-    expect(Buffer.from(tx.message.compiledInstructions[0]!.data).subarray(0, 8).equals(discriminator("global", "finalize_empty"))).toBe(true);
+    expect(Buffer.from(tx.message.compiledInstructions[1]!.data).subarray(0, 8).equals(discriminator("global", "finalize_empty"))).toBe(true);
     await t.encodeEpoch(t.sealed, OPEN, t.state, { emptyFinalized: true });
     await expect(source.finalizeEmpty({ owner: payer.toBase58(), opensAt: OPEN })).rejects.toBeInstanceOf(NothingToDoError);
   });
@@ -408,7 +409,7 @@ describe("permissionless Epoch round preparation", () => {
     t.now = OPEN + 14_400 + 86_401;
     const built = await source.voidRound({ owner: payer.toBase58(), opensAt: OPEN });
     const tx = VersionedTransaction.deserialize(Buffer.from(built.transaction, "base64"));
-    expect(Buffer.from(tx.message.compiledInstructions[0]!.data).subarray(0, 8).equals(discriminator("global", "void_epoch"))).toBe(true);
+    expect(Buffer.from(tx.message.compiledInstructions[1]!.data).subarray(0, 8).equals(discriminator("global", "void_epoch"))).toBe(true);
     expect(built.operation).toBe("epoch-void");
     await t.encodeEpoch(t.sealed, OPEN, { ...t.state, phase: { voided: {} } });
     await expect(source.voidRound({ owner: payer.toBase58(), opensAt: OPEN })).rejects.toBeInstanceOf(NothingToDoError);
