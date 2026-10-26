@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { parseScaled } from "@/lib/amounts";
 import { COLLATERAL } from "@/lib/config";
-import { basketMode, basketProblem, entryBasket, feeOf } from "@/lib/epoch";
+import { TEAMMATES, basketMode, basketProblem, entryBasket, feeOf } from "@/lib/epoch";
 import type { Collateral } from "@/lib/market";
 import type { Intent } from "@/lib/requests";
 import { useAccount } from "./account";
@@ -121,6 +121,8 @@ export function EntryTicket(props: { epoch: Epoch; coins: string[]; backed: stri
   const problem = basketIssue ? basketIssue : gross === null || gross <= 0n ? "Enter an amount above zero." : short ? "Not enough USDC or rlUSD." : null;
   const intent: Intent | null = problem === null && gross !== null ? { operation: "epoch-entry", opensAt: epoch.opensAt, grossStake: gross.toString(), basket: entryBasket(coins, backed, mates), backedAsset: backed, collateralMint: collaterals.length > 1 && chosen ? chosen.mint : undefined } : null;
   const mode = basketMode(coins);
+  const extra = mates.length - TEAMMATES;
+  const basketAction = mode === "leave-out" && extra > 0 ? `Leave out ${extra} ${extra === 1 ? "coin" : "coins"}` : mode === "pick" && extra < 0 ? `Pick ${-extra} more` : "Finish basket";
   const left = coins.filter((id) => id !== backed && !mates.includes(id));
   const listed = mode === "pick" ? mates : left;
   const preset = (dollars: number) => setAmount(String(dollars));
@@ -195,7 +197,7 @@ export function EntryTicket(props: { epoch: Epoch; coins: string[]; backed: stri
             ) : owner ? (
               <SendButton
                 intent={intent}
-                label={basketIssue ? "Finish basket" : empty ? "Enter amount" : "Enter round"}
+                label={basketIssue ? basketAction : empty ? "Enter amount" : "Enter round"}
                 quiet
                 connectLabel="Connect wallet"
                 problem={empty || basketIssue ? "" : problem}
