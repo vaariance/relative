@@ -2305,3 +2305,11 @@ another agent needs to know.
   - **Hero pot:** counts only executed stake, so queued entries show as a pot of 0.00.
   - **Joel/Peter:** the live API returned `NO_PREVIEW` for part of 26 Oct, which blanked the moves.
 - **Refs:** commits `4806360`..`632f7f7`.
+
+### 2026-10-26 · Peter (Codex) · Snapshot repair deployed and existing Epoch lots executed
+
+- **Area:** Native publisher and preview exporter, generation three; source808fdc0, releasef377aea on working.
+- **What:** Installed verified Linux binary SHA256 `7bc226d8ae883f1f8e27ca682e907ffe7aa4e60e5ead0b1c1c61b87038b6034d` at19:35UTC with unchanged configuration hashes. After recovery, the two already-submitted acceptance lots executed at1793044039(19:47:19UTC), each preserving its30-member basket and references. Basic history advanced to sequence8; public preview at19:50UTC reported age0 and stale=false. Current round closing remains1793044800(20:00UTC).
+- **Verification:** Both service processes active with zero automatic restarts. Actual unsigned31/61-feed contract simulations passed344401/509238CU and existing signer linkage; simulation inputs were explicitly placeholders, while real executed lots used the live publisher. Exact closing, payout, withdrawal and successor acceptance remain unverified. Additional live entries exist; do not assume this round contains only our two test lots.
+- **Rules for agents:** Supersedes the unexecuted/pending-rollout facts in “Epoch snapshot composition and cleanup repair approved.” Peter explicitly directed KEEP publisher running after a bounded recovery retry. The30-asset expansion is NOT scheduled; no20UTC inclusion claim is valid. The attempted restoration email to Joel was rejected and was not sent. Preserve all current positions/custody and uncommitted Alchemy records.
+- **Refs:** Private `.cox/section5-20261026/epoch-recovery-status.json`, `repair-public-api.json`, `atomic-repair-live-simulation.json`; VM release installation.json. This entry remains uncommitted.
