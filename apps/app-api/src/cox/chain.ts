@@ -273,7 +273,7 @@ export function toPublication(publication: ChainPublication, batch: BatchAccount
       poolId: context.poolId,
       sequence,
       batch: scheduled,
-      predecessorSequence: sequence === 0 ? null : sequence - 1,
+      predecessorSequence: context.predecessorBatch === null ? null : sequence - 1,
       predecessorBatch: context.predecessorBatch,
       missedBatches,
       cutoff: Number(state.cutoff),
