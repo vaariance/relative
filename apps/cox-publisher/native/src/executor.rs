@@ -124,6 +124,44 @@ pub(crate) fn validate_methodology_policy(
     }
     Ok(())
 }
+fn basic_publication_deadline(
+    state: &ChainState,
+    instructions: &[Instruction],
+    clock: u64,
+) -> Result<Option<u64>, worker::Error> {
+    let mut deadline = None;
+    for instruction in instructions {
+        if instruction.program_id != state.basic.accounts.program
+            || ![b"global:publish_adaptive".as_slice(), b"global:begin_dynamic_publication".as_slice()]
+                .iter().any(|name| instruction.data.get(..8) == Some(&Sha256::digest(name)[..8]))
+        {
+            continue;
+        }
+        let batch = u64::from_le_bytes(instruction.data.get(8..16)
+            .ok_or(worker::Error::Chain)?.try_into().map_err(|_| worker::Error::Chain)?);
+        let cutoff = state.basic.pool.origin.checked_add(batch).ok_or(worker::Error::Clock)?;
+        let end = if !state.basic.pool.initialized && clock < state.basic.pool.trading_opens_at {
+            state.basic.pool.trading_opens_at
+        } else {
+            cutoff.checked_add(6).ok_or(worker::Error::Clock)?
+        };
+        deadline = Some(deadline.map_or(end, |previous: u64| previous.min(end)));
+    }
+    Ok(deadline)
+}
+async fn sign_before_deadline<S: DraftSigner>(
+    signer: &S,
+    draft: &DraftTransaction,
+) -> Result<PendingTransaction, worker::Error> {
+    if draft.expires_at_seconds <= now()? {
+        return Err(worker::Error::StaleDraft);
+    }
+    let result = signer.sign(draft).await;
+    if draft.expires_at_seconds <= now()? {
+        return Err(worker::Error::StaleDraft);
+    }
+    result
+}
 fn now() -> Result<u64, worker::Error> {
     #[cfg(test)]
     if let Some(timestamp) = LOCAL_REHEARSAL_CLOCK.with(|value| value.get()) {
@@ -1359,8 +1397,11 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
             .as_ref()
             .ok_or(worker::Error::Chain)?
             .confirmed_timestamp_ms;
-        if timestamp == 0 || timestamp > wall_ms || wall_ms - timestamp > self.max_price_age_ms {
+        if timestamp == 0 || timestamp > wall_ms {
             return Err(worker::Error::Clock);
+        }
+        if wall_ms - timestamp > self.max_price_age_ms {
+            return Err(worker::Error::Snapshot);
         }
         Ok(timestamp)
     }
@@ -1801,18 +1842,10 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
         };
         let clock = now()?;
         let mut expiry = clock.checked_add(20).ok_or(worker::Error::Clock)?;
-        if let Some(observation) = observation {
-            if work.iter().any(is_basic)
-                && (!state.basic.pool.initialized && clock < state.basic.pool.trading_opens_at)
-            {
-                expiry = expiry.min(state.basic.pool.trading_opens_at);
-            } else if work.iter().any(is_basic) && !staged_epoch {
-                expiry = expiry.min(
-                    (observation.timestamp_us / 1_000_000)
-                        .checked_add(6)
-                        .ok_or(worker::Error::Clock)?,
-                );
-            }
+        if let Some(deadline) = basic_publication_deadline(&state, &instructions, clock)? {
+            expiry = expiry.min(deadline);
+        }
+        if observation.is_some() {
             for epoch in &state.epochs {
                 if epoch_selected(work, epoch.epoch.opens_at)
                     && work.iter().any(|item| {
@@ -1891,12 +1924,7 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
         if draft.expires_at_seconds <= now()? {
             return Err(worker::Error::StaleDraft);
         }
-        let pending = match self.signer.sign(draft).await {
-            Err(worker::Error::Signer) if draft.expires_at_seconds <= now()? => {
-                return Err(worker::Error::StaleDraft);
-            }
-            result => result?,
-        };
+        let pending = sign_before_deadline(&self.signer, draft).await?;
         if !pending_valid(self.reader.operator, &pending)
             || pending
                 .signed_bytes
@@ -2097,7 +2125,7 @@ mod tests {
         );
         assert_eq!(
             executor.price_timestamp_ceiling_ms(14_415_001),
-            Err(worker::Error::Clock)
+            Err(worker::Error::Snapshot)
         );
         assert_eq!(
             executor.price_timestamp_ceiling_ms(14_409_999),
@@ -2751,6 +2779,42 @@ mod tests {
             executor.reader.rpc.usage().unwrap().physical_http_requests,
             0
         );
+    }
+    #[test]
+    fn actual_basic_instructions_keep_their_deadline_after_epoch_trimming() {
+        let mut state = state();
+        state.basic.pool.initialized = true;
+        let batch = 10u64;
+        let cutoff = state.basic.pool.origin + batch;
+        for name in [b"global:publish_adaptive".as_slice(), b"global:begin_dynamic_publication".as_slice()] {
+            let mut data = Sha256::digest(name)[..8].to_vec();
+            data.extend_from_slice(&batch.to_le_bytes());
+            let instruction = Instruction { program_id: state.basic.accounts.program, accounts: vec![], data };
+            assert_eq!(basic_publication_deadline(&state, &[instruction.clone()], cutoff + 5).unwrap(), Some(cutoff + 6));
+            assert_eq!(basic_publication_deadline(&state, &[instruction], cutoff + 7).unwrap(), Some(cutoff + 6));
+        }
+        assert_eq!(basic_publication_deadline(&state, &[], cutoff).unwrap(), None);
+        let mut data = Sha256::digest(b"global:seal_dynamic_publication")[..8].to_vec();
+        data.extend_from_slice(&batch.to_le_bytes());
+        let instruction = Instruction { program_id: state.basic.accounts.program, accounts: vec![], data };
+        assert_eq!(basic_publication_deadline(&state, &[instruction], cutoff + 20).unwrap(), None);
+    }
+    #[tokio::test]
+    async fn successful_signer_response_arriving_at_deadline_is_discarded() {
+        struct DelayedSigner { returns_at: u64 }
+        impl DraftSigner for DelayedSigner {
+            async fn sign(&self, _: &DraftTransaction) -> Result<PendingTransaction, worker::Error> {
+                LOCAL_REHEARSAL_CLOCK.with(|clock| clock.set(Some(self.returns_at)));
+                Ok(PendingTransaction { signature: "test".into(), signed_bytes: vec![1], last_valid_block_height: 100 })
+            }
+        }
+        let _clock = LocalRehearsalClock::at(100);
+        let draft = DraftTransaction { request_id: "test".into(), unsigned_bytes: vec![1], blockhash: "test".into(), last_valid_block_height: 100, expires_at_seconds: 106 };
+        assert!(sign_before_deadline(&DelayedSigner { returns_at: 105 }, &draft).await.is_ok());
+        LOCAL_REHEARSAL_CLOCK.with(|clock| clock.set(Some(100)));
+        assert_eq!(sign_before_deadline(&DelayedSigner { returns_at: 106 }, &draft).await, Err(worker::Error::StaleDraft));
+        LOCAL_REHEARSAL_CLOCK.with(|clock| clock.set(Some(100)));
+        assert_eq!(sign_before_deadline(&DelayedSigner { returns_at: 107 }, &draft).await, Err(worker::Error::StaleDraft));
     }
     #[test]
     fn stale_snapshot_cleanup_is_bounded_durable_and_does_not_hold_the_active_stage() {

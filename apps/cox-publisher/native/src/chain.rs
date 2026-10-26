@@ -629,11 +629,15 @@ impl ChainReader {
             }
             let accounts = EpochAccounts::derive(self.epoch_program, self.epoch_config, opens)
                 .map_err(|_| Error::InvalidAccount)?;
-            let (s, rows) = self
-                .optional_accounts(&[accounts.epoch], slot, "confirmed")
+            let (s, mut rows) = self
+                .optional_accounts(
+                    &[accounts.epoch, accounts.vault, accounts.test_vault],
+                    slot,
+                    "confirmed",
+                )
                 .await?;
             slot = s;
-            let row = rows.into_iter().next().flatten();
+            let row = rows.remove(0);
             let epoch = row
                 .as_ref()
                 .map(|row| decode::<EpochAccount>(row, self.epoch_program))
@@ -677,10 +681,9 @@ impl ChainReader {
             if done {
                 continue;
             }
-            let (s, vault_rows) = self
-                .multiple(&[accounts.vault, accounts.test_vault], slot)
-                .await?;
-            slot = s;
+            let vault_rows = rows.into_iter()
+                .map(|row| row.ok_or(Error::InvalidAccount))
+                .collect::<Result<Vec<_>, _>>()?;
             let first = validate_vault(
                 &vault_rows[0],
                 accounts.epoch,
