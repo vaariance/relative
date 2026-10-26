@@ -1,6 +1,8 @@
 [Unit]
 Description=Relative native devnet publisher
 After=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=3
 Wants=network-online.target
 
 [Service]
@@ -10,7 +12,7 @@ Group=cox-publisher
 WorkingDirectory=/opt/cox-publisher/current
 ExecStart=/opt/cox-publisher/current/apps/cox-publisher/native/target/release/relative-publisher run --config /etc/cox-publisher/native.json
 Restart=on-failure
-RestartSec=5
+RestartSec=60
 RuntimeDirectory=cox-publisher
 StateDirectory=cox-publisher
 EnvironmentFile=/etc/cox-publisher/native.env

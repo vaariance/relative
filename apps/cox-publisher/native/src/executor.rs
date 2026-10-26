@@ -51,6 +51,7 @@ pub struct Executor<S> {
     epoch_stage: Option<crate::epoch_stage::Stage>,
     epoch_stage_snapshot: Option<(relative_epoch::SnapshotAccount, usize)>,
     epoch_retry_ms: u64,
+    epoch_cleanup: Vec<u64>,
     inclusion: Option<crate::inclusion_execution::Shared>,
     current_epoch_preparation: Vec<Instruction>,
     staging_preparation: Vec<Instruction>,
@@ -244,6 +245,7 @@ impl<S: DraftSigner> Executor<S> {
             epoch_stage: None,
             epoch_stage_snapshot: None,
             epoch_retry_ms: 0,
+            epoch_cleanup: vec![],
             inclusion: None,
             current_epoch_preparation: vec![],
             staging_preparation: vec![],
@@ -320,6 +322,18 @@ impl<S: DraftSigner> Executor<S> {
         self.epoch_stage = crate::journal::read::<Option<crate::epoch_stage::Stage>>(&stage_path)
             .map_err(|_| worker::Error::Storage)?
             .flatten();
+        let cleanup_path = stage_path.with_file_name("epoch-snapshot-cleanup.json");
+        if std::fs::metadata(&cleanup_path).is_ok_and(|info| info.len() > 4096) {
+            return Err(worker::Error::Storage);
+        }
+        self.epoch_cleanup = crate::journal::read::<Vec<u64>>(&cleanup_path)
+            .map_err(|_| worker::Error::Storage)?
+            .unwrap_or_default();
+        if self.epoch_cleanup.len() > 64
+            || self.epoch_cleanup.windows(2).any(|pair| pair[0] >= pair[1])
+        {
+            return Err(worker::Error::Storage);
+        }
         self.epoch_stage_path = Some(stage_path);
         self.discovery = crate::chain::Discovery::load(
             path,
@@ -548,6 +562,87 @@ impl<S: DraftSigner> Executor<S> {
         self.epoch_stage_snapshot = None;
         Ok(())
     }
+    fn persist_epoch_cleanup(&self) -> Result<(), worker::Error> {
+        let path = self
+            .epoch_stage_path
+            .as_ref()
+            .ok_or(worker::Error::Storage)?
+            .with_file_name("epoch-snapshot-cleanup.json");
+        crate::journal::atomic_write(&path, &self.epoch_cleanup).map_err(|_| worker::Error::Storage)
+    }
+    fn defer_epoch_cleanup(&mut self, timestamp: u64) -> Result<(), worker::Error> {
+        if !self.epoch_cleanup.contains(&timestamp) {
+            if self.epoch_cleanup.len() >= 64 {
+                return Err(worker::Error::Storage);
+            }
+            self.epoch_cleanup.push(timestamp);
+            self.epoch_cleanup.sort_unstable();
+            self.persist_epoch_cleanup()?;
+        }
+        self.persist_epoch_stage(None)?;
+        self.epoch_retry_ms = 0;
+        Ok(())
+    }
+    async fn cleanup_snapshot_exists(
+        &self,
+        state: &ChainState,
+        timestamp: u64,
+    ) -> Result<bool, worker::Error> {
+        let accounts = transactions::EpochAccounts::derive(
+            self.reader.epoch_program,
+            self.reader.epoch_config,
+            self.discovery.first_epoch(),
+        )
+        .map_err(|_| worker::Error::Chain)?;
+        let value = chain_error(
+            self.reader
+                .rpc
+                .call(
+                    "getAccountInfo",
+                    json!([accounts.snapshot(timestamp).to_string(),
+            {"commitment":"confirmed","encoding":"base64","minContextSlot":state.slot}]),
+                )
+                .await,
+        )?;
+        let account = value.get("value").ok_or(worker::Error::Chain)?;
+        if account.is_null() {
+            return Ok(false);
+        }
+        if account.get("owner").and_then(|value| value.as_str())
+            != Some(self.reader.epoch_program.to_string().as_str())
+            || account.get("executable").and_then(|value| value.as_bool()) != Some(false)
+        {
+            return Err(worker::Error::Snapshot);
+        }
+        let bytes = STANDARD
+            .decode(
+                account
+                    .pointer("/data/0")
+                    .and_then(|value| value.as_str())
+                    .ok_or(worker::Error::Snapshot)?,
+            )
+            .map_err(|_| worker::Error::Snapshot)?;
+        let snapshot = relative_epoch::SnapshotAccount::try_deserialize(&mut bytes.as_slice())
+            .map_err(|_| worker::Error::Snapshot)?;
+        if snapshot.config.to_bytes() != self.reader.epoch_config.to_bytes()
+            || snapshot.sequence != timestamp
+            || snapshot.oracle_timestamp != timestamp
+        {
+            return Err(worker::Error::Snapshot);
+        }
+        Ok(true)
+    }
+    fn cleanup_timestamp(&self, work: &[Work]) -> Option<u64> {
+        work.iter().find_map(|work| {
+            id(work)
+                .strip_prefix("epoch:snapshot-cleanup:")
+                .and_then(|timestamp| timestamp.parse::<u64>().ok())
+                .filter(|timestamp| {
+                    self.epoch_cleanup.contains(timestamp)
+                        && self.now_ms / 1000 >= timestamp.saturating_add(60)
+                })
+        })
+    }
     async fn read_epoch_stage_snapshot(
         &self,
         state: &ChainState,
@@ -672,6 +767,16 @@ impl<S: DraftSigner> Executor<S> {
         )
         .map_err(|_| worker::Error::Chain)?;
         if self.epoch_stage_expired(state, stage) {
+            if self
+                .epoch_stage_snapshot
+                .as_ref()
+                .is_some_and(|(snapshot, _)| {
+                    !snapshot.sealed && self.now_ms / 1000 < stage.timestamp().saturating_add(60)
+                })
+            {
+                self.epoch_retry_ms = stage.timestamp().saturating_add(60).saturating_mul(1000);
+                return Err(worker::Error::StaleDraft);
+            }
             return Ok(vec![
                 accounts.close_snapshot(self.reader.operator, stage.timestamp())
             ]);
@@ -686,7 +791,13 @@ impl<S: DraftSigner> Executor<S> {
             .as_ref()
             .map(|(snapshot, space)| (snapshot, *space));
         let mut instructions = stage.plan(&accounts, self.reader.operator, saved, &prices)?;
-        if saved.is_some_and(|(snapshot, _)| snapshot.sealed) {
+        if saved.is_some_and(|(snapshot, _)| snapshot.sealed)
+            || instructions.last().is_some_and(|instruction| {
+                instruction.program_id == accounts.program
+                    && instruction.data.get(..8)
+                        == Some(&Sha256::digest(b"global:seal_snapshot")[..8])
+            })
+        {
             for epoch in &state.epochs {
                 if !epoch_selected(&stage.work, epoch.epoch.opens_at) {
                     continue;
@@ -1097,22 +1208,40 @@ fn trim_optional_tail(
 ) -> bool {
     let close = &Sha256::digest(b"global:close_snapshot")[..8];
     let publish = &Sha256::digest(b"global:publish_snapshot")[..8];
+    let initialize = &Sha256::digest(b"global:initialize_snapshot")[..8];
     let execute = &Sha256::digest(b"global:execute")[..8];
     let closing = &Sha256::digest(b"global:begin_close")[..8];
+    let consumes = |ix: &Instruction| {
+        ix.program_id == epoch_program
+            && (ix.data.get(..8) == Some(execute) || ix.data.get(..8) == Some(closing))
+    };
+    let count = instructions.iter().filter(|ix| consumes(ix)).count();
     if instructions
         .last()
         .is_some_and(|ix| ix.program_id == epoch_program && ix.data.get(..8) == Some(close))
     {
-        if let Some(index) = instructions.iter().rposition(|ix| {
-            ix.program_id == epoch_program
-                && (ix.data.get(..8) == Some(execute) || ix.data.get(..8) == Some(closing))
-        }) {
+        if count > 1 {
+            let index = instructions.iter().rposition(consumes).unwrap();
             instructions.remove(index);
         } else {
-            instructions.retain(|ix| {
-                ix.program_id != epoch_program
-                    || (ix.data.get(..8) != Some(close) && ix.data.get(..8) != Some(publish))
-            });
+            instructions.pop();
+            if count == 0 {
+                if let Some(start) = instructions.iter().position(|ix| {
+                    ix.program_id == epoch_program
+                        && (ix.data.get(..8) == Some(publish)
+                            || ix.data.get(..8) == Some(initialize))
+                }) {
+                    instructions.truncate(start);
+                }
+            }
+        }
+    } else if instructions.last().is_some_and(consumes) && count == 1 {
+        instructions.pop();
+        if let Some(start) = instructions.iter().position(|ix| {
+            ix.program_id == epoch_program
+                && (ix.data.get(..8) == Some(publish) || ix.data.get(..8) == Some(initialize))
+        }) {
+            instructions.truncate(start);
         }
     } else {
         instructions.pop();
@@ -1256,15 +1385,23 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
                         .map(|state| state.epoch_config.max_entry_price_age)
                         .unwrap_or(60)
                 };
-                Some(
-                    self.epoch_retry_ms.min(
-                        stage
-                            .timestamp()
-                            .saturating_add(age)
-                            .saturating_add(1)
-                            .saturating_mul(1000),
-                    ),
-                )
+                if self
+                    .last_state
+                    .as_ref()
+                    .is_some_and(|state| self.epoch_stage_expired(state, stage))
+                {
+                    Some(self.epoch_retry_ms)
+                } else {
+                    Some(
+                        self.epoch_retry_ms.min(
+                            stage
+                                .timestamp()
+                                .saturating_add(age)
+                                .saturating_add(1)
+                                .saturating_mul(1000),
+                        ),
+                    )
+                }
             } else {
                 Some(self.epoch_retry_ms)
             }
@@ -1298,6 +1435,12 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
             .chain(epoch)
             .chain(boundary)
             .chain(next_round)
+            .chain(
+                self.epoch_cleanup
+                    .iter()
+                    .map(|timestamp| timestamp.saturating_add(60).saturating_mul(1000))
+                    .filter(|deadline| *deadline > self.now_ms),
+            )
             .min()
     }
     async fn authoritative_work(&mut self, now_ms: u64) -> Result<Vec<Work>, worker::Error> {
@@ -1375,7 +1518,7 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
                 self.reader.operator,
                 &self.anchor,
             )?;
-            if self.now_ms < self.epoch_retry_ms && !self.epoch_stage_expired(&state, &stage) {
+            if self.now_ms < self.epoch_retry_ms {
                 work.retain(is_basic);
             } else {
                 self.epoch_retry_ms = 0;
@@ -1385,10 +1528,32 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
                     && (!still_pending || self.epoch_stage_expired(&state, &stage))
                 {
                     self.persist_epoch_stage(None)?;
+                } else if self.epoch_stage_expired(&state, &stage)
+                    && self
+                        .epoch_stage_snapshot
+                        .as_ref()
+                        .is_some_and(|(snapshot, _)| !snapshot.sealed)
+                    && self.now_ms / 1000 < stage.timestamp().saturating_add(60)
+                {
+                    self.defer_epoch_cleanup(stage.timestamp())?;
                 } else {
                     work.retain(is_basic);
                     work.push(Self::epoch_stage_work(&stage)?);
                 }
+            }
+        }
+        for timestamp in self.epoch_cleanup.clone() {
+            if now_ms / 1000 < timestamp.saturating_add(60) {
+                continue;
+            }
+            if self.cleanup_snapshot_exists(&state, timestamp).await? {
+                work.push(Work::Maintenance {
+                    id: format!("epoch:snapshot-cleanup:{timestamp}"),
+                    pool: Pool::Epoch,
+                });
+            } else {
+                self.epoch_cleanup.retain(|pending| *pending != timestamp);
+                self.persist_epoch_cleanup()?;
             }
         }
         if let Some(control) = &self.inclusion {
@@ -1438,6 +1603,7 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
                 && !(id(item) == crate::epoch_lifecycle::PREPARE_ID
                     && !self.current_epoch_preparation.is_empty())
                 && !(id(item) == STAGING_CAPACITY_ID && !self.staging_preparation.is_empty())
+                && self.cleanup_timestamp(std::slice::from_ref(item)).is_none()
                 && !(self.inclusion.is_some()
                     && crate::inclusion_execution::Controller::matches(item))
                 && !self
@@ -1453,7 +1619,9 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
         let lifecycle = work
             .iter()
             .any(|item| id(item) == crate::epoch_lifecycle::PREPARE_ID);
+        let cleanup = self.cleanup_timestamp(work);
         let staged_epoch = !lifecycle
+            && cleanup.is_none()
             && has_epoch_work
             && (self.epoch_stage.is_some() || (self.mapping.len() > 30 && observation.is_some()));
         let rollout=work.iter().any(|work|matches!(work,Work::Maintenance{id,..} if id==crate::inclusion_execution::ROLLOUT_ID));
@@ -1496,6 +1664,14 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
                     return Err(worker::Error::StaleDraft)
                 }
             }
+        } else if let Some(timestamp) = cleanup {
+            let accounts = transactions::EpochAccounts::derive(
+                self.reader.epoch_program,
+                self.reader.epoch_config,
+                self.discovery.first_epoch(),
+            )
+            .map_err(|_| worker::Error::Chain)?;
+            vec![accounts.close_snapshot(self.reader.operator, timestamp)]
         } else if staged_epoch {
             match self.prepare_epoch_stage(&state, work, observation).await {
                 Ok(instructions) => {
@@ -2204,7 +2380,7 @@ mod tests {
     async fn staged_epoch_executes_only_original_pending_lot_and_preserves_exact_close_deadline() {
         let mut executor = dynamic_executor(31);
         let mut state = crate::chain::tests::dynamic_state(31);
-        state.epoch_config.max_entry_price_age = 60;
+        state.epoch_config.max_entry_price_age = 5;
         state.epochs.push(crate::chain::tests::epoch(true));
         let observation = Observation {
             universe_digest: executor.anchor.universe_digest,
@@ -2263,6 +2439,64 @@ mod tests {
                     .accounts
                     .close_snapshot(executor.reader.operator, 14_410)
             ]
+        );
+        executor.epoch_stage_snapshot = None;
+        let atomic = executor
+            .prepare_epoch_stage(&state, &work, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            atomic.first().unwrap(),
+            &state.epochs[0]
+                .accounts
+                .initialize_snapshot(
+                    executor.reader.operator,
+                    14_410,
+                    14_410,
+                    observation.benchmark as u128,
+                    31
+                )
+                .unwrap()
+        );
+        assert!(atomic.iter().any(|instruction| instruction
+            == &state.epochs[0]
+                .accounts
+                .execute(executor.reader.operator, 0, 14_410)));
+        assert_eq!(
+            atomic.last().unwrap(),
+            &state.epochs[0]
+                .accounts
+                .close_snapshot(executor.reader.operator, 14_410)
+        );
+        let mut data = relative_epoch::SnapshotAccount::DISCRIMINATOR.to_vec();
+        data.resize(4_096, 0);
+        let snapshot =
+            relative_epoch::SnapshotAccount::try_deserialize(&mut data.as_slice()).unwrap();
+        executor.epoch_stage_snapshot = Some((snapshot, 4_096));
+        executor.now_ms = 14_469_000;
+        executor.epoch_stage_snapshot.as_mut().unwrap().0.sealed = false;
+        assert!(executor.epoch_stage_expired(&state, &stage));
+        assert_eq!(
+            executor.prepare_epoch_stage(&state, &work, None).await,
+            Err(worker::Error::StaleDraft)
+        );
+        assert_eq!(executor.epoch_retry_ms, 14_470_000);
+        executor.last_state = Some(state);
+        assert_eq!(worker::Chain::next_wake_ms(&executor), Some(14_470_000));
+        let state = executor.last_state.take().unwrap();
+        executor.now_ms = 14_470_000;
+        assert_eq!(
+            executor
+                .prepare_epoch_stage(&state, &work, None)
+                .await
+                .unwrap(),
+            vec![state.epochs[0]
+                .accounts
+                .close_snapshot(executor.reader.operator, 14_410)]
+        );
+        assert_eq!(
+            executor.reader.rpc.usage().unwrap().physical_http_requests,
+            0
         );
         executor.now_ms = 14_471_000;
         assert!(executor.epoch_stage_expired(&state, &stage));
@@ -2519,6 +2753,47 @@ mod tests {
         );
     }
     #[test]
+    fn stale_snapshot_cleanup_is_bounded_durable_and_does_not_hold_the_active_stage() {
+        let path = std::env::temp_dir().join(format!("epoch-cleanup-{}", std::process::id()));
+        let mut executor = dynamic_executor(31)
+            .with_discovery_state(path.join("discovery.json"), 14_400)
+            .unwrap();
+        executor.defer_epoch_cleanup(14_410).unwrap();
+        executor.defer_epoch_cleanup(14_410).unwrap();
+        assert_eq!(executor.epoch_cleanup, vec![14_410]);
+        assert!(executor.epoch_stage.is_none());
+        executor.now_ms = 14_469_000;
+        assert_eq!(worker::Chain::next_wake_ms(&executor), Some(14_470_000));
+        let cleanup = Work::Maintenance {
+            id: "epoch:snapshot-cleanup:14410".into(),
+            pool: Pool::Epoch,
+        };
+        assert_eq!(
+            executor.cleanup_timestamp(std::slice::from_ref(&cleanup)),
+            None
+        );
+        executor.now_ms = 14_470_000;
+        assert_eq!(
+            executor.cleanup_timestamp(std::slice::from_ref(&cleanup)),
+            Some(14_410)
+        );
+        let recovered = dynamic_executor(31)
+            .with_discovery_state(path.join("discovery.json"), 14_400)
+            .unwrap();
+        assert_eq!(recovered.epoch_cleanup, vec![14_410]);
+        assert!(recovered.epoch_stage.is_none());
+        assert_eq!(
+            executor.reader.rpc.usage().unwrap().physical_http_requests,
+            0
+        );
+        executor.epoch_cleanup = (0..64).collect();
+        assert_eq!(
+            executor.defer_epoch_cleanup(65),
+            Err(worker::Error::Storage)
+        );
+        let _ = std::fs::remove_dir_all(path);
+    }
+    #[test]
     fn size_trimming_keeps_snapshot_publication_and_rent_close_atomic() {
         let operator = solana_address::Address::new_from_array([7; 32]);
         let epoch = transactions::EpochAccounts::derive(
@@ -2557,7 +2832,10 @@ mod tests {
             ]
         );
         assert!(trim_optional_tail(&mut instructions, epoch.program));
-        assert_eq!(instructions, vec![publish, close]);
+        assert_eq!(
+            instructions,
+            vec![publish.clone(), epoch.execute(operator, 0, 1)]
+        );
         assert!(!trim_optional_tail(&mut instructions, epoch.program));
         assert!(instructions.is_empty());
         let basic = Instruction {

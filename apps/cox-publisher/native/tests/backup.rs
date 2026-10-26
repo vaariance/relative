@@ -1043,3 +1043,17 @@ async fn accepted_epoch_snapshot_journal_is_frozen_and_restored_with_its_signed_
         b"bound-preview-cutoff"
     );
 }
+
+#[tokio::test]
+async fn deferred_epoch_snapshot_cleanup_survives_verified_backup_and_restore() {
+    let f = Fixture::new();
+    let payload = b"[1793030400,1793030405]";
+    fs::write(f.config.state_directory.join("epoch-snapshot-cleanup.json"), payload).unwrap();
+    let transport = Memory::default();
+    let report = backup::backup(&f.config, &transport).await.unwrap();
+    fs::write(f.config.state_directory.join("epoch-snapshot-cleanup.json"), b"[]").unwrap();
+    let destination = f.root.join("cleanup-restored");
+    let manifest = backup::restore(&f.config, &transport, &report.manifest_sha256, &destination).await.unwrap();
+    assert!(manifest.entries.iter().any(|entry| entry.path == "epoch-snapshot-cleanup.json"));
+    assert_eq!(fs::read(destination.join("epoch-snapshot-cleanup.json")).unwrap(), payload);
+}

@@ -94,37 +94,54 @@ impl Stage {
         saved: Option<(&relative_epoch::SnapshotAccount, usize)>,
         prices: &[EpochPrice],
     ) -> Result<Vec<Instruction>, worker::Error> {
-        let Some((snapshot, space)) = saved else {
-            return Ok(vec![accounts
-                .initialize_snapshot(
-                    operator,
-                    self.timestamp(),
-                    self.timestamp(),
-                    self.observation.benchmark as u128,
-                    u16::try_from(prices.len()).map_err(|_| worker::Error::Snapshot)?,
-                )
-                .map_err(|_| worker::Error::Snapshot)?]);
-        };
-        if snapshot.sealed {
-            return Ok(vec![]);
-        }
-        let target = snapshot
-            .try_to_vec()
-            .map_err(|_| worker::Error::Snapshot)?
-            .len()
-            + 8
-            + (prices.len() - snapshot.prices.len()) * 50;
-        if space < target {
-            return Ok(vec![accounts
-                .grow_snapshot(
-                    operator,
-                    self.timestamp(),
-                    (target - space).min(8_192) as u32,
-                )
-                .map_err(|_| worker::Error::Snapshot)?]);
-        }
         let mut instructions = Vec::new();
-        for page in prices[snapshot.prices.len()..].chunks(8) {
+        let (present, space, header) = if let Some((snapshot, space)) = saved {
+            if snapshot.sealed {
+                return Ok(instructions);
+            }
+            (
+                snapshot.prices.len(),
+                space,
+                snapshot
+                    .try_to_vec()
+                    .map_err(|_| worker::Error::Snapshot)?
+                    .len()
+                    + 8
+                    - snapshot.prices.len() * 50,
+            )
+        } else {
+            instructions.push(
+                accounts
+                    .initialize_snapshot(
+                        operator,
+                        self.timestamp(),
+                        self.timestamp(),
+                        self.observation.benchmark as u128,
+                        u16::try_from(prices.len()).map_err(|_| worker::Error::Snapshot)?,
+                    )
+                    .map_err(|_| worker::Error::Snapshot)?,
+            );
+            if prices.len() > 61 {
+                return Ok(instructions);
+            }
+            (0, relative_epoch::INITIAL_SPACE, 144)
+        };
+        let target = header + prices.len() * 50;
+        if space < target {
+            instructions.push(
+                accounts
+                    .grow_snapshot(
+                        operator,
+                        self.timestamp(),
+                        (target - space).min(8_192) as u32,
+                    )
+                    .map_err(|_| worker::Error::Snapshot)?,
+            );
+            if prices.len() > 61 {
+                return Ok(instructions);
+            }
+        }
+        for page in prices[present..].chunks(8) {
             instructions.push(
                 accounts
                     .append_snapshot_prices(operator, self.timestamp(), page)
@@ -194,9 +211,10 @@ mod tests {
                 .validate(key(2), key(3), key(7), &stage.anchor)
                 .unwrap();
             stage.verify_snapshot(&saved, &prices, [9; 32]).unwrap();
+            let initial = stage.plan(&accounts, key(7), None, &prices).unwrap();
             assert_eq!(
-                stage.plan(&accounts, key(7), None, &prices).unwrap(),
-                vec![accounts
+                initial[0],
+                accounts
                     .initialize_snapshot(
                         key(7),
                         28_800,
@@ -204,8 +222,9 @@ mod tests {
                         100 * cox_math::SCALE as u128,
                         count as u16
                     )
-                    .unwrap()]
+                    .unwrap()
             );
+            assert_eq!(initial.len(), if count == 31 { 6 } else { 1 });
             saved.prices = prices[..8]
                 .iter()
                 .map(|price| cox_epoch::Price {
@@ -240,6 +259,44 @@ mod tests {
             assert!(wrong
                 .validate(key(2), key(3), key(7), &stage.anchor)
                 .is_err());
+        }
+    }
+    #[test]
+    fn complete_31_and_61_price_snapshots_execute_within_one_v1_packet() {
+        for count in [31, 61] {
+            let (stage, accounts, prices, saved) = fixture(count);
+            assert_eq!(saved.try_to_vec().unwrap().len() + 8, 144);
+            let mut instructions = stage.plan(&accounts, key(7), None, &prices).unwrap();
+            assert_eq!(
+                instructions.last().unwrap(),
+                &accounts.seal_snapshot(key(7), stage.timestamp())
+            );
+            assert_eq!(
+                instructions
+                    .iter()
+                    .filter(|instruction| instruction.data.get(..8)
+                        == Some(&sha2::Sha256::digest(b"global:grow_snapshot")[..8]))
+                    .count(),
+                usize::from(count == 61)
+            );
+            instructions.push(accounts.execute(key(7), 0, stage.timestamp()));
+            instructions.push(accounts.execute(key(7), 1, stage.timestamp()));
+            instructions.push(accounts.close_snapshot(key(7), stage.timestamp()));
+            let transaction = crate::transactions::compile(
+                key(7),
+                solana_hash::Hash::new_from_array([5; 32]),
+                &instructions,
+                &[accounts.program],
+                crate::transactions::Budget {
+                    compute_units: 1_400_000,
+                    priority_fee_lamports: 100,
+                    heap_bytes: Some(262_144),
+                },
+            )
+            .unwrap();
+            assert!(transaction.unsigned_transaction.len() <= 4096);
+            assert!(instructions.len() + 4 <= 64);
+            eprintln!("{count}-feed atomic snapshot + 2 executions + close: {} bytes, {} protocol instructions", transaction.unsigned_transaction.len(), instructions.len());
         }
     }
     #[test]
