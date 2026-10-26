@@ -2126,3 +2126,15 @@ another agent needs to know.
   - **Quiet window:** `status.chain.readAt` stayed at its start-up value for 90 seconds on the VM and 96 seconds on Cloud Run, with the feed `unhealthy`.
 - **Rules for agents:** Never derive a chain catch-up from feed state that can stay empty; latch one-off work separately.
 - **Refs:** commit `67f673a`.
+
+### 2026-10-26 · Joel (Claude Code) · Live APIs switched to Basic pool 3 and Epoch config 3 (Pause B)
+
+- **Area:** `apps/app-api` (`src/cox/chain.ts`, `src/cox/epoch-source.ts`), `deploy/dev`; Cloud Run `cox-app-api-live`, dev VM.
+- **What:** After Peter's 2026-10-26 initialization-ready email, both live APIs read Basic pool 3 `Dwkxra6m…ETZT` and Epoch config 3 `GrCCt9M2…aPhs`. Supersedes the "not applied" status in Joel's 2026-10-25 "Pause B prepared" entry.
+  - **Settings:** `COX_POOL_ID=3`, the Epoch config, and the `pool-3/` history, preview and chain-change prefixes. Cloud Run history segments go to `gs://colosseum-cox-app-api-history-dev/pool-3/`, and the VM uses `/opt/eox/state/cox-app-api-live-pool-3`. Submissions go to Firestore `coxSubmissionsPool3`. RPC and secrets are unchanged (`494dceb`).
+  - **Genesis predecessor:** publication 1 reported `predecessorSequence: 0`, which does not exist. The first publication in the log now has no predecessor sequence (`a23e5df`). The VM had already logged the wrong value, so its pool 3 log was moved aside (`*.pre-genesis-fix`) and rebuilt from the archive.
+  - **Epoch heap:** `epoch-prepare` failed in simulation with `ProgramFailedToComplete`, a write outside the default 32 KB heap. Epoch preparation, empty finalization and void now start with a 256 KB heap request, as the publisher does (`7ce2c40`). A devnet simulation with a funded payer prepared and sealed a whole round in one transaction, using about 700,000 compute units. Nothing was sent.
+  - **Deployed:** Cloud Run `cox-app-api-live-00036-g6d` (image `cox-app-api:7ce2c40`) and the VM at `7ce2c40`. 149 tests pass.
+  - **Verified on both:** pool 3, methodology digest `9e1bb324…463c`, generation `2699b776…d25d`, registry `94dvDz5J…Fb9`, 31 assets, `cryptoClass` 0, gate and lifecycle `preparing`, `opensAt` 1793030400. History runs 1 to 4 from publication 1 (batch 0, no predecessor), with no publication 0. Vault 0 and covered, feed `healthy`, previews fresh.
+- **Rules for agents:** `epoch-prepare` builds for the current four-hour window. Before 16:00 UTC that is the 12:00 round, which must not be prepared; do not submit a preparation before the 16:00 boundary.
+- **Open:** At 16:00 UTC: verify permissionless preparation of the 16:00 round, its frozen `state.universe` and the 20:00 close through both APIs. Admission stays closed until Pause B passes.
