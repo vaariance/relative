@@ -3,7 +3,7 @@
 import type { PreviewHistory, PreviewPortfolio } from "@eox/app-api";
 import { usePathname } from "next/navigation";
 import { type ReactNode, createContext, useContext, useEffect, useMemo, useState } from "react";
-import { type Estimate, type Freshness, type SeriesKind, type WalletEstimate, HISTORY_LIMIT_SECONDS, HISTORY_SECONDS, ageText, appendHistory, estimateOf, freshnessOf, historyEstimates, historyStep, joinHistory, sampled, seriesOf, trimHistory, walletEstimateOf, withLiveMinute } from "@/lib/estimate";
+import { type Estimate, type Freshness, type SeriesKind, type WalletEstimate, HISTORY_LIMIT_SECONDS, HISTORY_SECONDS, appendHistory, estimateOf, freshnessOf, historyEstimates, historyStep, joinHistory, sampled, seriesOf, trimHistory, walletEstimateOf, withLiveMinute } from "@/lib/estimate";
 import { direction, formatAmount, formatPrice } from "@/lib/format";
 import { CRYPTO_CLASS, type Point } from "@/lib/view";
 import { useAccount } from "./account";
@@ -203,16 +203,16 @@ function settledText(cutoff: number, now: number | null): string {
 }
 
 export function EstimateBar({ settledAt }: { settledAt: number | null }) {
-  const { freshness, age } = useLive();
+  const { freshness } = useLive();
   const now = useNow();
   const pathname = usePathname();
   if (pathname.startsWith("/epochs")) return null;
-  const label = freshness === "live" ? "Live estimate" : freshness === "stale" ? `Estimate paused · ${age === null ? "" : ageText(age)}` : "Showing settled values";
-  const tone = freshness === "stale" ? "text-warn" : "text-ink";
+  const label = freshness === "live" ? "Live estimate" : freshness === "stale" ? null : "Showing settled values";
+  if (label === null && settledAt === null) return null;
   return (
     <div className="border-b border-line bg-bg">
       <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-xs text-muted sm:px-6">
-        <span className={tone}>{label}</span>
+        {label && <span className="text-ink">{label}</span>}
         {settledAt !== null && <span>Last settled on chain {settledText(settledAt, now)}</span>}
       </div>
     </div>
