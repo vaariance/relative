@@ -103,6 +103,7 @@ if [ -f /etc/systemd/system/cox-publication-archive-copy.timer ]; then
   systemctl daemon-reload
 fi
 install -d -o eox -g eox -m 0750 /opt/eox/state/cox-app-api-live
+install -d -o eox -g eox -m 0750 /opt/eox/state/cox-app-api-live-pool-3
 start_service cox-app-api-live 8791
 
 echo "$commit" > /opt/eox/DEPLOYED_COMMIT
