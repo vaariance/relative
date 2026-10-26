@@ -9,6 +9,7 @@ struct State {
     saved: Checkpoint,
     trace: Vec<&'static str>,
     fail_sign: bool,
+    signer_unavailable: bool,
     fail_save: bool,
     work: bool,
     stale_sign: bool,
@@ -93,6 +94,9 @@ impl Chain for Accounts {
         if s.fail_sign {
             return Err(Error::Signer);
         }
+        if s.signer_unavailable {
+            return Err(Error::SignerUnavailable);
+        }
         Ok(PendingTransaction {
             signature: "sig".into(),
             signed_bytes: vec![1, 2, 3],
@@ -124,6 +128,20 @@ impl Snapshots for Prices {
 }
 fn create(state: Arc<Mutex<State>>) -> Publisher<Accounts, Prices, Disk> {
     Publisher::new(Accounts(state.clone()), Prices, Disk(state), 2, 2000).unwrap()
+}
+#[tokio::test]
+async fn transient_signer_failure_keeps_unsigned_idempotency_and_recovers_without_restart() {
+    let state = Arc::new(Mutex::new(State { work: true, signer_unavailable: true, ..State::default() }));
+    let mut publisher = create(state.clone());
+    assert_eq!(publisher.tick(10_000).await, Err(Error::SignerUnavailable));
+    let original = state.lock().unwrap().saved.unsigned.clone().unwrap();
+    state.lock().unwrap().signer_unavailable = false;
+    assert_eq!(publisher.tick(11_000).await, Ok(Tick::Submitted(12_000)));
+    let saved = state.lock().unwrap();
+    assert_eq!(saved.trace.iter().filter(|step| **step == "prepare").count(), 1);
+    assert_eq!(original.request_id, "stable-request");
+    assert!(saved.saved.unsigned.is_none());
+    assert!(saved.saved.pending.is_some());
 }
 #[tokio::test]
 async fn restart_after_ambiguous_signing_reuses_persisted_unsigned_request_before_broadcast() {

@@ -11,6 +11,7 @@ pub enum Error {
     Snapshot,
     Storage,
     Signer,
+    SignerUnavailable,
     Clock,
     Simulation,
     StaleDraft,

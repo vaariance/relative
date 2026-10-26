@@ -23,6 +23,26 @@ use std::{
 use tokio::sync::{mpsc, watch};
 
 const IDLE_MS: u64 = 20 * 60 * 1_000;
+#[derive(Default)]
+struct PublicationGate {
+    quarantined: bool,
+}
+impl PublicationGate {
+    fn healthy(&self, connected: bool) -> bool {
+        connected && !self.quarantined
+    }
+    async fn tick<C: worker::Chain, P: Snapshots, S: worker::Store>(
+        &self,
+        publisher: &mut Publisher<C, P, S>,
+        now: u64,
+    ) -> Result<Tick, worker::Error> {
+        if self.quarantined {
+            Ok(Tick::Idle(None))
+        } else {
+            publisher.tick(now).await
+        }
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -987,6 +1007,7 @@ pub async fn run(path: &Path) -> Result<(), Error> {
     let shutdown = shutdown();
     tokio::pin!(shutdown);
     let mut schedule = WakeSchedule::default();
+    let mut publication_gate = PublicationGate::default();
     let mut inclusion_capture: Option<tokio::task::JoinHandle<Result<(), worker::Error>>> = None;
     let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -999,18 +1020,24 @@ pub async fn run(path: &Path) -> Result<(), Error> {
                 _=&mut grpc=>return Err(Error::Feed),
                 _=&mut pyth=>return Err(Error::Feed),
                 _=&mut benchmark=>return Err(Error::Feed),
-                result=crate::rpc::with_trigger(schedule.trigger.unwrap_or("startup"),publisher.tick(now_ms()?))=>result,
+                result=crate::rpc::with_trigger(schedule.trigger.unwrap_or("startup"),publication_gate.tick(&mut publisher,now_ms()?))=>result,
             };
             let now=now_ms()?;
             match tick{
                 Ok(ref value)=>{
-                    changes.set_health(wake.borrow().connected).map_err(|_|Error::Storage)?;
+                    changes.set_health(publication_gate.healthy(wake.borrow().connected)).map_err(|_|Error::Storage)?;
                     if let Some(confirmed)=crate::changes::read(&config.state_directory.join("chain-change.json")).map_err(|_|Error::Storage)? {
                         schedule.confirmed(*wake.borrow(),confirmed.observed_slot);
                     }
                     schedule.after_tick(value,now);
                 },
-                Err(error @ (worker::Error::Storage|worker::Error::Clock|worker::Error::Signer|worker::Error::UniverseTransition))=>{
+                Err(worker::Error::Signer)=>{
+                    publication_gate.quarantined=true;
+                    changes.set_health(false).map_err(|_|Error::Storage)?;
+                    eprintln!("Financial publication quarantined after signer rejection; validated price ingestion continues; operator review required");
+                    schedule.after_tick(&Tick::Idle(None),now);
+                },
+                Err(error @ (worker::Error::Storage|worker::Error::Clock|worker::Error::UniverseTransition))=>{
                     eprintln!("Publisher stopped: {error:?}");
                     return Err(Error::Publisher);
                 },
@@ -1043,7 +1070,7 @@ pub async fn run(path: &Path) -> Result<(), Error> {
                     changed=wake.changed()=>{
                         changed.map_err(|_|Error::Feed)?;
                         let hint=*wake.borrow_and_update();
-                        changes.set_health(hint.connected).map_err(|_|Error::Storage)?;
+                        changes.set_health(publication_gate.healthy(hint.connected)).map_err(|_|Error::Storage)?;
                         if schedule.notify(hint,now_ms()?) { break; }
                     },
                 }
@@ -1183,7 +1210,7 @@ mod tests {
         }
     }
     #[tokio::test]
-    async fn live_ingestion_consumers_and_feed_watch_switch_together_and_resume_after_adoption() {
+    async fn live_ingestion_and_adoption_continue_without_rpc_while_financial_worker_is_quarantined() {
         use crate::universe_runtime;
         let path = std::fs::canonicalize(std::env::temp_dir())
             .unwrap()
@@ -1228,6 +1255,18 @@ mod tests {
             path.join("usage.json"),
             stopped,
         ));
+        let gate = PublicationGate { quarantined: true };
+        let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut publisher = Publisher::new(
+            CountingChain { reads: reads.clone(), closes_at: None },
+            archive.clone(),
+            FileCheckpoint { path: path.join("quarantined-checkpoint.json"), identity: [7; 32] },
+            2,
+            5_000,
+        ).unwrap();
+        assert!(!gate.healthy(true));
+        assert!(!gate.healthy(false));
+        assert_eq!(gate.tick(&mut publisher, first_time / 1_000).await.unwrap(), Tick::Idle(None));
         prices.send(old_payload).await.unwrap();
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
@@ -1245,6 +1284,9 @@ mod tests {
         })
         .await
         .unwrap();
+        assert_eq!(reads.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert_eq!(rpc.usage().unwrap().physical_http_requests, 0);
+        assert!(!path.join("quarantined-checkpoint.json").exists());
         journal::atomic_write(
             &path.join("inclusion-approved.json"),
             &serde_json::json!({"invalid":"candidate"}),
@@ -1329,6 +1371,9 @@ mod tests {
             .unwrap();
         assert_eq!(selected.prices_e8, vec![210; 31]);
         assert_eq!(selected.benchmark, 210 * cox_math::SCALE);
+        assert_eq!(gate.tick(&mut publisher, next_time / 1_000 + IDLE_MS).await.unwrap(), Tick::Idle(None));
+        assert_eq!(reads.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert!(!gate.healthy(true));
         assert_eq!(rpc.usage().unwrap().physical_http_requests, 0);
         assert!(archive
             .adopt_committed(&first.canonical, &initial.anchor)

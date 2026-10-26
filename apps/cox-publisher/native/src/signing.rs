@@ -66,7 +66,7 @@ impl RemoteSigner {
             return Ok(value.token.clone());
         }
         let response = self.client.get("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token")
-            .header("Metadata-Flavor", "Google").send().await.map_err(|_| Error::Signer)?;
+            .header("Metadata-Flavor", "Google").send().await.map_err(|_| Error::SignerUnavailable)?;
         let credentials = bounded_json(response).await?;
         let token = credentials
             .get("access_token")
@@ -77,7 +77,7 @@ impl RemoteSigner {
             return Err(Error::Signer);
         }
         let response = self.client.post(format!("https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{IDENTITY}:generateIdToken"))
-            .bearer_auth(token).json(&json!({"audience":self.audience,"includeEmail":true})).send().await.map_err(|_| Error::Signer)?;
+            .bearer_auth(token).json(&json!({"audience":self.audience,"includeEmail":true})).send().await.map_err(|_| Error::SignerUnavailable)?;
         let value = bounded_json(response).await?;
         let token = value
             .get("token")
@@ -98,7 +98,7 @@ impl RemoteSigner {
                 .bearer_auth(self.token().await?)
                 .send()
                 .await
-                .map_err(|_| Error::Signer)?,
+                .map_err(|_| Error::SignerUnavailable)?,
         )
         .await?;
         if value.get("schemaVersion").and_then(Value::as_str) != Some(SCHEMA) {
@@ -152,7 +152,7 @@ impl RemoteSigner {
             .json(&request)
             .send()
             .await
-            .map_err(|_| Error::Signer)?;
+            .map_err(|_| Error::SignerUnavailable)?;
         validate_response(
             self.operator,
             &self.key_version,
@@ -247,16 +247,25 @@ fn validate_response(
 }
 async fn bounded_json(mut response: reqwest::Response) -> Result<Value, Error> {
     if !response.status().is_success() {
-        return Err(Error::Signer);
+        return Err(response_error(response.status()));
     }
     let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|_| Error::Signer)? {
+    while let Some(chunk) = response.chunk().await.map_err(|_| Error::SignerUnavailable)? {
         if bytes.len() + chunk.len() > 65_536 {
             return Err(Error::Signer);
         }
         bytes.extend_from_slice(&chunk);
     }
     serde_json::from_slice(&bytes).map_err(|_| Error::Signer)
+}
+fn response_error(status: reqwest::StatusCode) -> Error {
+    if status.is_server_error()
+        || matches!(status, reqwest::StatusCode::REQUEST_TIMEOUT | reqwest::StatusCode::TOO_MANY_REQUESTS)
+    {
+        Error::SignerUnavailable
+    } else {
+        Error::Signer
+    }
 }
 
 #[cfg(test)]
@@ -266,6 +275,15 @@ mod tests {
     use ed25519_dalek::{Signer, SigningKey};
     use solana_hash::Hash;
     use solana_instruction::Instruction;
+    #[test]
+    fn retryable_service_failures_never_include_auth_policy_or_invalid_payload_rejections() {
+        for code in [408, 429, 500, 502, 503, 504] {
+            assert_eq!(response_error(reqwest::StatusCode::from_u16(code).unwrap()), Error::SignerUnavailable);
+        }
+        for code in [400, 401, 403, 404, 409, 422] {
+            assert_eq!(response_error(reqwest::StatusCode::from_u16(code).unwrap()), Error::Signer);
+        }
+    }
     fn fixture() -> (SigningKey, Address, DraftTransaction, Value) {
         let key = SigningKey::from_bytes(&[13; 32]);
         let operator = Address::new_from_array(key.verifying_key().to_bytes());
