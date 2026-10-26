@@ -5,7 +5,7 @@ import { Check, ChevronLeft, ChevronRight, Trophy } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo } from "react";
-import { TEAMMATES, basketMode, basketProblem, epochBasket, leaveOutCount, marketClosedReason, mateLocked, stageOf, windowText } from "@/lib/epoch";
+import { TEAMMATES, basketMode, basketProblem, epochBasket, leaveOutCount, marketClosedReason, mateLocked, stageOf } from "@/lib/epoch";
 import { collateralsOf } from "@/lib/market";
 import { useAccount } from "./account";
 import { CoinIcon } from "./coin-icon";
@@ -90,8 +90,11 @@ export function PerformerPrompt({ epoch, coins, now, next, marketClosed, active,
 function StepHeader({ step, title, text, back }: { step: number; title: string; text: string; back: { href: string; label: string } }) {
   return (
     <header className="flex flex-col gap-3">
-      <Link href={back.href} className="flex w-fit items-center gap-1 text-xs text-muted hover:text-ink">
-        <ChevronLeft size={14} aria-hidden="true" /> {back.label}
+      <Link href={back.href} className="group flex w-fit items-center gap-2 text-sm text-muted transition-colors duration-150 hover:text-ink">
+        <span className="grid size-8 place-items-center rounded-full bg-surface-2 text-ink transition-colors duration-150 group-hover:bg-white/15">
+          <ChevronLeft size={16} aria-hidden="true" />
+        </span>
+        {back.label}
       </Link>
       <div className="flex items-center gap-2 text-xs">
         {[1, 2].map((item) => (
@@ -132,7 +135,7 @@ export function PickPerformerView({ overview, roster, serverNow }: { overview: E
 
   return (
     <div className="flex flex-col gap-5">
-      <StepHeader step={1} title="Pick your performer" text="The asset you think will beat the market this round. Moves are against the benchmark since the round opened." back={{ href: "/epochs", label: "Epoch" }} />
+      <StepHeader step={1} title="Pick your performer" text="The asset you think will beat the market this round." back={{ href: "/epochs", label: "Epoch" }} />
       {!epoch && (
         <section className={`${card} p-5`}>
           <EntryClosed epoch={shown} now={now} next={next} marketClosed={marketClosed} onSelect={() => router.push("/epochs")} />
@@ -141,7 +144,6 @@ export function PickPerformerView({ overview, roster, serverNow }: { overview: E
       <AssetRows
         rows={rows}
         series={series}
-        title={epoch ? windowText(epoch) : "Assets in this round"}
         onRow={epoch ? (row) => pick(row.id) : undefined}
         rowLabel={(row) => `Pick ${row.id} as your performer, ${pct(row.change, 2)} against the benchmark`}
         action={(row) =>
