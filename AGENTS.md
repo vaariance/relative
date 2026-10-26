@@ -2281,3 +2281,27 @@ another agent needs to know.
 - **Verification:**228 native tests pass, including five-second freshness,31/61-feed snapshot initialization/growth/price pages/seal/two executions/rent-close wire plans2195/3795bytes, bounded cleanup59→60 eligibility, duplicate/overflow/restart recovery and immutable backup/restore of cleanup timestamps. The service template retries at60seconds with three starts per ten minutes. Price-age, signer policy, contracts and exact closing timestamps are unchanged. Actual live repair results remain pending rollout.
 - **Rules for agents:** Cleanup waits must not block fresh Epoch work or introduce idle HTTP. No Active→Preparing hold was signed/submitted: lifecycle states cannot be reused as pause controls. Markets remain Active with explicitly unavailable publisher feed during repair; never archive them as a temporary pause. Inclusion remains unscheduled until repair and deployed API roster-adoption gates pass. Preserve uncommitted Alchemy records.
 - **Refs:** Private `.cox/section5-20261026/epoch-repair-tests.log`, `epoch-signer-linkage-result.json`, `epoch-signer-checkpoint.json`; native snapshot regression tests. No admin/operator key or permission boundary changed.
+
+### 2026-10-26 · Godwin (Claude Code) · Epoch entry flow, entry ticket, Portfolio balance and profile
+
+- **Area:** `apps/web`.
+- **What:**
+  - **Epoch entry:** a guided flow replaces the coin board and side entry panel. Supersedes the layouts in Godwin's 2026-10-25 Epoch entries.
+    - **`/epochs`:** the hero, then one card: "Which performer do you think will beat the market?" with **Pick your performer**. It becomes "Continue your entry" while picks are in progress, and **Your team** once the wallet has an entry in the round: the performer in a highlighted badge, the 29 coins with their moves since execution, and a link to enter another performer.
+    - **`/epochs/pick`:** a searchable list of the round's assets with sparklines and moves. Tapping a row picks the performer.
+    - **`/epochs/basket`:** the basket of 30. A 30-coin round needs no choice, 31 to 59 coins start full and the user leaves coins out, and 60 or more start empty and the user picks 29. A 350px entry ticket on the right lists the performer and the coins left out or picked, preset amounts that set rather than add, the amount that goes into the pot (gross minus the 0.02% fee, capped at $0.20) with a ? breakdown, and **Enter round**.
+  - **Payment:** the ticket pays with USDC or rlUSD, whichever balance covers the amount. When neither does, the button is **Deposit** and opens the Faucet.
+  - **Picks:** kept per round in session storage (`relative_epoch_picks`) through `EpochPicksProvider` in `epochs/layout.tsx`. The wallet's lots are cached in memory, so returning to `/epochs` never flashes the empty card.
+  - **Portfolio:** a **Wallet balance** card (USDC, rlUSD, devnet SOL) and a profile card. The profile shows a DiceBear `glass` avatar, the Google name and email when signed in with Google, and every wallet on the account with a copy button. `useSigner()` now has a `profile` field.
+  - **Trading gates:** `preparing` and `archived` have their own wording. The estimate bar no longer shows "Estimate paused" and keeps "Last settled on chain".
+  - **Verified:** 142 web tests, the type check and `next build --webpack` pass. Every step was checked in the browser at 1440px on devnet pool 3 with a Phantom wallet.
+- **Rules for agents:**
+  - Never compute an Epoch payout or multiple in the web app; the ticket shows only the amount that goes into the pot.
+  - DiceBear receives a SHA-256 hash of the wallet address as its seed, never the address.
+  - Keep the Epoch basket at exactly 30 coins (`EPOCH_BASKET_SIZE`).
+- **Open:**
+  - **Not checked:** a full entry submitted from the new ticket, filled and settled; Google sign-in on the profile card; phone widths.
+  - **Privacy Policy:** does not name DiceBear, CoinGecko or DefiLlama (Godwin).
+  - **Hero pot:** counts only executed stake, so queued entries show as a pot of 0.00.
+  - **Joel/Peter:** the live API returned `NO_PREVIEW` for part of 26 Oct, which blanked the moves.
+- **Refs:** commits `4806360`..`632f7f7`.
