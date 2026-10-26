@@ -70,6 +70,8 @@ export function useOpeningReferences(epoch: Epoch | null, now: number): Record<s
   return held && held.key === opensAt ? held.references : undefined;
 }
 
+const BALANCE_RETRY_MS = [1_000, 3_000, 8_000];
+
 export function useWalletCollateral(mint: string | null, decimals: number, refreshKey: number): number | null {
   const { connection } = useConnection();
   const { owner } = useAccount();
@@ -80,16 +82,22 @@ export function useWalletCollateral(mint: string | null, decimals: number, refre
     let current = true;
     const wallet = new PublicKey(owner);
     const account = PublicKey.findProgramAddressSync([wallet.toBuffer(), TOKEN_PROGRAM.toBuffer(), new PublicKey(mint).toBuffer()], ASSOCIATED_TOKEN_PROGRAM)[0];
-    connection
-      .getAccountInfo(account)
-      .then((info) => {
-        if (!current) return;
-        const amount = info && info.owner.equals(TOKEN_PROGRAM) && info.data.length === 165 ? new DataView(info.data.buffer, info.data.byteOffset).getBigUint64(64, true) : 0n;
-        setBalance(Number(amount) / 10 ** decimals);
-      })
-      .catch(() => undefined);
+    let timer: number | undefined;
+    const read = (attempt: number) =>
+      connection
+        .getAccountInfo(account)
+        .then((info) => {
+          if (!current) return;
+          const amount = info && info.owner.equals(TOKEN_PROGRAM) && info.data.length === 165 ? new DataView(info.data.buffer, info.data.byteOffset).getBigUint64(64, true) : 0n;
+          setBalance(Number(amount) / 10 ** decimals);
+        })
+        .catch(() => {
+          if (current && attempt < BALANCE_RETRY_MS.length) timer = window.setTimeout(() => void read(attempt + 1), BALANCE_RETRY_MS[attempt]);
+        });
+    void read(0);
     return () => {
       current = false;
+      if (timer) window.clearTimeout(timer);
     };
   }, [connection, owner, mint, decimals, refreshKey]);
   return balance;
