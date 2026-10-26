@@ -67,6 +67,7 @@ export function closedLabel(trading: TradingStatus | null, now: number): string 
   if (trading.gate === "not-initialized") return "Not open yet";
   if (trading.gate === "preparing") return trading.opensAt !== null && trading.opensAt > now ? `Opens at ${clock(trading.opensAt, now)}` : "Opening soon";
   if (trading.gate === "archived") return "Market closed";
+  if (trading.gate === "unavailable") return "Market unavailable";
   return "Trading paused";
 }
 
@@ -81,5 +82,6 @@ export function closedNote(trading: TradingStatus | null, now: number): string |
       : "This market is being set up. Trading opens once it is ready.";
   }
   if (trading.gate === "archived") return "This market has closed and takes no new trades. You can still withdraw what is ready.";
+  if (trading.gate === "unavailable") return "Prices are not updating right now, so trading is on hold. You can still withdraw what is ready.";
   return "Trading is paused. You can still withdraw what is ready.";
 }
