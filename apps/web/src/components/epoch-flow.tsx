@@ -5,7 +5,7 @@ import { Check, ChevronLeft, ChevronRight, Trophy } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo } from "react";
-import { TEAMMATES, basketMode, basketProblem, epochBasket, leaveOutCount, marketClosedReason, mateLocked, stageOf, utcTime, windowText } from "@/lib/epoch";
+import { TEAMMATES, basketMode, basketProblem, epochBasket, leaveOutCount, marketClosedReason, mateLocked, stageOf, windowText } from "@/lib/epoch";
 import { collateralsOf } from "@/lib/market";
 import { useAccount } from "./account";
 import { CoinIcon } from "./coin-icon";
@@ -79,7 +79,7 @@ export function PerformerPrompt({ epoch, coins, now, next, marketClosed, active,
         <Trophy size={26} aria-hidden="true" className="text-accent" />
       </span>
       <h2 className="max-w-md text-xl font-semibold">Which performer do you think will beat the market?</h2>
-      <p className="max-w-md text-sm text-muted">Pick one asset, then build the basket of {EPOCH_BASKET_SIZE} it is compared against. The round closes at {utcTime(epoch.closesAt)} UTC.</p>
+      <p className="max-w-md text-sm text-muted">Pick your performer then curate a basket around it.</p>
       <Link href="/epochs/pick" className={`${primary} mt-2 max-w-xs cursor-pointer`}>
         Pick your performer <ChevronRight size={16} aria-hidden="true" />
       </Link>
