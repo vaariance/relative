@@ -2116,3 +2116,13 @@ another agent needs to know.
 - **Rules for agents:** Do not tell users they can hold the benchmark; the landing page no longer says so. The Epoch product card's countdown, pot and entry count are labelled example figures, not live data.
 - **Open:** the Swap page, the Benchmark page's swap card and "pay with benchmark" on Buy still offer benchmark entry; whether to remove them is Godwin's decision. The landing cards have not been checked at phone width.
 - **Refs:** commits `c31b076`..`1677dc6`.
+
+### 2026-10-26 · Joel (Claude Code) · Empty chain feed no longer refreshes Solana every second
+
+- **Area:** `apps/app-api` (`src/cox/chain-changes.ts`); Cloud Run `cox-app-api-live`, dev VM.
+- **What:** Peter found (2026-10-26 email) that `ChainChangeFeed.tick()` set `catchUp = this.cursor === null` on every tick. With the publisher stopped, no notifications arrived, the cursor stayed null, and each one-second tick told both APIs to refresh from the chain. Each refresh was one `getMultipleAccounts` plus the Epoch configuration's `getAccountInfo`, about 215k to 219k CU an hour overnight. The start-up catch-up is now latched on its own, independent of the cursor (`67f673a`). An empty, invalid or failing feed stays `unhealthy` and asks for no chain reads. Recovery, a new generation, a skipped revision and the 20-minute safety read still trigger one refresh each.
+  - **Tests:** 149 pass. A new test runs 10 empty, 10 invalid and 10 failing ticks and gets one catch-up each; it fails on the previous code.
+  - **Deployed:** Cloud Run `cox-app-api-live-00033-dqz` (image `cox-app-api:67f673a`) and the VM at `67f673a`, both still on archived pool 2.
+  - **Quiet window:** `status.chain.readAt` stayed at its start-up value for 90 seconds on the VM and 96 seconds on Cloud Run, with the feed `unhealthy`.
+- **Rules for agents:** Never derive a chain catch-up from feed state that can stay empty; latch one-off work separately.
+- **Refs:** commit `67f673a`.
