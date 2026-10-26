@@ -2335,3 +2335,10 @@ another agent needs to know.
 - **Verification:**235 native tests pass, two optional tests ignored. Known per-round read comparison reduced six HTTP calls to three with identical returned account bytes. Wire capacity is not a compute/latency guarantee: the actual31→61 running-services rehearsal is separately recorded when complete. Storage support for255 assets must not be advertised as verified execution capacity.
 - **Rules for agents:** Preserve five-second price freshness, final confirmed-state/signing validation and current economic rules. This includes the earlier held deadline correction and requires renewed explicit commit/release approval; it does not override Peter's earlier leave-uncommitted answer. Keep Alchemy records uncommitted.
 - **Refs:** Existing publisher README; private `.cox/section5-20261026/financial-isolation-all-tests.log`, `epoch-batch-read-latency.json`.
+
+### 2026-10-26 · Peter (Codex) · Prepared financial failure isolation
+
+- **Area:** Native publisher runtime and remote signing error classification; uncommitted and undeployed.
+- **What:** Transient signer transport/408/429/5xx failures retain bounded retry behavior. Auth/policy/malformed-signature failures quarantine financial publication with explicit unhealthy feed status, while validated Pyth ingestion, benchmark calculation and preview/archive production continue. Quarantine performs no further financial RPC/sign/send work and requires operator intervention; genuine storage corruption remains fail-closed.
+- **Rules for agents:** Never describe a quarantined financial worker as healthy because its process or price stream is alive. Do not broaden signer permissions or silently retry policy denials. Preserve event-driven wakeups and the shared20-minute safety reconciliation; no rapid idle HTTP fallback was added.
+- **Refs:** Runtime/signing regression tests and existing publisher README;235-test suite includes continuing ingestion/adoption with zero RPC and unchanged quarantine status across the safety boundary.
