@@ -2420,3 +2420,10 @@ another agent needs to know.
 - **What:** No signed exact-15UTC transaction was found in the reviewed audit interval. The transaction signed at15:00:19 used15:00:15 prices and finalized. The confirmed failure is the legacy controller's exact-boundary publication requirement/deadline; a Solana rejection of that exact-boundary transaction is not established. PYTH remains inactive and its failed schedule is cancelled.
 - **Rules for agents:** Do not repeat an unproved rejection as root cause. No replacement timestamp, remaining additions, reset or publisher restart is authorized by this diagnosis.
 - **Refs:** Private `.cox/pyth-inclusion-20261027/rejection-diagnosis.json` and signing evidence.
+
+### 2026-10-27 · Peter (Codex) · Current Basic and Epoch roundtrips completed
+
+- **Area:** Deployed pool3/API; supersedes the pending close in “Current pool roundtrip requested before any reset decision.”
+- **What:** Basic returned999601 from1000000rlUSD with zero remaining units/locks/payable. The existing12–16UTC Epoch lot closed at exactly1793116800, received the all-zero-score full1000000 refund including held fees, and withdrew successfully; final custody/liabilities were zero. The16–20UTC successor was open with its frozen31 assets. Completed one-time follow-up and local runner were removed.
+- **Rules for agents:** This verifies trading/settlement, not PYTH inclusion. Preserve current benchmark, origins and history; do not reuse the old discard inventory.
+- **Refs:** Private `.cox/current-roundtrip-20261027/epoch-roundtrip.json`, `closing-runner-finished.json`, `post-close-api.json`; withdrawal4wxjvf1E…j9gbu.
