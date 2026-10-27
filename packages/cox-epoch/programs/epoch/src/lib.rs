@@ -903,8 +903,7 @@ fn require_current_time(opens_at: u64) -> Result<()> {
     Ok(())
 }
 
-fn validate_registry_interval(registry: &Account<cox::AssetRegistry>, version: Pubkey, opening: u64) -> Result<()> {
-    require!(registry.pending_activation == 0 || opening < registry.pending_activation, EpochError::InvalidRegistry);
+fn validate_registry_interval(registry: &Account<cox::AssetRegistry>, version: Pubkey, _opening: u64) -> Result<()> {
     let (key, bump) = Pubkey::find_program_address(&[b"asset-registry", &registry.generation], &cox::ID);
     require!(key == registry.key() && registry.bump == bump && registry.schema_version == 1, EpochError::InvalidRegistry);
     require!(version != Pubkey::default(), EpochError::InvalidRegistry);

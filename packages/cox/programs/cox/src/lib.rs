@@ -11,6 +11,8 @@ mod dynamic_universe;
 pub use dynamic_universe::*;
 mod asset_registry;
 pub use asset_registry::*;
+mod prepared_universe;
+pub use prepared_universe::*;
 
 declare_id!("G6iQGoupNSfduw1QJxQ9vcVi9FnCC6cbippXsi4QQzJF");
 pub const REQUIRED_HEAP_BYTES: u32 = 256 * 1024;
@@ -650,11 +652,13 @@ pub mod cox {
     }
     pub fn activate_universe(ctx: Context<ActivateUniverse>) -> Result<()> {
         let p = &mut ctx.accounts.pool;
+        require!(p.asset_registry == Pubkey::default(), CoxError::InvalidManifest);
         ensure_pool_mutable(p)?;
         reconcile(p, &ctx.accounts.vault, ctx.accounts.test_vault.as_ref())?;
         require!(p.schema_version == 5 && p.stage.is_none(), CoxError::BatchBusy);
         let previous = read_dynamic_manifest(&ctx.accounts.methodology)?;
         let next = read_dynamic_manifest(&ctx.accounts.next_methodology)?;
+        require!(ctx.accounts.schedule.schema_version == 1, CoxError::InvalidManifest);
         ctx.accounts.schedule.eligible(p.key(), now()?)?;
         ctx.accounts.schedule.validate_successor(&previous, &next)?;
         require!(next.pool == p.key() && next.operator == ctx.accounts.runtime.key()
@@ -686,8 +690,15 @@ pub mod cox {
         emit!(UniverseActivated { pool: p.key(), version: next.version, digest: next.digest, timestamp: next.capture.timestamp });
         Ok(())
     }
+    pub fn schedule_universe_v2(ctx: Context<ScheduleUniverse>, version: u64, identities_digest: [u8; 32], expected_instruments: u16, activation_timestamp: u64, expires_at: u64) -> Result<()> {
+        prepare_universe_schedule(ctx, version, identities_digest, expected_instruments, activation_timestamp, expires_at)
+    }
+    pub fn begin_universe_handoff(ctx: Context<BeginUniverseHandoff>) -> Result<()> { begin_handoff(ctx) }
+    pub fn append_universe_handoff_prices(ctx: Context<AppendUniverseHandoffPrices>, offset: u16, prices: Vec<u64>) -> Result<()> { append_handoff_prices(ctx, offset, prices) }
+    pub fn activate_prepared_universe(ctx: Context<ActivatePreparedUniverse>) -> Result<()> { activate_prepared(ctx) }
     pub fn schedule_universe(ctx: Context<ScheduleUniverse>, version: u64, identities_digest: [u8; 32], expected_instruments: u16, activation_timestamp: u64, expires_at: u64) -> Result<()> {
         let p = &ctx.accounts.pool;
+        require!(p.asset_registry == Pubkey::default(), CoxError::InvalidManifest);
         ensure_pool_mutable(p)?;
         require!(p.schema_version == 5 && p.stage.is_none(), CoxError::BatchBusy);
         let previous = read_dynamic_manifest(&ctx.accounts.methodology)?;
@@ -714,7 +725,7 @@ pub mod cox {
     pub fn cancel_universe_schedule(ctx: Context<CancelUniverseSchedule>) -> Result<()> {
         ensure_pool_mutable(&ctx.accounts.pool)?;
         require!(!ctx.accounts.schedule.consumed, CoxError::AlreadyProcessed);
-        if ctx.accounts.pool.asset_registry != Pubkey::default() {
+        if ctx.accounts.pool.asset_registry != Pubkey::default() && ctx.accounts.schedule.schema_version == 1 {
             let registry = ctx.accounts.asset_registry.as_mut().ok_or(CoxError::InvalidAccount)?;
             validate_bound_registry(registry, &ctx.accounts.pool, ctx.accounts.pool.key())?;
             require!(registry.pending_activation == ctx.accounts.schedule.activation_timestamp, CoxError::InvalidManifest);
@@ -727,7 +738,7 @@ pub mod cox {
         ensure_pool_mutable(&ctx.accounts.pool)?;
         let p = &ctx.accounts.pool;
         ctx.accounts.schedule.eligible(p.key(), now()?)?;
-        require!(p.schema_version == 5 && p.stage.is_none() && add(p.origin, p.last_batch)? == ctx.accounts.schedule.activation_timestamp
+        require!(p.schema_version == 5 && (ctx.accounts.schedule.schema_version == 2 || p.stage.is_none() && add(p.origin, p.last_batch)? == ctx.accounts.schedule.activation_timestamp)
             && ctx.accounts.methodology.digest == ctx.accounts.schedule.predecessor_digest
             && length > 0 && length as usize <= DYNAMIC_MAX_ACCOUNT_BYTES - 512 && digest != [0; 32], CoxError::InvalidManifest);
         let m = &mut ctx.accounts.next_methodology;
@@ -749,17 +760,21 @@ pub mod cox {
         ensure_pool_mutable(&ctx.accounts.pool)?;
         let p = &ctx.accounts.pool;
         ctx.accounts.schedule.eligible(p.key(), now()?)?;
-        require!(p.schema_version == 5 && p.stage.is_none(), CoxError::BatchBusy);
+        require!(p.schema_version == 5 && (ctx.accounts.schedule.schema_version == 2 || p.stage.is_none()), CoxError::BatchBusy);
         let previous = read_dynamic_manifest(&ctx.accounts.methodology)?;
         let m = &mut ctx.accounts.next_methodology;
         require!(m.schema_version == 3 && !m.sealed && m.canonical.len() == m.expected_length as usize, CoxError::InvalidManifest);
         let mut next = UniverseVersion::from_canonical(&m.canonical)?;
         ctx.accounts.schedule.validate_successor(&previous, &next)?;
-        require!(next.digest == m.digest && next.operator == ctx.accounts.runtime.key()
-            && next.capture.predecessor_sequence == p.sequence && next.capture.predecessor_state_digest == p.state_digest
-            && next.capture.timestamp == add(p.origin, p.last_batch)? && next.capture.benchmark == p.benchmark
-            && next.capture.prices_e8.get(..p.last_prices.len()) == Some(p.last_prices.as_slice()), CoxError::WrongPredecessor);
-        next.sealed = false; let canonical_digest = next.digest; next.seal_validated_successor(&previous, p.benchmark, canonical_digest)?;
+        require!(next.digest == m.digest && next.operator == ctx.accounts.runtime.key(), CoxError::WrongPredecessor);
+        if ctx.accounts.schedule.schema_version == 1 {
+            require!(next.capture.predecessor_sequence == p.sequence && next.capture.predecessor_state_digest == p.state_digest
+                && next.capture.timestamp == add(p.origin, p.last_batch)? && next.capture.benchmark == p.benchmark
+                && next.capture.prices_e8.get(..p.last_prices.len()) == Some(p.last_prices.as_slice()), CoxError::WrongPredecessor);
+        }
+        next.sealed = false; let canonical_digest = next.digest;
+        let admission_benchmark = if ctx.accounts.schedule.schema_version == 2 { next.capture.benchmark } else { p.benchmark };
+        next.seal_validated_successor(&previous, admission_benchmark, canonical_digest)?;
         m.origin = p.origin; m.roster = (0..next.instruments.len()).map(|index| index as u8).collect(); m.bybit = false; m.sealed = true;
         Ok(())
     }
@@ -774,7 +789,7 @@ pub mod cox {
         let authority = ctx.accounts.payer.key();
         let privileged = authority == ctx.accounts.registry.admin || authority == ctx.accounts.registry.runtime;
         let mut valid = privileged && fixed.contains(&key);
-        let mut limit = if key == pool_key { 32768 } else { dynamic_batch_space(p.classes.len()) };
+        let mut limit = if key == pool_key { 32768 } else { dynamic_batch_space(DYNAMIC_MAX_ASSETS + 1) };
         if !valid {
             let data = target.try_borrow_data()?;
             if let Ok(position) = Position::try_deserialize(&mut data.as_ref()) {
@@ -2388,7 +2403,7 @@ pub struct Publish<'info> {
     pub pool: Box<Account<'info, Pool>>,
     #[account(seeds=[b"methodology",methodology.digest.as_ref()],bump=methodology.bump)]
     pub methodology: Account<'info, Methodology>,
-    #[account(init_if_needed,payer=payer,space=if pool.schema_version == 5 { dynamic_batch_space(pool.classes.len()) } else { 8192 },seeds=[b"batch",pool.key().as_ref()],bump)]
+    #[account(init_if_needed,payer=payer,space=if pool.schema_version == 5 { dynamic_batch_space(pool.classes.len()).max(batch.to_account_info().data_len()) } else { 8192 },seeds=[b"batch",pool.key().as_ref()],bump)]
     pub batch: Account<'info, Batch>,
     #[account(token::authority=pool,token::mint=pool.collateral_mint)]
     pub vault: Account<'info, TokenAccount>,
@@ -2435,7 +2450,7 @@ pub struct Finalize<'info> {
     pub batch: Box<Account<'info, Batch>>,
     #[account(seeds=[b"methodology",methodology.digest.as_ref()],bump=methodology.bump)]
     pub methodology: Account<'info, Methodology>,
-    #[account(init_if_needed,payer=payer,space=if pool.schema_version == 5 { dynamic_batch_space(pool.classes.len()) } else { 8192 },seeds=[b"publication",pool.key().as_ref()],bump)]
+    #[account(init_if_needed,payer=payer,space=if pool.schema_version == 5 { dynamic_batch_space(pool.classes.len()).max(publication.to_account_info().data_len()) } else { 8192 },seeds=[b"publication",pool.key().as_ref()],bump)]
     pub publication: Box<Account<'info, Publication>>,
     #[account(token::authority=pool,token::mint=pool.collateral_mint)]
     pub vault: Account<'info, TokenAccount>,
@@ -3311,7 +3326,7 @@ pub struct BeginDynamicPublication<'info> {
     pub pool: Box<Account<'info, Pool>>,
     #[account(seeds=[b"methodology",methodology.digest.as_ref()],bump=methodology.bump)]
     pub methodology: Account<'info, Methodology>,
-    #[account(init_if_needed,payer=payer,space=if pool.schema_version == 5 { dynamic_batch_space(pool.classes.len()) } else { 8192 },seeds=[b"batch",pool.key().as_ref()],bump)]
+    #[account(init_if_needed,payer=payer,space=if pool.schema_version == 5 { dynamic_batch_space(pool.classes.len()).max(batch.to_account_info().data_len()) } else { 8192 },seeds=[b"batch",pool.key().as_ref()],bump)]
     pub batch: Box<Account<'info, Batch>>,
     #[account(token::authority=pool,token::mint=pool.collateral_mint)]
     pub vault: Account<'info, TokenAccount>,

@@ -402,7 +402,12 @@ fn export_generation(h:&Harness,name:&str,accounts:&[(&str,Pubkey)],expected:ser
         "expected":expected,"accounts":records})).unwrap()).unwrap();
 }
 
-fn permissionless_registry_round(asset_count:usize) {
+fn permissionless_registry_round(asset_count:usize) { permissionless_registry_round_with_pending(asset_count,false); }
+
+#[test]
+fn compiled_pending_proposal_does_not_block_current_or_successor_epoch() { permissionless_registry_round_with_pending(31,true); }
+
+fn permissionless_registry_round_with_pending(asset_count:usize,pending_proposal:bool) {
     let mut h=Harness::new();
     let old_config:relative_epoch::PoolConfig=h.read(h.config);
     let generation=[81;32];let (registry,registry_bump)=Pubkey::find_program_address(&[b"asset-registry",&generation],&cox::ID);
@@ -423,7 +428,7 @@ fn permissionless_registry_round(asset_count:usize) {
         activation_batch:0,expected_length:canonical.len() as u32,roster:(0..asset_count as u8).collect(),origin:OPEN,bybit:false};
     install_anchor_account(&mut h,methodology,&methodology_account,cox::ID,canonical.len()+512);
     let mut registry_account=cox::AssetRegistry {schema_version:1,bump:registry_bump,generation,authority_registry:Pubkey::new_unique(),
-        source_pool:universe.pool,active_version:version,active_digest:digest,active_from:OPEN,pending_activation:0};
+        source_pool:universe.pool,active_version:version,active_digest:digest,active_from:OPEN,pending_activation:if pending_proposal {OPEN+50}else{0}};
     install_anchor_account(&mut h,registry,&registry_account,cox::ID,256);
     let mut version_account=cox::AssetRegistryVersion {schema_version:1,bump:version_bump,registry,generation,methodology,digest,
         predecessor:[0;32],effective_from:OPEN,effective_until:0,sealed:true};
@@ -452,8 +457,6 @@ fn permissionless_registry_round(asset_count:usize) {
         registry_version:version,methodology,mint:old_config.mint,test_mint:old_config.mint,epoch:h.epoch,vault:h.vault,
         test_vault:h.test_vault,token_program:spl_token::ID,system_program:system_program::ID},i::InitializeCurrentEpoch {opens_at:OPEN});
     registry_account.pending_activation=OPEN;install_anchor_account(&mut h,registry,&registry_account,cox::ID,256);
-    h.send(init(&h),&alice,false);
-    registry_account.pending_activation=0;install_anchor_account(&mut h,registry,&registry_account,cox::ID,256);
     version_account.effective_until=OPEN;install_anchor_account(&mut h,version,&version_account,cox::ID,256);
     h.send(init(&h),&alice,false);
     version_account.effective_until=0;install_anchor_account(&mut h,version,&version_account,cox::ID,256);
@@ -489,10 +492,10 @@ fn permissionless_registry_round(asset_count:usize) {
                 digest:next.digest,canonical:canonical.clone(),sealed:true,activation_batch:150,expected_length:canonical.len() as u32,
                 roster:(0..32).collect(),origin:OPEN,bybit:false},cox::ID,canonical.len()+512);
             let (next_version,next_bump)=Pubkey::find_program_address(&[b"asset-version",registry.as_ref(),&next.digest],&cox::ID);
-            version_account.effective_until=OPEN+150;install_anchor_account(&mut h,version,&version_account,cox::ID,256);
-            install_anchor_account(&mut h,next_version,&cox::AssetRegistryVersion {schema_version:1,bump:next_bump,registry,generation,
-                methodology:next_methodology,digest:next.digest,predecessor:universe.digest,effective_from:OPEN+150,effective_until:0,sealed:true},cox::ID,256);
-            registry_account.active_version=next_version;registry_account.active_digest=next.digest;registry_account.active_from=OPEN+150;
+            version_account.effective_until=OPEN+151;install_anchor_account(&mut h,version,&version_account,cox::ID,256);
+            install_anchor_account(&mut h,next_version,&cox::AssetRegistryVersion {schema_version:2,bump:next_bump,registry,generation,
+                methodology:next_methodology,digest:next.digest,predecessor:universe.digest,effective_from:OPEN+151,effective_until:0,sealed:true},cox::ID,256);
+            registry_account.active_version=next_version;registry_account.active_digest=next.digest;registry_account.active_from=OPEN+151;
             install_anchor_account(&mut h,registry,&registry_account,cox::ID,256);
             latest_version=next_version;latest_methodology=next_methodology;latest_count=32;
             let late_config=pda(&[b"config",admin.pubkey().as_ref(),&2u64.to_le_bytes()]);

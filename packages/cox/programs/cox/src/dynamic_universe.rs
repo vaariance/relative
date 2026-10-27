@@ -730,7 +730,7 @@ pub struct UniverseSchedule {
 
 impl UniverseSchedule {
     pub fn eligible(&self, pool: Pubkey, timestamp: u64) -> Result<()> {
-        require!(self.schema_version == 1 && self.pool == pool && !self.cancelled && !self.consumed
+        require!(matches!(self.schema_version, 1 | 2) && self.pool == pool && !self.cancelled && !self.consumed
             && timestamp >= self.activation_timestamp && timestamp <= self.expires_at,
             CoxError::InvalidManifest);
         Ok(())

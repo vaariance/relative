@@ -177,6 +177,265 @@
       "args": []
     },
     {
+      "name": "activate_prepared_universe",
+      "discriminator": [
+        174,
+        20,
+        239,
+        127,
+        75,
+        220,
+        194,
+        3
+      ],
+      "accounts": [
+        {
+          "name": "runtime",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          },
+          "relations": [
+            "batch",
+            "schedule",
+            "handoff"
+          ]
+        },
+        {
+          "name": "batch",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  116,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "next_methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "next_methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          }
+        },
+        {
+          "name": "schedule",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  118,
+                  101,
+                  114,
+                  115,
+                  101,
+                  45,
+                  115,
+                  99,
+                  104,
+                  101,
+                  100,
+                  117,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "schedule.version",
+                "account": "UniverseSchedule"
+              }
+            ]
+          }
+        },
+        {
+          "name": "handoff",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  118,
+                  101,
+                  114,
+                  115,
+                  101,
+                  45,
+                  104,
+                  97,
+                  110,
+                  100,
+                  111,
+                  102,
+                  102
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "next_methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "instructions",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "test_vault",
+          "optional": true
+        },
+        {
+          "name": "asset_registry",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "next_registry_version",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "previous_registry_version",
+          "writable": true,
+          "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "activate_universe",
       "discriminator": [
         153,
@@ -509,6 +768,206 @@
       ]
     },
     {
+      "name": "append_universe_handoff_prices",
+      "discriminator": [
+        163,
+        149,
+        54,
+        1,
+        106,
+        204,
+        128,
+        36
+      ],
+      "accounts": [
+        {
+          "name": "runtime",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          },
+          "relations": [
+            "batch",
+            "handoff"
+          ]
+        },
+        {
+          "name": "batch",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  116,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "next_methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "next_methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          }
+        },
+        {
+          "name": "handoff",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  118,
+                  101,
+                  114,
+                  115,
+                  101,
+                  45,
+                  104,
+                  97,
+                  110,
+                  100,
+                  111,
+                  102,
+                  102
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "next_methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "offset",
+          "type": "u16"
+        },
+        {
+          "name": "prices",
+          "type": {
+            "vec": "u64"
+          }
+        }
+      ]
+    },
+    {
       "name": "begin_dynamic_publication",
       "discriminator": [
         9,
@@ -783,6 +1242,238 @@
         {
           "name": "test_vault",
           "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "begin_universe_handoff",
+      "discriminator": [
+        64,
+        188,
+        157,
+        230,
+        165,
+        126,
+        10,
+        12
+      ],
+      "accounts": [
+        {
+          "name": "runtime",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          },
+          "relations": [
+            "batch",
+            "schedule"
+          ]
+        },
+        {
+          "name": "batch",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  116,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "next_methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "next_methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          }
+        },
+        {
+          "name": "schedule",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  118,
+                  101,
+                  114,
+                  115,
+                  101,
+                  45,
+                  115,
+                  99,
+                  104,
+                  101,
+                  100,
+                  117,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "schedule.version",
+                "account": "UniverseSchedule"
+              }
+            ]
+          }
+        },
+        {
+          "name": "handoff",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  118,
+                  101,
+                  114,
+                  115,
+                  101,
+                  45,
+                  104,
+                  97,
+                  110,
+                  100,
+                  111,
+                  102,
+                  102
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "next_methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": []
@@ -6925,6 +7616,178 @@
       ]
     },
     {
+      "name": "schedule_universe_v2",
+      "discriminator": [
+        135,
+        217,
+        100,
+        84,
+        216,
+        115,
+        3,
+        99
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.pool_id",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "methodology",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  116,
+                  104,
+                  111,
+                  100,
+                  111,
+                  108,
+                  111,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "methodology.digest",
+                "account": "Methodology"
+              }
+            ]
+          },
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "schedule",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  118,
+                  101,
+                  114,
+                  115,
+                  101,
+                  45,
+                  115,
+                  99,
+                  104,
+                  101,
+                  100,
+                  117,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "arg",
+                "path": "version"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "asset_registry",
+          "writable": true,
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "version",
+          "type": "u64"
+        },
+        {
+          "name": "identities_digest",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "expected_instruments",
+          "type": "u16"
+        },
+        {
+          "name": "activation_timestamp",
+          "type": "u64"
+        },
+        {
+          "name": "expires_at",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "seal_adaptive_methodology",
       "discriminator": [
         152,
@@ -8949,6 +9812,19 @@
       ]
     },
     {
+      "name": "UniverseHandoff",
+      "discriminator": [
+        148,
+        211,
+        253,
+        229,
+        61,
+        60,
+        146,
+        71
+      ]
+    },
+    {
       "name": "UniverseSchedule",
       "discriminator": [
         71,
@@ -9078,6 +9954,19 @@
         152,
         160,
         120
+      ]
+    },
+    {
+      "name": "PreparedUniverseActivated",
+      "discriminator": [
+        199,
+        50,
+        213,
+        62,
+        39,
+        40,
+        238,
+        188
       ]
     },
     {
@@ -10252,6 +11141,52 @@
       }
     },
     {
+      "name": "PoolLifecycle",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "magic",
+            "type": {
+              "array": [
+                "u8",
+                8
+              ]
+            }
+          },
+          {
+            "name": "lifecycle_version",
+            "type": "u8"
+          },
+          {
+            "name": "lifecycle",
+            "type": {
+              "defined": {
+                "name": "InstanceLifecycle"
+              }
+            }
+          },
+          {
+            "name": "asset_registry",
+            "type": "pubkey"
+          },
+          {
+            "name": "generation",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "crypto_class",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
       "name": "Position",
       "type": {
         "kind": "struct",
@@ -10392,6 +11327,47 @@
           },
           {
             "name": "payable",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PreparedUniverseActivated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "version",
+            "type": "u64"
+          },
+          {
+            "name": "digest",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "anchor",
+            "type": "pubkey"
+          },
+          {
+            "name": "capture_timestamp",
+            "type": "u64"
+          },
+          {
+            "name": "handoff_timestamp",
+            "type": "u64"
+          },
+          {
+            "name": "effective_from",
             "type": "u64"
           }
         ]
@@ -10974,6 +11950,91 @@
       }
     },
     {
+      "name": "UniverseHandoff",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "schema_version",
+            "type": "u16"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "schedule",
+            "type": "pubkey"
+          },
+          {
+            "name": "methodology",
+            "type": "pubkey"
+          },
+          {
+            "name": "predecessor_sequence",
+            "type": "u64"
+          },
+          {
+            "name": "predecessor_state_digest",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "sequence",
+            "type": "u64"
+          },
+          {
+            "name": "snapshot_digest",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "timestamp",
+            "type": "u64"
+          },
+          {
+            "name": "benchmark",
+            "type": "i128"
+          },
+          {
+            "name": "accepted_at",
+            "type": "u64"
+          },
+          {
+            "name": "effective_from",
+            "type": "u64"
+          },
+          {
+            "name": "committed_state_digest",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "prices_e8",
+            "type": {
+              "vec": "u64"
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "UniverseSchedule",
       "type": {
         "kind": "struct",
@@ -11060,52 +12121,6 @@
           {
             "name": "amount",
             "type": "u64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "PoolLifecycle",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "magic",
-            "type": {
-              "array": [
-                "u8",
-                8
-              ]
-            }
-          },
-          {
-            "name": "lifecycle_version",
-            "type": "u8"
-          },
-          {
-            "name": "lifecycle",
-            "type": {
-              "defined": {
-                "name": "InstanceLifecycle"
-              }
-            }
-          },
-          {
-            "name": "asset_registry",
-            "type": "pubkey"
-          },
-          {
-            "name": "generation",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "crypto_class",
-            "type": "u16"
           }
         ]
       }

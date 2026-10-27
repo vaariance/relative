@@ -51,7 +51,7 @@ pub fn validate_registry_version(version_info: &AccountInfo, methodology_info: &
     require_keys_eq!(*version_info.owner, crate::ID, CoxError::InvalidAccount);
     require_keys_eq!(*methodology_info.owner, crate::ID, CoxError::InvalidAccount);
     let version = AssetRegistryVersion::try_deserialize(&mut version_info.try_borrow_data()?.as_ref())?;
-    require!(version.schema_version == 1 && version.sealed && version.registry == registry && version.generation == generation
+    require!(matches!(version.schema_version, 1 | 2) && version.sealed && version.registry == registry && version.generation == generation
         && version.effective_from <= opening && (version.effective_until == 0 || opening < version.effective_until), CoxError::InvalidManifest);
     require_keys_eq!(Pubkey::find_program_address(&[b"asset-version", registry.as_ref(), version.digest.as_ref()], &crate::ID).0, version_info.key(), CoxError::InvalidAccount);
     require_keys_eq!(version.methodology, methodology_info.key(), CoxError::InvalidAccount);
@@ -59,7 +59,7 @@ pub fn validate_registry_version(version_info: &AccountInfo, methodology_info: &
     require_keys_eq!(Pubkey::find_program_address(&[b"methodology", methodology.digest.as_ref()], &crate::ID).0, methodology_info.key(), CoxError::InvalidAccount);
     require!(methodology.digest == version.digest, CoxError::InvalidManifest);
     let universe = read_dynamic_manifest(&methodology)?;
-    require!(universe.capture.timestamp == version.effective_from, CoxError::InvalidManifest);
+    require!(if version.schema_version == 1 { universe.capture.timestamp == version.effective_from } else { universe.capture.timestamp <= version.effective_from }, CoxError::InvalidManifest);
     Ok(universe)
 }
 
@@ -213,7 +213,7 @@ pub struct ActivateAssetRegistryVersion<'info> {
     pub previous_version: Option<Account<'info, AssetRegistryVersion>>,
 }
 pub fn apply_registry_activation(registry: &mut Account<AssetRegistry>, next: &mut Account<AssetRegistryVersion>, previous_version: Option<&mut Account<AssetRegistryVersion>>, pool: &Pool, pool_key: Pubkey, methodology: Pubkey, digest: [u8;32]) -> Result<()> {
-    require!(!next.sealed && next.schema_version == 1 && next.generation == registry.generation
+    require!(!next.sealed && matches!(next.schema_version, 1 | 2) && next.generation == registry.generation
         && registry.source_pool == pool_key && pool.asset_registry == registry.key()
         && next.registry == registry.key() && next.methodology == pool.methodology && next.methodology == methodology
         && next.digest == digest && next.effective_from <= now()?
@@ -225,7 +225,7 @@ pub fn apply_registry_activation(registry: &mut Account<AssetRegistry>, next: &m
         let previous = previous_version.ok_or(CoxError::InvalidAccount)?;
         require!(previous.key() == registry.active_version && previous.registry == registry.key()
             && previous.digest == registry.active_digest && previous.sealed && previous.effective_until == 0
-            && next.effective_from > previous.effective_from && registry.pending_activation == next.effective_from, CoxError::WrongPredecessor);
+            && next.effective_from > previous.effective_from && (next.schema_version == 2 && registry.pending_activation == 0 || next.schema_version == 1 && registry.pending_activation == next.effective_from), CoxError::WrongPredecessor);
         require_keys_eq!(Pubkey::find_program_address(&[b"asset-version",registry.key().as_ref(),previous.digest.as_ref()],&crate::ID).0,previous.key(),CoxError::InvalidAccount);
         previous.effective_until = next.effective_from;
     }
