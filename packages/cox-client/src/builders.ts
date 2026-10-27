@@ -1,6 +1,6 @@
 import { Buffer } from "buffer";
 import { BN, type Program } from "@coral-xyz/anchor";
-import { PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
+import { PublicKey, SystemProgram, SYSVAR_INSTRUCTIONS_PUBKEY, TransactionInstruction } from "@solana/web3.js";
 import { addresses } from "./pdas.ts";
 import { bytes32 } from "./wire.ts";
 import type { MarketLifecycle } from "./lifecycle.ts";
@@ -150,6 +150,20 @@ export class CoxInstructions {
   scheduleUniverse(admin: PublicKey, pool: PublicKey, methodology: PublicKey, version: bigint, identitiesDigest: Uint8Array, expectedInstruments: number, activationTimestamp: bigint, expiresAt: bigint, assetRegistry?: PublicKey) {
     if (!Number.isInteger(expectedInstruments) || expectedInstruments < 31 || expectedInstruments > 255 || activationTimestamp <= 0n || expiresAt < activationTimestamp || expiresAt > activationTimestamp + 86400n) throw new Error("InvalidUniverseSchedule");
     return this.build("scheduleUniverse", { version: bn(version), identitiesDigest: [...bytes32(identitiesDigest)], expectedInstruments, activationTimestamp: bn(activationTimestamp), expiresAt: bn(expiresAt) }, { admin, registry: this.pdas.registry(), pool, methodology, schedule: this.pdas.universeSchedule(pool, version), systemProgram: SystemProgram.programId, ...(assetRegistry ? { assetRegistry } : {}) });
+  }
+  scheduleUniverseV2(admin: PublicKey, pool: PublicKey, methodology: PublicKey, version: bigint, identitiesDigest: Uint8Array, expectedInstruments: number, activationTimestamp: bigint, expiresAt: bigint, assetRegistry?: PublicKey) {
+    if (!Number.isInteger(expectedInstruments) || expectedInstruments < 31 || expectedInstruments > 255 || activationTimestamp <= 0n || expiresAt < activationTimestamp || expiresAt > activationTimestamp + 86400n) throw new Error("InvalidUniverseSchedule");
+    return this.build("scheduleUniverseV2", { version: bn(version), identitiesDigest: [...bytes32(identitiesDigest)], expectedInstruments, activationTimestamp: bn(activationTimestamp), expiresAt: bn(expiresAt) }, { admin, registry: this.pdas.registry(), pool, methodology, schedule: this.pdas.universeSchedule(pool, version), systemProgram: SystemProgram.programId, ...(assetRegistry ? { assetRegistry } : {}) });
+  }
+  beginUniverseHandoff(runtime: PublicKey, pool: PublicKey, methodology: PublicKey, nextDigest: Uint8Array, version: bigint) {
+    return this.build("beginUniverseHandoff", {}, { runtime, registry: this.pdas.registry(), pool, batch: this.pdas.batch(pool), methodology, nextMethodology: this.pdas.methodology(nextDigest), schedule: this.pdas.universeSchedule(pool, version), handoff: this.pdas.universeHandoff(pool, nextDigest), systemProgram: SystemProgram.programId });
+  }
+  appendUniverseHandoffPrices(runtime: PublicKey, pool: PublicKey, methodology: PublicKey, nextDigest: Uint8Array, offset: number, prices: readonly bigint[]) {
+    if (!Number.isInteger(offset) || offset < 0 || offset > 254 || prices.length < 1 || prices.length > 16 || prices.some(price => price <= 0n || price > 18446744073709551615n)) throw new Error("InvalidUniverseHandoffPricePage");
+    return this.build("appendUniverseHandoffPrices", { offset, prices: prices.map(bn) }, { runtime, registry: this.pdas.registry(), pool, batch: this.pdas.batch(pool), methodology, nextMethodology: this.pdas.methodology(nextDigest), handoff: this.pdas.universeHandoff(pool, nextDigest) });
+  }
+  activatePreparedUniverse(runtime: PublicKey, keys: PoolKeys, methodology: PublicKey, nextDigest: Uint8Array, version: bigint, registryBinding?: { assetRegistry: PublicKey; nextRegistryVersion: PublicKey; previousRegistryVersion: PublicKey }) {
+    return this.build("activatePreparedUniverse", {}, { runtime, registry: this.pdas.registry(), ...keys, batch: this.pdas.batch(keys.pool), methodology, nextMethodology: this.pdas.methodology(nextDigest), schedule: this.pdas.universeSchedule(keys.pool, version), handoff: this.pdas.universeHandoff(keys.pool, nextDigest), instructions: SYSVAR_INSTRUCTIONS_PUBKEY, ...registryBinding });
   }
   cancelUniverseSchedule(admin: PublicKey, pool: PublicKey, version: bigint, assetRegistry?: PublicKey) {
     return this.build("cancelUniverseSchedule", {}, { admin, registry: this.pdas.registry(), pool, schedule: this.pdas.universeSchedule(pool, version), ...(assetRegistry ? { assetRegistry } : {}) });

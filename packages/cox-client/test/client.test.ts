@@ -352,3 +352,63 @@ test("large dynamic position simulations fail with account-reader guidance befor
   await assert.rejects(new CoxSimulations(dynamic, owner).position(poolKey, owner), /CoxPositionSimulationLimit:UseCoxReader.position/);
   assert.equal(reads, 1);
 });
+
+test("prepared inclusion builders bind candidate, handoff, schedule and instruction sysvar to compiler ABI", () => {
+  const pool = fixture("pool"), runtime = fixture("registry").account.runtime, digest = Buffer.alloc(32, 23);
+  const keys = {pool:pool.key,vault:pool.account.vault}, methodology=pool.account.methodology;
+  const calls = [builder.scheduleUniverseV2(runtime,pool.key,methodology,2n,Buffer.alloc(32,1),32,2000n,3000n),builder.beginUniverseHandoff(runtime,pool.key,methodology,digest,2n),builder.appendUniverseHandoffPrices(runtime,pool.key,methodology,digest,0,[10n,20n]),builder.activatePreparedUniverse(runtime,keys,methodology,digest,2n)];
+  const names=["scheduleUniverseV2","beginUniverseHandoff","appendUniverseHandoffPrices","activatePreparedUniverse"];
+  calls.forEach((ix,index)=>{
+    const definition=program.idl.instructions.find(value=>value.name===names[index])!;
+    assert.deepEqual([...ix.data.subarray(0,8)],definition.discriminator);
+    assert.deepEqual(ix.keys.map(key=>[key.isSigner,key.isWritable]),definition.accounts.map((account,index)=>"accounts" in account ? [false,false] : "optional" in account && account.optional && ix.keys[index]!.pubkey.equals(program.programId) ? [false,false] : ["signer" in account && !!account.signer,"writable" in account && !!account.writable]));
+  });
+  assert.equal(calls[1]!.keys[7]!.pubkey.toBase58(),addresses(program.programId).universeHandoff(pool.key,digest).toBase58());
+  assert.equal(calls[3]!.keys[9]!.pubkey.toBase58(),"Sysvar1nstructions1111111111111111111111111");
+  for(const prices of [[],[0n],[-1n],[18446744073709551616n],Array(17).fill(1n)]) assert.throws(()=>builder.appendUniverseHandoffPrices(runtime,pool.key,methodology,digest,0,prices),/InvalidUniverseHandoffPricePage/);
+  assert.throws(()=>builder.appendUniverseHandoffPrices(runtime,pool.key,methodology,digest,255,[1n]),/InvalidUniverseHandoffPricePage/);
+});
+
+test("prepared schedule and handoff account readers accept only their explicit schemas and owners", async () => {
+  const pool=fixture("pool"), digest=Buffer.alloc(32,23), zero=Array(32).fill(0), number=new anchor.BN(1);
+  const schedule={schemaVersion:2,bump:0,pool:pool.key,predecessorDigest:zero,sourceMethodology:zero,version:number,identitiesDigest:zero,expectedInstruments:32,activationTimestamp:number,expiresAt:number,cancelled:false,consumed:false};
+  const scheduleData=await program.coder.accounts.encode("universeSchedule",schedule);
+  const scheduleInfo={owner:program.programId,data:scheduleData,executable:false,lamports:1,rentEpoch:0};
+  assert.equal(decodeAccount(program,"universeSchedule",scheduleInfo).schemaVersion,2);
+  const handoff={schemaVersion:1,bump:0,pool:pool.key,schedule:addresses(program.programId).universeSchedule(pool.key,1n),methodology:addresses(program.programId).methodology(digest),predecessorSequence:number,predecessorStateDigest:zero,sequence:number,snapshotDigest:zero,timestamp:number,benchmark:number,acceptedAt:number,effectiveFrom:number,committedStateDigest:zero,pricesE8:[number]};
+  const data=await program.coder.accounts.encode("universeHandoff",handoff), account={...scheduleInfo,data};
+  assert.equal(decodeAccount(program,"universeHandoff",account).pricesE8[0]!.toString(),"1");
+  assert.throws(()=>decodeAccount(program,"universeHandoff",{...account,owner:PublicKey.default}),/AccountOwnerMismatch/);
+  data.writeUInt16LE(2,8); assert.throws(()=>decodeAccount(program,"universeHandoff",account),/AccountVersionMismatch/);
+});
+
+test("compiled prepared inclusion preserves frozen rosters and separates capture from registry activation", async () => {
+  const compiled = JSON.parse(readFileSync(new URL("../../cox/fixtures/generation/prepared-inclusion.json", import.meta.url), "utf8")) as { accounts: { name: string; address: string; owner: string; dataHex: string }[]; expected: { captureTimestamp: string; handoffTimestamp: string; effectiveFrom: string } };
+  const row = (name: string): AccountInfo<Buffer> => {
+    const found = compiled.accounts.find(value => value.name === name);
+    assert.ok(found);
+    return { owner: new PublicKey(found.owner), data: Buffer.from(found.dataHex, "hex"), executable: false, lamports: 100000000, rentEpoch: 0 };
+  };
+  const pool = decodeAccount(program, "pool", row("pool"));
+  const version = decodeAccount(program, "assetRegistryVersion", row("assetRegistryVersion"));
+  const handoff = decodeAccount(program, "universeHandoff", row("universeHandoff"));
+  assert.equal(pool.cryptoClass, 0);
+  assert.equal(pool.originPrices.length, 32);
+  assert.equal(version.schemaVersion, 2);
+  assert.equal(handoff.pricesE8.length, 32);
+  assert.equal(handoff.timestamp.toString(), compiled.expected.handoffTimestamp);
+  assert.equal(version.effectiveFrom.toString(), compiled.expected.effectiveFrom);
+  assert(BigInt(compiled.expected.captureTimestamp) < BigInt(compiled.expected.handoffTimestamp));
+  assert(BigInt(compiled.expected.handoffTimestamp) < BigInt(compiled.expected.effectiveFrom));
+  const { decodeEpochAccount } = await import("../src/epoch.ts");
+  const epoch = new anchor.Program(JSON.parse(readFileSync(new URL("../../cox-epoch/idl/epoch.json", import.meta.url), "utf8")), { connection });
+  const frozen = decodeEpochAccount(epoch, "epochAccount", row("frozenEpoch"));
+  const successor = decodeEpochAccount(epoch, "epochAccount", row("successorEpoch"));
+  assert.ok(frozen.state && successor.state);
+  assert.equal(frozen.state.universe.length, 31);
+  assert.equal(successor.state.universe.length, 32);
+  assert("settled" in frozen.state.phase);
+  assert("open" in successor.state.phase);
+  assert.equal(frozen.state.ledger.claimable.toString(), "0");
+  assert(!frozen.registryVersion.equals(successor.registryVersion));
+});

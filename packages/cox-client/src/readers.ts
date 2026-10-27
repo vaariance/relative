@@ -39,7 +39,7 @@ export function decodeAccount<K extends keyof Accounts>(program: Program, name: 
   const schema = info.data.readUInt16LE(8);
   const legacy = name === "pool" || name === "request" ? schema === 1 : name === "batch" ? schema === 2 : false;
   const supported = name === "pool" ? schema === 1 || schema === 2 || schema === 3 || schema === 4 || schema === 5 : name === "request" ? schema === 1 || schema === 2 || schema === 3 || schema === 4
-    : name === "batch" || name === "publication" ? schema === 2 || schema === 3 || schema === 4 : name === "methodology" ? schema === 1 || schema === 2 || schema === 3 : schema === 1;
+    : name === "universeSchedule" || name === "assetRegistryVersion" ? schema === 1 || schema === 2 : name === "batch" || name === "publication" ? schema === 2 || schema === 3 || schema === 4 : name === "methodology" ? schema === 1 || schema === 2 || schema === 3 : schema === 1;
   if (!supported) throw new Error("AccountVersionMismatch");
   const fields: string[] = [...(legacy ? appended[name as keyof typeof appended] ?? [] : [])];
   if (name === "pool" && schema < 4) fields.push("tradingOpensAt", "testCollateralMint", "lifecycleExtension", "lifecycleVersion", "lifecycle", "assetRegistry", "generation", "cryptoClass");
@@ -104,6 +104,11 @@ export class CoxReader {
   async universeSchedule(poolId: bigint, version: bigint) {
     const pool = this.pdas.pool(poolId); const value = await this.account("universeSchedule", this.pdas.universeSchedule(pool, version));
     if (!value.pool.equals(pool) || value.version.toString() !== version.toString()) throw new Error("UniverseScheduleIdentityMismatch");
+    return value;
+  }
+  async universeHandoff(poolId: bigint, digest: Uint8Array) {
+    const pool = this.pdas.pool(poolId), value = await this.account("universeHandoff", this.pdas.universeHandoff(pool, digest));
+    if (!value.pool.equals(pool) || !value.methodology.equals(this.pdas.methodology(digest))) throw new Error("UniverseHandoffIdentityMismatch");
     return value;
   }
   async registry() { return this.account("registry", this.pdas.registry()); }
