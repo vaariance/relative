@@ -2413,3 +2413,10 @@ another agent needs to know.
 - **What:** Peter requested one existing-list inclusion, then asked to protect the upcoming Epoch close. PYTH's15UTC signed capture succeeded, but the required exact old-universe publication failed; runtime marked RescheduleRequired. The publisher stayed PID1367947 and ordinary publication resumed at15:00:15UTC. Confirmed31 origins, frozen31-asset round and executed30-member test basket remained unchanged. Cancelled only unconsumed scheduleV2 in finalized transaction2mPegYeGDaQoHpVDEZMEjQsYp7qmhLKjPgbHj7K5MpBjYnaVhQzUKrzfmWYMi4MGrUaLoGGrJWqw76wv6bq9Y8HD; registry pendingActivation is now0.
 - **Rules for agents:** PYTH is not active; do not add the remaining29 assets or declare inclusion passed. Do not reset/restart the current market. The exact-boundary transaction rejection needs diagnosis and the failed-candidate gate needs an isolated design before rescheduling. Preserve existing Epoch closing/withdrawal runner, verified armed for16:00:15UTC; no new entries or timing changes. This entry is uncommitted; preserve all uncommitted Alchemy topics.
 - **Refs:** Private `.cox/pyth-inclusion-20261027/activation-result.json`, `live-check.json`, `cancel-finalized.json`; `.cox/current-roundtrip-20261027/`.
+
+### 2026-10-27 · Peter (Codex) · PYTH failure diagnosis corrected
+
+- **Area:** Read-only signer/transaction evidence; corrects the earlier “Failed PYTH boundary cancelled before successor Epoch” diagnosis.
+- **What:** No signed exact-15UTC transaction was found in the reviewed audit interval. The transaction signed at15:00:19 used15:00:15 prices and finalized. The confirmed failure is the legacy controller's exact-boundary publication requirement/deadline; a Solana rejection of that exact-boundary transaction is not established. PYTH remains inactive and its failed schedule is cancelled.
+- **Rules for agents:** Do not repeat an unproved rejection as root cause. No replacement timestamp, remaining additions, reset or publisher restart is authorized by this diagnosis.
+- **Refs:** Private `.cox/pyth-inclusion-20261027/rejection-diagnosis.json` and signing evidence.
