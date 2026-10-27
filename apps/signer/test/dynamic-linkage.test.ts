@@ -97,6 +97,9 @@ test("dynamic publication validates cursor phases, timestamp and bounded pages w
 test("dynamic lineage account order is checked against generated contract ABI", () => {
   const idl = JSON.parse(readFileSync(new URL("../../../packages/cox/idl/cox.json", import.meta.url), "utf8"));
   const expected: Record<string, string[]> = {
+    begin_universe_handoff: ["runtime", "registry", "pool", "batch", "methodology", "next_methodology", "schedule", "handoff", "system_program"],
+    append_universe_handoff_prices: ["runtime", "registry", "pool", "batch", "methodology", "next_methodology", "handoff"],
+    activate_prepared_universe: ["runtime", "registry", "pool", "batch", "methodology", "next_methodology", "schedule", "handoff", "vault", "instructions", "test_vault", "asset_registry", "next_registry_version", "previous_registry_version"],
     register_scheduled_methodology: ["runtime", "registry", "pool", "methodology", "schedule", "next_methodology", "system_program"],
     upload_scheduled_methodology: ["runtime", "registry", "pool", "methodology", "schedule", "next_methodology"],
     seal_scheduled_methodology: ["runtime", "registry", "pool", "methodology", "schedule", "next_methodology"],
@@ -177,4 +180,55 @@ test("migration preparation permits only the pinned adaptive source and exact ge
   old[47 + adaptive.length] = 0; await rejected(check(), /unsealed bootstrap/); old[47 + adaptive.length] = 1;
   old[51] ^= 1; await rejected(check(), /canonical digest/); old[51] ^= 1;
   await rejected(checkProtocolLinkage(f.binding, linkage, f.transaction([f.instruction("seal_scheduled_methodology", keys)]), f.fetch), /not approved dynamic runtime/);
+});
+
+test("prepared candidates retain approval and immutable origins while ordinary publications advance", async () => {
+  const f = fixture(), keys = [operator, f.registry, f.pool, f.methodology, f.schedule, f.nextMethodology];
+  f.approval.writeUInt16LE(2, 8);
+  f.root.writeBigUInt64LE(f.timestamp + 8n - 1000n, 155);
+  f.root.writeBigUInt64LE(f.sequence + 1n, 163);
+  f.root[171] ^= 1;
+  await f.check("seal_scheduled_methodology", keys);
+  f.approval.writeUInt16LE(1, 8);
+  await rejected(f.check("seal_scheduled_methodology", keys), /non-boundary/);
+  f.approval.writeUInt16LE(2, 8);
+  f.rows.set(f.nextMethodology.toBase58(), { owner: f.program, data: f.method(f.nextCanonical, true) });
+  await rejected(f.check("activate_universe", [operator, f.registry, f.pool, f.methodology, f.nextMethodology, f.vault, f.schedule]), /atomic prepared activation/);
+});
+
+test("prepared handoff strictly binds the successor, prices, pool, and immediate finalization", async () => {
+  const f = fixture(30, 1); f.approval.writeUInt16LE(2, 8);
+  f.rows.set(f.nextMethodology.toBase58(), { owner: f.program, data: f.method(f.nextCanonical, true) });
+  const cutoff = f.timestamp + 1n, anchor = f.pda(Buffer.from("universe-handoff"), f.pool.toBuffer(), f.nextDigest);
+  const batchData = Buffer.concat([disc("account", "Batch"), num(4, 2), num(0, 1), f.pool.toBuffer(), num(cutoff - 1000n, 8), num(f.sequence + 1n, 8), num(cutoff, 8), num(f.sequence, 8), f.state, filled(49), vec(Array.from({length:30}, () => Buffer.concat([num(100000000,8),num(3,1),num(0,1),num(cutoff,8),num(0,2)]))), num(100n*SCALE,16),vec([]),vec([]),vec([]),vec([]),vec([]),vec([]),Buffer.alloc(48),num(0,8),Buffer.alloc(72),num(cutoff,8),num(1,1),num(0,1),num(0,8)]);
+  f.put(f.batch,batchData);
+  f.put(anchor,Buffer.concat([disc("account","UniverseHandoff"),num(1,2),num(0,1),f.pool.toBuffer(),f.schedule.toBuffer(),f.nextMethodology.toBuffer(),num(f.sequence,8),f.state,num(f.sequence+1n,8),filled(49),num(cutoff,8),num(100n*SCALE,16),num(cutoff,8),num(0,8),filled(0),vec([num(110000000,8)])]));
+  const common=[operator,f.registry,f.pool,f.batch,f.methodology,f.nextMethodology];
+  await rejected(f.check("append_universe_handoff_prices",[...common,anchor],Buffer.concat([num(1,2),num(1,4),num(120000000,8)])),/price page/);
+  const activation=[...common,f.schedule,anchor,f.vault,new PublicKey("Sysvar1nstructions1111111111111111111111111"),f.program,f.program,f.program,f.program];
+  await rejected(f.check("activate_prepared_universe",activation),/immediately preceding/);
+  const finalize=f.instruction("finalize",[operator,f.registry,f.pool,f.batch,f.methodology,f.pda(Buffer.from("publication"),f.pool.toBuffer()),f.vault,SystemProgram.programId]);
+  await checkProtocolLinkage(f.binding,f.linkage,f.transaction([finalize,f.instruction("activate_prepared_universe",activation)]),f.fetch);
+  await rejected(checkProtocolLinkage(f.binding,f.linkage,f.transaction([finalize,f.instruction("activate_prepared_universe",activation.map((key,index)=>index===7?stranger:key))]),f.fetch),/account/);
+  await rejected(f.check("append_universe_handoff_prices",[...common,anchor],Buffer.concat([num(0,2),num(1,4),num(0,8)])),/price page|zero handoff/);
+});
+
+ test("prepared handoff begins only from a fresh accepted empty-price publication", async () => {
+  const f=fixture(); f.approval.writeUInt16LE(2,8); f.put(f.nextMethodology,f.method(f.nextCanonical,true));
+  const anchor=f.pda(Buffer.from("universe-handoff"),f.pool.toBuffer(),f.nextDigest), keys=[operator,f.registry,f.pool,f.batch,f.methodology,f.nextMethodology,f.schedule,anchor,SystemProgram.programId];
+  const clock=Date.now; Date.now=()=>Number(f.timestamp+2n)*1000;
+  try { await f.check("begin_universe_handoff",keys); await rejected(f.check("begin_universe_handoff",keys.map((key,index)=>index===7?stranger:key)),/account/); Date.now=()=>Number(f.timestamp+7n)*1000; await rejected(f.check("begin_universe_handoff",keys),/handoff batch/); } finally { Date.now=clock; }
+ });
+
+test("prepared approval bounds staging preallocation without changing the current universe", async () => {
+  const f = fixture(31);
+  f.approval.writeUInt16LE(2, 8);
+  f.put(f.batch, Buffer.concat([f.batchBytes, Buffer.alloc(8192 - f.batchBytes.length)]));
+  const keys = [operator, f.registry, f.pool, f.batch, SystemProgram.programId];
+  await f.check("grow_dynamic_account", keys, num(8192, 4));
+  f.put(f.batch, Buffer.concat([f.batchBytes, Buffer.alloc(16384 - f.batchBytes.length)]));
+  await rejected(f.check("grow_dynamic_account", keys, num(8192, 4)), /exceeds target bound/);
+  f.put(f.batch, Buffer.concat([f.batchBytes, Buffer.alloc(8192 - f.batchBytes.length)]));
+  f.approval.writeUInt16LE(1, 8);
+  await rejected(f.check("grow_dynamic_account", keys, num(8192, 4)), /prepared universe approval/);
 });

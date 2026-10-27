@@ -32,7 +32,8 @@ export async function checkEpochPreparation(program: PublicKey, linkage: EpochLi
   const registry = await account(registryKey, basic, "AssetRegistry", 187);
   const version = await account(keys[3]!, basic, "AssetRegistryVersion", 188);
   const method = await account(keys[4]!, basic, "Methodology", 48);
-  if (registry.readUInt16LE(8) !== 1 || version.readUInt16LE(8) !== 1 || !registry.subarray(11, 43).equals(generation) || !version.subarray(43, 75).equals(generation) || version[187] !== 1) return deny("wrong registry generation or unsealed version");
+  const versionSchema = version.readUInt16LE(8);
+  if (registry.readUInt16LE(8) !== 1 || ![1, 2].includes(versionSchema) || !registry.subarray(11, 43).equals(generation) || !version.subarray(43, 75).equals(generation) || version[187] !== 1) return deny("wrong registry generation or unsealed version");
   same(keyAt(version, 11), registryKey); same(keyAt(version, 75), keys[4]!);
   const digest = version.subarray(107, 139);
   same(keys[3]!, pda(basic, Buffer.from("asset-version"), registryKey.toBuffer(), digest));
@@ -42,6 +43,8 @@ export async function checkEpochPreparation(program: PublicKey, linkage: EpochLi
   const canonical = method.subarray(47, 47 + length);
   if (!hash(canonical).equals(digest)) return deny("registry canonical hash mismatch");
   const manifest = universe(canonical);
+  const effectiveFrom = version.readBigUInt64LE(171);
+  if (versionSchema === 1 ? manifest.timestamp !== effectiveFrom : manifest.timestamp > effectiveFrom) return deny("registry admission capture is outside its activation interval");
   same(manifest.pool, keyAt(registry, 75));
   if (manifest.source.toString("hex") !== linkage.methodologyDigest || !manifest.operator.equals(new PublicKey(linkage.operator))) return deny("registry source or operator mismatch");
   const epochKey = keys[initializing ? 7 : 5]!;
@@ -70,6 +73,6 @@ export async function checkEpochPreparation(program: PublicKey, linkage: EpochLi
   const now = BigInt(Math.floor(Date.now() / 1000)), openingBytes = Buffer.alloc(8); openingBytes.writeBigUInt64LE(opening);
   same(epochKey, pda(program, Buffer.from("epoch"), new PublicKey(linkage.config).toBuffer(), openingBytes));
   if (opening !== now / 14400n * 14400n || version.readBigUInt64LE(171) > opening || version.readBigUInt64LE(179) !== 0n && opening >= version.readBigUInt64LE(179)
-    || registry.readBigUInt64LE(179) !== 0n && opening >= registry.readBigUInt64LE(179)) return deny("wrong opening registry interval or pending activation");
+    ) return deny("wrong opening registry interval");
   if (version.readBigUInt64LE(179) === 0n) same(keyAt(registry, 107), keys[3]!);
 }

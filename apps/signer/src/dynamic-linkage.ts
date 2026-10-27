@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { PublicKey, SystemProgram } from "@solana/web3.js";
+import { PublicKey, SystemProgram, SYSVAR_INSTRUCTIONS_PUBKEY } from "@solana/web3.js";
 import type { DynamicCoxLinkage, SolanaProgramBinding } from "./config.js";
 import type { AccountFetcher } from "./cox-linkage.js";
 import { PolicyRejection } from "./policy.js";
@@ -99,10 +99,10 @@ export function poolFields(bytes: Buffer) {
 function batchFields(bytes: Buffer) {
   const c = new Cursor(bytes); c.take(8); const schema = c.u16(); c.byte(); const pool = c.key();
   if (![2, 3, 4].includes(schema)) return deny("invalid dynamic batch schema");
-  const batch = c.u64(), sequence = c.u64(); c.take(80);
-  const prices = c.vector(20, 255); c.take(16); c.vector(16, 256); c.vector(24, 256); c.vector(16, 256); c.vector(16, 256); c.vector(16, 256); c.vector(1, 256);
-  c.take(48); const cursor = c.u64(); c.take(80); const phase = c.byte();
-  return { pool, batch, sequence, prices, cursor, phase };
+  const batch = c.u64(), sequence = c.u64(), cutoff = c.u64(), predecessorSequence = c.u64(), predecessor = c.take(32), snapshot = c.take(32);
+  const prices = c.vector(20, 255), benchmark = c.i128(); c.vector(16, 256); c.vector(24, 256); c.vector(16, 256); c.vector(16, 256); c.vector(16, 256); c.vector(1, 256);
+  c.take(48); const cursor = c.u64(); c.take(72); const acceptedAt = c.u64(), phase = c.byte();
+  return { pool, batch, sequence, cutoff, predecessorSequence, predecessor, snapshot, benchmark, acceptedAt, prices, cursor, phase };
 }
 
 export async function checkDynamicCoxLinkage(binding: SolanaProgramBinding, linkage: DynamicCoxLinkage, transaction: PolicyTransaction, fetch: AccountFetcher): Promise<void> {
@@ -186,20 +186,20 @@ export async function checkDynamicCoxLinkage(binding: SolanaProgramBinding, link
   async function schedule(key: PublicKey) {
     if (!current?.value) return deny("schedule requires dynamic pool");
     const bytes = await account(key, "UniverseSchedule", 167), c = new Cursor(bytes); c.take(8);
-    if (c.u16() !== 1) return deny("invalid universe schedule schema"); c.byte(); same(c.key(), pool, "schedule pool");
+    const schema = c.u16(); if (schema !== 1 && schema !== 2) return deny("invalid universe schedule schema"); c.byte(); same(c.key(), pool, "schedule pool");
     const predecessor = c.take(32), algorithm = c.take(32), version = c.u64(), identities = c.take(32), count = c.u16(), timestamp = c.u64(), expires = c.u64(), cancelled = c.byte(), consumed = c.byte();
     const now = BigInt(Math.floor(Date.now() / 1000));
     same(key, pda(Buffer.from("universe-schedule"), pool.toBuffer(), u64(version)), "schedule PDA");
     equal(predecessor, current.digest, "schedule predecessor"); equal(algorithm, source, "schedule algorithm");
-    if (version !== current.value.version + 1n || count <= current.value.count || count > 255 || !nonzero(identities) || cancelled !== 0 || consumed !== 0 || now < timestamp || now > expires || expires < timestamp || expires > timestamp + 86400n || fields.origin + fields.batch !== timestamp || fields.stage) return deny("unapproved, expired, cancelled or non-boundary universe schedule");
-    return { version, identities, count, timestamp, expires };
+    if (version !== current.value.version + 1n || count <= current.value.count || count > 255 || !nonzero(identities) || cancelled !== 0 || consumed !== 0 || now < timestamp || now > expires || expires < timestamp || expires > timestamp + 86400n || schema === 1 && (fields.origin + fields.batch !== timestamp || fields.stage)) return deny("unapproved, expired, cancelled or non-boundary universe schedule");
+    return { schema, version, identities, count, timestamp, expires };
   }
   const verifyNext = (next: Method, approved: Awaited<ReturnType<typeof schedule>>) => {
     const value = next.value ?? deny("incomplete scheduled capture");
     same(value.pool, pool, "capture pool"); same(value.operator, operator, "capture operator"); equal(value.source, source, "capture algorithm");
     equal(value.predecessor, current!.digest, "capture predecessor"); equal(value.identitiesDigest, approved.identities, "approved instrument identities");
-    if (value.schemaVersion !== current!.value!.schemaVersion || value.version !== approved.version || value.count !== approved.count || value.timestamp !== approved.timestamp || next.activation !== value.timestamp - fields.origin || value.sequence !== fields.sequence || !value.state.equals(fields.state) || value.benchmark !== fields.benchmark
-      || !current!.value!.instruments.every((instrument, index) => instrument.complete.equals(value.instruments[index]!.complete)) || !fields.prices.every((price, index) => price === value.prices[index])) return deny("scheduled capture changed fixed lineage, benchmark or boundary");
+    if (value.schemaVersion !== current!.value!.schemaVersion || value.version !== approved.version || value.count !== approved.count || value.timestamp !== approved.timestamp || next.activation !== value.timestamp - fields.origin || approved.schema === 1 && (value.sequence !== fields.sequence || !value.state.equals(fields.state) || value.benchmark !== fields.benchmark)
+      || !current!.value!.instruments.every((instrument, index) => instrument.complete.equals(value.instruments[index]!.complete)) || approved.schema === 1 && !fields.prices.every((price, index) => price === value.prices[index])) return deny("scheduled capture changed fixed lineage, benchmark or boundary");
     if (value.instruments.slice(current!.value!.count).some((instrument, index) => instrument.price !== value.prices[index + current!.value!.count] || instrument.benchmark !== value.benchmark || instrument.timestamp !== value.timestamp)) return deny("scheduled capture changed new original references");
   };
   const pendingMethods = new Map<string, Method>();
@@ -210,10 +210,44 @@ export async function checkDynamicCoxLinkage(binding: SolanaProgramBinding, link
   }
   let stage: ReturnType<typeof batchFields> | null = null;
   async function batch() { if (!stage) { stage = batchFields(await account(batchKey, "Batch", 139)); same(stage.pool, pool, "batch pool"); } return stage; }
-  const names = ["seal_dynamic_methodology", "initialize_dynamic_staging", "register_asset_registry_version", "activate_asset_registry_version", "register_scheduled_methodology", "upload_scheduled_methodology", "seal_scheduled_methodology", "activate_universe", "grow_dynamic_account", "begin_dynamic_publication", "append_dynamic_prices", "seal_dynamic_publication", "prepare_dynamic_revaluation", "finish_dynamic_revaluation", "evaluate", "safety", "execute", "seal_evaluation", "finalize"];
+  const names = ["begin_universe_handoff", "append_universe_handoff_prices", "activate_prepared_universe", "seal_dynamic_methodology", "initialize_dynamic_staging", "register_asset_registry_version", "activate_asset_registry_version", "register_scheduled_methodology", "upload_scheduled_methodology", "seal_scheduled_methodology", "activate_universe", "grow_dynamic_account", "begin_dynamic_publication", "append_dynamic_prices", "seal_dynamic_publication", "prepare_dynamic_revaluation", "finish_dynamic_revaluation", "evaluate", "safety", "execute", "seal_evaluation", "finalize"];
   for (const instruction of relevant) {
     const bytes = Buffer.from(instruction.data), name = names.find(value => bytes.subarray(0, 8).equals(disc("global", value))), keys = instruction.accountKeyIndexes.map(index => transaction.message.staticAccountKeys[index] ?? deny("missing dynamic account"));
     if (!name || schema === 4 && name !== "seal_dynamic_methodology") return deny("instruction is not approved dynamic runtime");
+    if (["begin_universe_handoff", "append_universe_handoff_prices", "activate_prepared_universe"].includes(name)) {
+      const activation = name === "activate_prepared_universe", beginning = name === "begin_universe_handoff";
+      const nextKey = keys[5] ?? deny("missing prepared methodology"), next = await nextMethod(nextKey, true);
+      same(nextKey, pda(Buffer.from("methodology"), next.digest), "prepared methodology PDA");
+      const scheduleKey = pda(Buffer.from("universe-schedule"), pool.toBuffer(), u64(next.value!.version)), approved = await schedule(scheduleKey);
+      if (approved.schema !== 2) return deny("prepared handoff requires schedule schema two");
+      verifyNext(next, approved);
+      const handoffKey = pda(Buffer.from("universe-handoff"), pool.toBuffer(), next.digest), state = await batch();
+      const prefix = [operator, registry, pool, batchKey, methodology, nextKey];
+      const now = BigInt(Math.floor(Date.now() / 1000));
+      if (beginning) {
+        bind(keys, [...prefix, scheduleKey, handoffKey, SystemProgram.programId]);
+        if (bytes.length !== 8 || state.phase !== 4 || state.prices !== 0 || state.predecessorSequence !== fields.sequence || !state.predecessor.equals(fields.state) || state.sequence !== fields.sequence + 1n || state.cutoff < approved.timestamp || now < state.cutoff || now > state.cutoff + 5n) return deny("invalid prepared handoff batch");
+      } else {
+        const data = await account(handoffKey, "UniverseHandoff", 263), c = new Cursor(data); c.take(8);
+        if (c.u16() !== 1) return deny("wrong handoff schema"); c.byte();
+        same(c.key(), pool, "handoff pool"); same(c.key(), scheduleKey, "handoff schedule"); same(c.key(), nextKey, "handoff methodology");
+        const predecessorSequence = c.u64(), predecessor = c.take(32), sequence = c.u64(), snapshot = c.take(32), timestamp = c.u64(), benchmark = c.i128(), acceptedAt = c.u64(), effective = c.u64(); c.take(32); const count = c.count(255); const prices = Array.from({ length: count }, () => c.u64());
+        if (effective !== 0n || predecessorSequence !== state.predecessorSequence || !predecessor.equals(state.predecessor) || sequence !== state.sequence || !snapshot.equals(state.snapshot) || timestamp !== state.cutoff || benchmark !== state.benchmark || acceptedAt !== state.acceptedAt || prices.some(price => price === 0n)) return deny("handoff does not match accepted publication");
+        if (!activation) {
+          bind(keys, [...prefix, handoffKey]);
+          const count = bytes.length >= 14 ? bytes.readUInt32LE(10) : 0;
+          if (count < 1 || count > 16 || bytes.length !== 14 + count * 8 || bytes.readUInt16LE(8) !== prices.length || prices.length + count > next.value!.count - current!.value!.count) return deny("invalid handoff price page");
+          for (let index = 0; index < count; index++) if (bytes.readBigUInt64LE(14 + index * 8) === 0n) return deny("zero handoff price");
+        } else {
+          const bound = !fields.assetRegistry.equals(PublicKey.default), assetRegistry = pda(Buffer.from("asset-registry"), fields.generation);
+          bind(keys, [...prefix, scheduleKey, handoffKey, vault, SYSVAR_INSTRUCTIONS_PUBKEY, linkage.testCollateralMint ? testVault : program, ...(bound ? [assetRegistry, pda(Buffer.from("asset-version"), assetRegistry.toBuffer(), next.digest), pda(Buffer.from("asset-version"), assetRegistry.toBuffer(), current!.digest)] : [program, program, program])]);
+          if (bound) same(assetRegistry, fields.assetRegistry, "prepared registry");
+          const index = transaction.message.compiledInstructions.findIndex(value => value === instruction), previous = transaction.message.compiledInstructions[index - 1];
+          if (bytes.length !== 8 || !previous || !transaction.message.staticAccountKeys[previous.programIdIndex]?.equals(program) || !Buffer.from(previous.data).equals(disc("global", "finalize")) || state.phase !== 1 || prices.length !== next.value!.count - current!.value!.count || state.prices !== current!.value!.count || timestamp < approved.timestamp || acceptedAt < timestamp || acceptedAt > timestamp + 5n || now % 14400n === 0n) return deny("prepared activation requires immediately preceding finalization");
+        }
+      }
+      continue;
+    }
     if (name === "initialize_dynamic_staging") {
       if (bytes.length !== 8 || fields.initialized || fields.lifecycle !== 0) return deny("dynamic staging requires preparing genesis");
       bind(keys, [operator, pool, batchKey, publication, SystemProgram.programId]); continue;
@@ -256,6 +290,8 @@ export async function checkDynamicCoxLinkage(binding: SolanaProgramBinding, link
     if (["upload_scheduled_methodology", "seal_scheduled_methodology", "activate_universe"].includes(name)) {
       const activation = name === "activate_universe";
       if (activation) {
+        if (!fields.assetRegistry.equals(PublicKey.default)) return deny("shared registry requires prepared atomic activation");
+        const approved = await schedule(keys[6]!); if (approved.schema !== 1) return deny("prepared schedule requires atomic prepared activation");
         const bound = !fields.assetRegistry.equals(PublicKey.default);
         const base = keys.length >= 11 ? keys.slice(0, 8) : keys;
         optionalVault(base, 7);
@@ -288,7 +324,14 @@ export async function checkDynamicCoxLinkage(binding: SolanaProgramBinding, link
       const [target] = await fetch([keys[3]!]); const growth = bytes.readUInt32LE(8); if (!target || !target.owner.equals(program) || growth < 1 || growth > 8192) return deny("invalid dynamic growth target");
       let limit = 0;
       if (keys[3]!.equals(pool)) limit = 32768;
-      else if (keys[3]!.equals(batchKey) || keys[3]!.equals(publication)) limit = Math.ceil((4096 + fields.classes * 128) / 8192) * 8192;
+      else if (keys[3]!.equals(batchKey) || keys[3]!.equals(publication)) {
+        limit = Math.ceil((4096 + fields.classes * 128) / 8192) * 8192;
+        if (target.data.length + growth > limit) {
+          const approved = await schedule(pda(Buffer.from("universe-schedule"), pool.toBuffer(), u64(current!.value!.version + 1n)));
+          if (approved.schema !== 2) return deny("staging preallocation requires prepared universe approval");
+          limit = Math.ceil((4096 + (approved.count + 1) * 128) / 8192) * 8192;
+        }
+      }
       else if (target.data.subarray(0, 8).equals(disc("account", "Position")) && target.data.length >= 75 && target.data.readUInt16LE(8) === 1) {
         same(new PublicKey(target.data.subarray(11, 43)), pool, "position growth pool"); same(keys[3]!, pda(Buffer.from("position"), pool.toBuffer(), target.data.subarray(43, 75)), "position growth PDA"); limit = Math.ceil((512 + fields.classes * 80) / 4096) * 4096;
       } else if (target.data.subarray(0, 8).equals(disc("account", "Methodology"))) {
@@ -304,7 +347,7 @@ export async function checkDynamicCoxLinkage(binding: SolanaProgramBinding, link
       const genesis = !fields.initialized && fields.lifecycle === 0 && fields.sequence === 0n && bytes.length === 104 && bytes.readBigUInt64LE(8) === 0n;
       if (bytes.length !== 104 || fields.stage || !genesis && (bytes.readBigUInt64LE(8) <= fields.batch || bytes.readBigUInt64LE(8) <= fields.stageBatch) || bytes.readBigUInt64LE(16) !== fields.sequence + 1n || !bytes.subarray(24, 56).equals(fields.state)) return deny("invalid dynamic publication predecessor");
       const c = new Cursor(bytes.subarray(88)); if (c.i128() <= 0n || !nonzero(bytes.subarray(56, 88))) return deny("invalid dynamic publication benchmark");
-      stage = { pool, batch: bytes.readBigUInt64LE(8), sequence: bytes.readBigUInt64LE(16), prices: 0, cursor: 0n, phase: 4 }; continue;
+      stage = { pool, batch: bytes.readBigUInt64LE(8), sequence: bytes.readBigUInt64LE(16), cutoff: fields.origin + bytes.readBigUInt64LE(8), predecessorSequence: fields.sequence, predecessor: fields.state, snapshot: bytes.subarray(56, 88), benchmark: new Cursor(bytes.subarray(88)).i128(), acceptedAt: 0n, prices: 0, cursor: 0n, phase: 4 }; continue;
     }
     if (["append_dynamic_prices", "seal_dynamic_publication", "prepare_dynamic_revaluation", "finish_dynamic_revaluation"].includes(name)) {
       bind(keys, [operator, registry, pool, methodology, batchKey]); const state = await batch();

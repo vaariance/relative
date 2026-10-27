@@ -92,8 +92,14 @@ test("sole operator can prepare a registry-bound round without administrator aut
   await checkProtocolLinkage(binding, linkage, f.transaction(initialize), f.fetch);
   await assert.rejects(checkProtocolLinkage(binding, { ...linkage, registry: undefined }, f.transaction(initialize), f.fetch), /not enabled/);
   f.registry.data.writeBigUInt64LE(opening, 179);
-  await assert.rejects(checkProtocolLinkage(binding, linkage, f.transaction(initialize), f.fetch), /pending activation/);
+  await checkProtocolLinkage(binding, linkage, f.transaction(initialize), f.fetch);
   f.registry.data.writeBigUInt64LE(0n, 179);
+  f.version.data.writeUInt16LE(2, 8);
+  f.version.data.writeBigUInt64LE(f.manifest.timestamp + 1n, 171);
+  await checkProtocolLinkage(binding, linkage, f.transaction(initialize), f.fetch);
+  f.version.data.writeUInt16LE(3, 8);
+  await assert.rejects(checkProtocolLinkage(binding, linkage, f.transaction(initialize), f.fetch), /generation/);
+  f.version.data.writeUInt16LE(2, 8);
   f.version.data.writeBigUInt64LE(opening, 179);
   await assert.rejects(checkProtocolLinkage(binding, linkage, f.transaction(initialize), f.fetch), /interval/);
   f.version.data.writeBigUInt64LE(0n, 179);
@@ -112,11 +118,11 @@ test("fresh-four release stays disabled with the already operated runtime instru
   const config = loadSignerConfig(new URL("../config/dev-dynamic.json", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
   const programs = config.bindings["oracle-operator"]!.solana!.programs;
   const expected = [
-    ["seal_genesis_methodology", "initialize_dynamic_staging", "register_asset_registry_version", "activate_asset_registry_version", "seal_dynamic_methodology", "register_scheduled_methodology", "upload_scheduled_methodology", "seal_scheduled_methodology", "activate_universe", "grow_dynamic_account", "begin_dynamic_publication", "append_dynamic_prices", "seal_dynamic_publication", "prepare_dynamic_revaluation", "finish_dynamic_revaluation", "evaluate", "safety", "execute", "seal_evaluation", "finalize"],
+    ["seal_genesis_methodology", "initialize_dynamic_staging", "register_asset_registry_version", "activate_asset_registry_version", "seal_dynamic_methodology", "register_scheduled_methodology", "upload_scheduled_methodology", "seal_scheduled_methodology", "activate_universe", "grow_dynamic_account", "begin_dynamic_publication", "append_dynamic_prices", "seal_dynamic_publication", "prepare_dynamic_revaluation", "finish_dynamic_revaluation", "evaluate", "safety", "execute", "seal_evaluation", "finalize", "begin_universe_handoff", "append_universe_handoff_prices", "activate_prepared_universe"],
     ["initialize_current_epoch", "grow_current_epoch", "copy_registry_assets", "seal_current_epoch", "finalize_empty", "publish_snapshot", "initialize_snapshot", "grow_snapshot", "append_prices", "seal_snapshot", "close_snapshot", "execute", "begin_close", "score", "allocate", "refund", "finalize_scores", "void_epoch"],
   ];
   const overrides: Record<string, number[]>[] = [
-    { append_dynamic_prices: [1, 2, 4], seal_dynamic_publication: [1, 2, 4], evaluate: [0, 1, 2, 3, 4], safety: [0, 1, 2, 3, 4], execute: [0, 1, 2, 3, 4], seal_evaluation: [0, 1, 2] },
+    { begin_universe_handoff: [0, 1, 2, 3, 7], append_universe_handoff_prices: [3, 6], activate_prepared_universe: [1, 2, 3, 6, 7, 11, 12, 13], append_dynamic_prices: [1, 2, 4], seal_dynamic_publication: [1, 2, 4], evaluate: [0, 1, 2, 3, 4], safety: [0, 1, 2, 3, 4], execute: [0, 1, 2, 3, 4], seal_evaluation: [0, 1, 2] },
     { execute: [2, 3, 6], begin_close: [2, 5] },
   ];
   assert.equal(programs.length, 2);
@@ -170,4 +176,11 @@ test("fresh-four policy pins the new generation and refuses legacy pool and Epoc
   checkSolanaPolicy("oracle-operator", enabled, transaction(epochs.initializeCurrentEpoch(operator, mint, selection, registryBinding, testMint)), operator);
   const oldSelection = { ...selection, config: epochs.pdas.config(new PublicKey(epoch.linkage.admin), 3n) };
   assert.throws(() => checkSolanaPolicy("oracle-operator", enabled, transaction(epochs.initializeCurrentEpoch(operator, mint, oldSelection, registryBinding, testMint)), operator), /account/);
+});
+
+test("shared registry pools refuse the legacy retroactive universe activation path", async () => {
+  const f=fixture(), fields=poolFields(f.pool.data);
+  assert(!fields.assetRegistry.equals(PublicKey.default));
+  const ix=f.sdk.activateUniverse(f.operator,{pool:f.pool.key,vault:new PublicKey(f.pool.data.subarray(115,147))},f.method.key,f.method.key,2n);
+  await assert.rejects(checkProtocolLinkage(f.binding,f.linkage,f.transaction(ix),f.fetch),/shared registry requires prepared atomic activation/);
 });

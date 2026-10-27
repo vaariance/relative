@@ -112,7 +112,10 @@
               "00980e338855a9cd",
               "82ddf29a0dc1bd1d",
               "b0a00549cafec750",
-              "ab3dda387f730cd9"
+              "ab3dda387f730cd9",
+              "40bc9de6a57e0a0c",
+              "a39536016acc8024",
+              "ae14ef7f4bdcc203"
             ],
             "instructions": [
               {
@@ -401,6 +404,53 @@
                   2,
                   3,
                   5
+                ]
+              },
+              {
+                "discriminator": "40bc9de6a57e0a0c",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "2": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi",
+                  "8": "11111111111111111111111111111111"
+                },
+                "v1WritableAccounts": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  7
+                ]
+              },
+              {
+                "discriminator": "a39536016acc8024",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "2": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi"
+                },
+                "v1WritableAccounts": [
+                  3,
+                  6
+                ]
+              },
+              {
+                "discriminator": "ae14ef7f4bdcc203",
+                "accounts": {
+                  "0": "$signer",
+                  "1": "9E52kNuxk7bHHuuvvrG13hvRBinvSnPFNFYM9kcPcKEC",
+                  "2": "45jn5iDor3M4e8NsG8XL99528F3eeMYBYJrbyuZSmPPi",
+                  "9": "Sysvar1nstructions1111111111111111111111111"
+                },
+                "v1WritableAccounts": [
+                  1,
+                  2,
+                  3,
+                  6,
+                  7,
+                  11,
+                  12,
+                  13
                 ]
               }
             ],
