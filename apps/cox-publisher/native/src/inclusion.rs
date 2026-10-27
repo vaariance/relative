@@ -70,6 +70,8 @@ pub struct Request {
     pub policy: InclusionPolicy,
     pub operator: [u8; 32],
     pub previous_canonical: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_handoff: Option<universe_runtime::HandoffConfirmation>,
     pub schedule: ScheduleEvidence,
     pub captured: activation::Captured,
     pub predecessor_sequence: u64,
@@ -200,7 +202,8 @@ pub fn validate_execution_capacity(preparation: &Preparation) -> Result<usize, E
         value: 1,
     }).collect::<Vec<_>>();
     prices.sort_by_key(|price| price.asset_id);
-    crate::epoch_stage::validate_atomic_entry_capacity(&prices).map_err(|_| Error::Admission)
+    if !(30..=cox::DYNAMIC_MAX_ASSETS).contains(&prices.len()) { return Err(Error::Admission) }
+    crate::epoch_stage::validate_atomic_entry_capacity(&prices[..cox_epoch::BASKET_SIZE]).map_err(|_| Error::Admission)
 }
 pub fn build_successor(request: Request) -> Result<Prepared, Error> {
     if request.schema != "relative.inclusion-successor-request/v1" {
@@ -210,14 +213,13 @@ pub fn build_successor(request: Request) -> Result<Prepared, Error> {
     activation::validate_capture(&request.captured).map_err(|_| Error::Capture)?;
     let previous = UniverseVersion::from_canonical(&request.previous_canonical)
         .map_err(|_| Error::Universe)?;
-    let previous_view =
-        universe_runtime::view(&request.previous_canonical).map_err(|_| Error::Universe)?;
+    universe_runtime::validate_previous_anchor(&request.previous_canonical, request.previous_handoff.as_ref(), &request.captured.request.previous_anchor)
+        .map_err(|_| Error::Universe)?;
     let transition = &request.preparation.request;
     if !matches!(
         (previous.schema_version, transition.schema.as_str()),
         (1, "relative.inclusion-request/v1") | (2, "relative.inclusion-request/v2")
     ) || transition.previous_bindings.len() != previous.instruments.len()
-        || request.captured.request.previous_anchor != previous_view.anchor
         || request.preparation.activation_timestamp_us != request.captured.captured.timestamp_us
         || transition.previous.version != previous.version
         || transition.next.version != previous.version.checked_add(1).ok_or(Error::Universe)?
@@ -307,7 +309,7 @@ pub fn build_successor(request: Request) -> Result<Prepared, Error> {
         genesis_hash: DEVNET_GENESIS.into(),
         canonical: next.canonical_bytes().map_err(|_| Error::Universe)?,
         previous_canonical: Some(request.previous_canonical.clone()),
-        evidence: Evidence::Inclusion(request.captured.clone()),
+        evidence: if schedule.schema_version == 2 { Evidence::Prepared { admission: request.captured.clone(), predecessor_handoff: request.previous_handoff.clone() } } else { Evidence::Inclusion(request.captured.clone()) },
     };
     receipt
         .validate_for_operator(&Pubkey::new_from_array(request.operator))

@@ -62,6 +62,8 @@ pub struct Stage {
     pub anchor: Anchor,
     pub observation: Observation,
     pub work: Vec<Work>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_ids: Option<Vec<u16>>,
 }
 impl Stage {
     pub fn validate(
@@ -75,6 +77,9 @@ impl Stage {
             || self.anchor!=*anchor || self.observation.universe_digest!=anchor.universe_digest || self.observation.timestamp_us%1_000_000!=0
             || self.observation.prices_e8.len()!=anchor.assets.len() || self.work.is_empty() || self.work.len()>16 || self.work.iter().any(|work|!matches!(work,Work::Entry{pool:crate::scheduler::Pool::Epoch,..}|Work::Close{..}))
             || self.work.iter().any(|work|matches!(work,Work::Close{timestamp_ms,..} if timestamp_ms.checked_mul(1000)!=Some(self.observation.timestamp_us))) { return Err(worker::Error::Snapshot); }
+        if self.asset_ids.as_ref().is_some_and(|ids| ids.is_empty() || ids.len() > 255 || ids.iter().collect::<std::collections::BTreeSet<_>>().len() != ids.len()) {
+            return Err(worker::Error::Snapshot);
+        }
         Ok(())
     }
     pub fn timestamp(&self) -> u64 {
@@ -92,6 +97,7 @@ impl Stage {
         let mut prices = mapping
             .iter()
             .zip(&self.observation.prices_e8)
+            .filter(|(mapping, _)| self.asset_ids.as_ref().is_none_or(|ids| ids.contains(&mapping.epoch_id)))
             .map(|(mapping, price)| EpochPrice {
                 asset_id: mapping.epoch_id,
                 feed_id: mapping.epoch_feed_id,
@@ -99,6 +105,9 @@ impl Stage {
             })
             .collect::<Vec<_>>();
         prices.sort_by_key(|price| price.asset_id);
+        if self.asset_ids.as_ref().is_some_and(|ids| ids.len() != prices.len()) {
+            return Err(worker::Error::Snapshot);
+        }
         Ok(prices)
     }
     pub fn verify_snapshot(
@@ -215,6 +224,7 @@ mod tests {
         let universe = crate::transactions::dynamic_test_universe(count);
         let view = crate::universe_runtime::view(&universe.canonical_bytes().unwrap()).unwrap();
         let stage = Stage {
+            asset_ids: None,
             schema: "relative.epoch-snapshot-stage/v1".into(),
             program: key(2).to_string(),
             config: key(3).to_string(),
@@ -303,6 +313,24 @@ mod tests {
                 .validate(key(2), key(3), key(7), &stage.anchor)
                 .is_err());
         }
+    }
+    #[test]
+    fn full_global_universe_keeps_entry_snapshots_bounded_to_the_locked_basket() {
+        let (mut stage, accounts, _, _) = fixture(255);
+        let universe = crate::transactions::dynamic_test_universe(255);
+        let mapping = crate::universe_runtime::view(&universe.canonical_bytes().unwrap()).unwrap().mapping;
+        stage.asset_ids = Some((225..255).collect());
+        let prices = stage.prices(&mapping).unwrap();
+        assert_eq!(prices.len(), cox_epoch::BASKET_SIZE);
+        assert_eq!(prices.first().unwrap().asset_id, 225);
+        assert_eq!(prices.last().unwrap().asset_id, 254);
+        assert!(validate_atomic_entry_capacity(&prices).is_ok());
+        let plan = stage.plan(&accounts, key(7), None, &prices).unwrap();
+        assert!(plan.len() > 1);
+        stage.asset_ids = Some(vec![256]);
+        assert!(stage.prices(&mapping).is_err());
+        stage.asset_ids = Some(vec![225, 225]);
+        assert!(stage.validate(key(2), key(3), key(7), &stage.anchor).is_err());
     }
     #[test]
     fn entry_capacity_is_derived_from_wire_bytes_and_rejects_resumable_only_snapshots() {

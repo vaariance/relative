@@ -224,6 +224,7 @@ fn maximum_request(authority: &str) -> inclusion_pipeline::Request {
         policy,
         operator: previous.operator.to_bytes(),
         previous_canonical,
+        previous_handoff: None,
         schedule: ScheduleEvidence {
             genesis_hash: relative_publisher::rpc::DEVNET_GENESIS.into(),
             program: cox::ID.to_string(),
@@ -246,10 +247,11 @@ fn full_capacity_wide_identity_payloads_fit_explicit_operational_limits() {
         preparation: request.preparation.clone(),
         policy: request.policy.clone(),
         previous_canonical: request.previous_canonical.clone(),
+        previous_handoff: None,
         schedule: request.schedule.clone(),
         capture_request: request.captured.request.clone(),
     };
-    assert!(approved.validate().is_err());
+    approved.validate().unwrap();
     let prepared = inclusion_pipeline::build_successor(request).unwrap();
     let request_bytes = serde_json::to_vec(&prepared.request).unwrap().len();
     let prepared_bytes = serde_json::to_vec(&prepared).unwrap().len();
@@ -279,8 +281,8 @@ fn full_capacity_wide_identity_payloads_fit_explicit_operational_limits() {
         serde_json::to_vec(&prepared.request).unwrap(),
     )
     .unwrap();
-    assert!(inclusion_pipeline::prepare_file(&request_path, &directory.join("prepared.json")).is_err());
-    assert!(!directory.join("prepared.json").exists());
+    inclusion_pipeline::prepare_file(&request_path, &directory.join("prepared.json")).unwrap();
+    assert!(directory.join("prepared.json").exists());
     let journal_path = directory.join("journal.json");
     relative_publisher::journal::atomic_write(&journal_path, &stored).unwrap();
     assert_eq!(

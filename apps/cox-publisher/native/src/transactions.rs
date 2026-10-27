@@ -86,6 +86,14 @@ impl BasicAccounts {
             test_vault: None,
         }
     }
+    pub fn grow_position(&self, operator: Address, owner: Address, additional: u32) -> Result<Instruction, Error> {
+        if !(1..=8192).contains(&additional) { return Err(Error::InvalidBoundary) }
+        let target = pda(&self.program, &[b"position", self.pool.as_ref(), owner.as_ref()]);
+        Ok(instruction(self.program, "grow_dynamic_account", vec![
+            AccountMeta::new(operator, true), readonly(self.registry), writable(self.pool),
+            writable(target), readonly(SYSTEM_PROGRAM),
+        ], &additional.to_le_bytes()))
+    }
     pub fn grow_staging(
         &self,
         operator: Address,

@@ -254,14 +254,14 @@ fn full_capacity_growth_is_bounded_and_corrupted_uploads_or_cursors_cannot_resum
 }
 
 #[test]
-fn activation_rejects_account_valid_rosters_without_atomic_entry_capacity() {
+fn full_universe_activation_capacity_is_separate_from_thirty_asset_entry_capacity() {
     let mut f = Fixture::new(255);
     f.registered(true, true);
     f.allocation = f.prepared.receipt.canonical.len() + 512;
     f.pool_bytes = 32768;
     f.persisted = true;
     let previous = f.pool.methodology;
-    assert_eq!(f.plan(None).unwrap_err(), Error::Capacity);
+    assert_eq!(f.plan(None).unwrap().cursor.phase, Phase::Activate);
     assert_eq!(f.pool.methodology, previous);
     assert_eq!(f.pool.classes.len(), 31);
 }
@@ -298,4 +298,72 @@ fn sealed_methodology_with_minimal_valid_allocation_never_attempts_forbidden_gro
     f.pool_bytes = 8192;
     f.methodology.as_mut().unwrap().canonical.truncate(1);
     assert_eq!(f.plan(None).unwrap_err(), Error::Conflict);
+}
+
+fn prepared_schedule(f: &mut Fixture) {
+    let mut request = f.prepared.request.clone();
+    let mut schedule = cox::UniverseSchedule::try_deserialize(&mut request.schedule.account_data.as_slice()).unwrap();
+    schedule.schema_version = 2;
+    request.schedule.account_data.clear();
+    schedule.try_serialize(&mut request.schedule.account_data).unwrap();
+    f.prepared = inclusion_pipeline::build_successor(request).unwrap();
+}
+
+#[test]
+fn prepared_candidate_stages_after_missed_boundary_publication_and_advancing_head() {
+    let mut f = Fixture::new(31);
+    prepared_schedule(&mut f);
+    f.now_ms = 9000;
+    f.pool.last_batch = 8;
+    f.pool.sequence += 9;
+    f.pool.state_digest = [77; 32];
+    f.pool.benchmark += 100;
+    f.pool.last_prices.fill(301);
+    f.epoch_stage = true;
+    let registration = f.plan(None).unwrap();
+    assert_eq!(registration.cursor.phase, Phase::Register);
+    f.registered(true, true);
+    f.persisted = true;
+    let ready = f.plan(Some(&registration.cursor)).unwrap();
+    assert_eq!(ready.status, Status::ReadyForHandoff);
+    assert_eq!(ready.cursor.phase, Phase::ReadyForHandoff);
+    assert!(ready.instructions.is_empty());
+    assert_eq!(f.plan(Some(&ready.cursor)).unwrap().status, Status::ReadyForHandoff);
+    let next = UniverseVersion::from_canonical(&f.prepared.receipt.canonical).unwrap();
+    assert_ne!(f.pool.benchmark, next.capture.benchmark);
+    assert_ne!(f.pool.sequence, next.capture.predecessor_sequence);
+    assert_ne!(f.pool.last_prices.as_slice(), &next.capture.prices_e8[..30]);
+}
+
+#[test]
+fn prepared_candidate_recovery_reuses_uploaded_pages_and_requires_matching_cursor_and_expiry() {
+    let mut f = Fixture::new(31);
+    prepared_schedule(&mut f);
+    f.now_ms = 9000;
+    f.pool.last_batch = 8;
+    f.registered(false, false);
+    let first = f.plan(None).unwrap();
+    let page = cox::instruction::UploadScheduledMethodology::try_from_slice(&first.instructions[0].data[8..]).unwrap();
+    f.methodology.as_mut().unwrap().canonical.extend(&page.bytes);
+    f.pool.sequence += 1;
+    f.pool.state_digest[0] ^= 1;
+    let resumed = f.plan(Some(&first.cursor)).unwrap();
+    let next = cox::instruction::UploadScheduledMethodology::try_from_slice(&resumed.instructions[0].data[8..]).unwrap();
+    assert_eq!(next.offset as usize, page.bytes.len());
+    let mut forged = resumed.cursor.clone();
+    forged.successor_digest[0] ^= 1;
+    assert_eq!(f.plan(Some(&forged)).unwrap_err(), Error::Cursor);
+    f.now_ms = 11000;
+    assert_eq!(f.plan(Some(&resumed.cursor)).unwrap().status, Status::RescheduleRequired(RescheduleReason::ExpiredSchedule));
+}
+
+#[test]
+fn legacy_candidate_still_requires_its_exact_boundary_head() {
+    let mut f = Fixture::new(31);
+    f.now_ms = 9000;
+    f.pool.last_batch = 8;
+    assert_eq!(f.plan(None).unwrap().status, Status::RescheduleRequired(RescheduleReason::BoundaryAlreadyPassed));
+    f.pool.last_batch = 2;
+    f.pool.sequence += 1;
+    assert_eq!(f.plan(None).unwrap().status, Status::RescheduleRequired(RescheduleReason::BoundaryDoesNotMatchCapture));
 }

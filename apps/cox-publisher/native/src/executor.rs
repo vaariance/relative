@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use solana_hash::Hash;
+use solana_address::Address;
 use solana_instruction::Instruction;
 use std::{
     collections::BTreeSet,
@@ -55,6 +56,7 @@ pub struct Executor<S> {
     inclusion: Option<crate::inclusion_execution::Shared>,
     current_epoch_preparation: Vec<Instruction>,
     staging_preparation: Vec<Instruction>,
+    rejected_handoff: Option<(String, u64)>,
 }
 const STAGING_CAPACITY_ID: &str = "basic:staging-capacity";
 fn staging_capacity_plan(
@@ -76,7 +78,7 @@ fn staging_capacity_plan(
         .into_iter()
         .zip(sizes)
     {
-        if allocated < 8192 || allocated % 8192 != 0 || allocated > required {
+        if allocated < 8192 || allocated % 8192 != 0 || allocated > cox::dynamic_batch_space(cox::DYNAMIC_MAX_ASSETS + 1) {
             return Err(worker::Error::Storage);
         }
         if allocated < required {
@@ -89,6 +91,38 @@ fn staging_capacity_plan(
         }
     }
     Ok(instructions)
+}
+fn position_growth_instruction(accounts: &transactions::BasicAccounts, operator: Address, owner: Address, allocated: usize, required: usize) -> Result<Option<Instruction>, worker::Error> {
+    if allocated >= required { return Ok(None) }
+    accounts.grow_position(operator, owner, (required-allocated).min(8192) as u32)
+        .map(Some).map_err(|_| worker::Error::Chain)
+}
+async fn position_capacity_plan(reader: &ChainReader, state: &ChainState) -> Result<Vec<Instruction>, worker::Error> {
+    let basic = &state.basic;
+    let required = cox::dynamic_position_space(basic.pool.classes.len());
+    if basic.pool.schema_version != 5 || basic.pool.stage.is_some() || required <= 4096 {
+        return Ok(vec![]);
+    }
+    let owners: BTreeSet<_> = basic.requests.iter().filter(|request| request.status == 0)
+        .map(|request| Address::new_from_array(request.owner.to_bytes())).collect();
+    let owners: Vec<_> = owners.into_iter().collect();
+    for page in owners.chunks(100) {
+        let keys: Vec<_> = page.iter().map(|owner| Address::find_program_address(
+            &[b"position", basic.accounts.pool.as_ref(), owner.as_ref()], &reader.basic_program).0).collect();
+        let (_, rows) = reader.optional_accounts(&keys, state.slot, "confirmed").await.map_err(|_| worker::Error::Chain)?;
+        for (owner, row) in page.iter().zip(rows) {
+            let row = row.ok_or(worker::Error::Chain)?;
+            if row.owner != reader.basic_program { return Err(worker::Error::Chain) }
+            let position = cox::Position::try_deserialize(&mut row.data.as_slice()).map_err(|_| worker::Error::Chain)?;
+            if position.pool.to_bytes() != basic.accounts.pool.to_bytes() || position.owner.to_bytes() != owner.to_bytes() {
+                return Err(worker::Error::Chain);
+            }
+            if let Some(instruction) = position_growth_instruction(&basic.accounts, reader.operator, *owner, row.data.len(), required)? {
+                return Ok(vec![instruction]);
+            }
+        }
+    }
+    Ok(vec![])
 }
 pub(crate) fn validate_methodology_policy(
     methodology: &cox::Methodology,
@@ -287,6 +321,7 @@ impl<S: DraftSigner> Executor<S> {
             inclusion: None,
             current_epoch_preparation: vec![],
             staging_preparation: vec![],
+            rejected_handoff: None,
         })
     }
     pub fn with_chain_changes(
@@ -409,7 +444,7 @@ impl<S: DraftSigner> Executor<S> {
             .ok_or(worker::Error::Storage)?;
         if let Some(record) = archive
             .read(state.basic.pool.sequence)
-            .map_err(|_| worker::Error::Storage)?
+            .map_err(|error| { eprintln!("Publication archive read failed: {error:?}"); worker::Error::Storage })?
         {
             return if record.state_digest == hex::encode(state.basic.pool.state_digest) {
                 Ok(())
@@ -455,7 +490,7 @@ impl<S: DraftSigner> Executor<S> {
                 state.basic.pool.sequence,
                 state.basic.pool.state_digest,
             )
-            .map_err(|_| worker::Error::Storage)
+            .map_err(|error| { eprintln!("Publication archive preservation failed: {error:?}"); worker::Error::Storage })
     }
     fn adopt_committed_universe(&mut self, state: &ChainState) -> Result<(), worker::Error> {
         let Some((current, root)) = self.dynamic.as_ref() else {
@@ -487,9 +522,11 @@ impl<S: DraftSigner> Executor<S> {
             if state.basic.methodology.digest != expected.digest {
                 return Err(worker::Error::StaleDraft);
             }
-            let observed = crate::universe_runtime::view(&state.basic.methodology.canonical)
+            let mut observed = crate::universe_runtime::view(&state.basic.methodology.canonical)
                 .map_err(|_| worker::Error::Snapshot)?;
+            observed.anchor = expected.anchor.clone();
             if observed != *expected
+                || self.anchor != expected.anchor
                 || state.basic.pool.schema_version != 5
                 || state.basic.pool.origin.checked_mul(1_000_000) != Some(root.timestamp_us)
                 || state.epoch_config.origin_benchmark != root.benchmark as u128
@@ -768,18 +805,43 @@ impl<S: DraftSigner> Executor<S> {
                 .as_ref()
                 .ok_or(worker::Error::Snapshot)?
                 .validate(observation)?;
+            let mut selected = work.iter().filter(|work| !is_basic(work)).cloned().collect::<Vec<_>>();
+            let selected_assets = |selected: &[Work]| -> Result<Vec<u16>, worker::Error> {
+                let mut ids = BTreeSet::new();
+                for epoch in &state.epochs {
+                    if !epoch_selected(selected, epoch.epoch.opens_at) { continue }
+                    let current = epoch.epoch.state.as_ref().ok_or(worker::Error::Chain)?;
+                    if selected.iter().any(|item| matches!(item, Work::Close { .. }) && epoch_selected(std::slice::from_ref(item), epoch.epoch.opens_at)) {
+                        ids.extend(current.universe().iter().map(|asset| asset.id));
+                    } else {
+                        for lot in &epoch.lots {
+                            if selected.iter().any(|item| id(item) == format!("epoch:{}:{}", epoch.epoch.opens_at, lot.nonce)) {
+                                ids.extend(lot.state.as_ref().ok_or(worker::Error::Chain)?.basket());
+                            }
+                        }
+                    }
+                }
+                if ids.is_empty() { return Err(worker::Error::Snapshot) }
+                Ok(ids.into_iter().collect())
+            };
+            let mut asset_ids = selected_assets(&selected)?;
+            let entry = selected.iter().all(|item| matches!(item, Work::Entry { .. }));
+            let capacity_prices = |ids: &[u16]| ids.iter().map(|id| self.mapping.iter().find(|mapping| mapping.epoch_id == *id)
+                .map(|mapping| EpochPrice { asset_id: *id, feed_id: mapping.epoch_feed_id, value: 1 }).ok_or(worker::Error::Snapshot)).collect::<Result<Vec<_>, _>>();
+            if entry && crate::epoch_stage::validate_atomic_entry_capacity(&capacity_prices(&asset_ids)?).is_err() {
+                selected.truncate(1);
+                asset_ids = selected_assets(&selected)?;
+                crate::epoch_stage::validate_atomic_entry_capacity(&capacity_prices(&asset_ids)?)?;
+            }
             let stage = crate::epoch_stage::Stage {
+                asset_ids: Some(asset_ids),
                 schema: "relative.epoch-snapshot-stage/v1".into(),
                 program: self.reader.epoch_program.to_string(),
                 config: self.reader.epoch_config.to_string(),
                 operator: self.reader.operator.to_string(),
                 anchor: self.anchor.clone(),
                 observation: observation.clone(),
-                work: work
-                    .iter()
-                    .filter(|work| !is_basic(work))
-                    .cloned()
-                    .collect(),
+                work: selected,
             };
             stage.validate(
                 self.reader.epoch_program,
@@ -1286,6 +1348,12 @@ fn trim_optional_tail(
     }
     !instructions.is_empty()
 }
+fn without_handoff(instructions: &[Instruction], program: solana_address::Address) -> Option<Vec<Instruction>> {
+    let ordinary = instructions.iter().filter(|instruction| instruction.program_id != program || ![
+        b"global:begin_universe_handoff".as_slice(), b"global:append_universe_handoff_prices".as_slice(), b"global:activate_prepared_universe".as_slice(),
+    ].iter().any(|name| instruction.data.get(..8) == Some(&Sha256::digest(name)[..8]))).cloned().collect::<Vec<_>>();
+    (ordinary.len() != instructions.len()).then_some(ordinary)
+}
 fn critical_digest(state: &ChainState) -> [u8; 32] {
     let mut hash = Sha256::new();
     let basic = &state.basic;
@@ -1390,6 +1458,13 @@ fn pending_valid(operator: solana_address::Address, pending: &PendingTransaction
             .verify_strict(&pending.signed_bytes[..at], &signature)
             .is_ok()
 }
+fn pending_has_handoff(pending: &PendingTransaction, program: solana_address::Address) -> bool {
+    let Some(bytes) = pending.signed_bytes.get(..pending.signed_bytes.len().saturating_sub(64)) else { return false };
+    let Ok(message) = solana_message::v1::deserialize(bytes) else { return false };
+    message.instructions.iter().any(|instruction| message.account_keys.get(instruction.program_id_index as usize) == Some(&program)
+        && [b"global:begin_universe_handoff".as_slice(), b"global:append_universe_handoff_prices".as_slice(), b"global:activate_prepared_universe".as_slice()]
+            .iter().any(|name| instruction.data.get(..8) == Some(&Sha256::digest(name)[..8])))
+}
 impl<S: DraftSigner> worker::Chain for Executor<S> {
     fn price_timestamp_ceiling_ms(&self, wall_ms: u64) -> Result<u64, worker::Error> {
         let timestamp = self
@@ -1487,6 +1562,9 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
     async fn authoritative_work(&mut self, now_ms: u64) -> Result<Vec<Work>, worker::Error> {
         self.now_ms = now_ms;
         let state = self.read_state().await?;
+        if let Some(control) = &self.inclusion {
+            crate::inclusion_execution::recover_handoff_commit(control, &self.reader.rpc, &state).await?;
+        }
         self.adopt_committed_universe(&state)?;
         self.validate_anchor(&state)?;
         if let Some(changes) = &self.chain_changes {
@@ -1598,13 +1676,23 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
             }
         }
         if let Some(control) = &self.inclusion {
-            let inclusion_work =
-                crate::inclusion_execution::observe(control, &self.reader.rpc, &state, now_ms)
-                    .await?;
+            let optional = control.lock().map_err(|_| worker::Error::Storage)?.prepared_mode();
+            let inclusion_work = match crate::inclusion_execution::observe(control, &self.reader.rpc, &state, now_ms).await {
+                Ok(work) => work,
+                Err(error) if optional => {
+                    eprintln!("Inclusion proposal unavailable; ordinary work continues: {error:?}");
+                    let _ = control.lock().map_err(|_| worker::Error::Storage)?.reject_handoff();
+                    vec![]
+                }
+                Err(error) => return Err(error),
+            };
             crate::inclusion_execution::filter_work(control, now_ms, &mut work)?;
             work.extend(inclusion_work.into_iter().filter(|work|!matches!(work,Work::Maintenance{id,..} if id==crate::inclusion_execution::ROLLOUT_ID && self.epoch_stage.is_some())));
         }
         self.staging_preparation = staging_capacity_plan(&state, self.reader.operator)?;
+        if self.staging_preparation.is_empty() {
+            self.staging_preparation = position_capacity_plan(&self.reader, &state).await?;
+        }
         if !self.staging_preparation.is_empty() {
             work.retain(|item| matches!(item, Work::Maintenance { .. }));
             work.push(Work::Maintenance {
@@ -1727,6 +1815,11 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
             }
         } else if let Some(observation) = observation {
             let mut instructions = self.publication_instructions(&state, work, observation)?;
+            if let (Some(control), Some(archive)) = (&self.inclusion, &self.snapshot_archive) {
+                if let Err(error) = crate::inclusion_execution::attach_handoff_begin(control, &state, self.reader.operator, observation, archive, self.now_ms, &mut instructions) {
+                    eprintln!("Optional inclusion handoff deferred: {error:?}");
+                }
+            }
             if work.iter().any(|item| !is_basic(item)) {
                 self.existing_epoch_snapshots(
                     &mut instructions,
@@ -1744,7 +1837,17 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
             {
                 return Err(worker::Error::Chain);
             }
-            if work.iter().any(is_basic)
+            let handoff = if work.iter().any(is_basic) {
+                if let Some(control) = &self.inclusion {
+                    match crate::inclusion_execution::handoff_maintenance(control, &self.reader.rpc, &state, self.reader.operator).await {
+                        Ok(instructions) => instructions,
+                        Err(error) => { eprintln!("Optional inclusion prices deferred: {error:?}"); None }
+                    }
+                } else { None }
+            } else { None };
+            if let Some(instructions) = handoff {
+                instructions
+            } else if work.iter().any(is_basic)
                 && state
                     .basic
                     .batch
@@ -1762,9 +1865,25 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
                 ))?
             }
         };
+        if let Some(control) = &self.inclusion {
+            if self.epoch_stage.is_none() {
+            if let Err(error) = crate::inclusion_execution::attach_handoff_commit(control, &self.reader.rpc, &state, self.reader.operator, self.now_ms, &mut instructions).await {
+                eprintln!("Optional inclusion activation deferred: {error:?}");
+            }
+            }
+        }
         if instructions.is_empty() {
             return Err(worker::Error::Chain);
         }
+        let mut ordinary_fallback = without_handoff(&instructions, self.reader.basic_program);
+        if ordinary_fallback.as_ref().is_some_and(Vec::is_empty) {
+            ordinary_fallback = Some(if state.basic.batch.as_ref().is_some_and(|batch| batch.phase == 4) {
+                self.resume_dynamic_prices(&state)?
+            } else {
+                chain_error(plan_maintenance_for(&state, self.reader.operator, self.now_ms / 1000, self.max_operations, work))?
+            });
+        }
+        let mut optional_rejected = false;
         let latest = chain_error(
             self.reader
                 .rpc
@@ -1823,6 +1942,11 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
                     .pointer("/value/err")
                     .is_some_and(|value| value.is_null())
             {
+                if let Some(fallback) = ordinary_fallback.take().filter(|fallback| !fallback.is_empty()) {
+                    instructions = fallback;
+                    optional_rejected = true;
+                    continue;
+                }
                 eprintln!(
                     "Publisher simulation rejected: {}",
                     result
@@ -1837,6 +1961,11 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
                     );
                 }
                 return Err(worker::Error::Simulation);
+            }
+            if optional_rejected {
+                if let Some(control) = &self.inclusion {
+                    control.lock().map_err(|_| worker::Error::Storage)?.reject_handoff()?;
+                }
             }
             break transaction;
         };
@@ -1942,7 +2071,11 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
         if !pending_valid(self.reader.operator, pending) {
             return Err(worker::Error::Signer);
         }
-        let result=chain_error(self.reader.rpc.call("sendTransaction",json!([STANDARD.encode(&pending.signed_bytes),{"encoding":"base64","skipPreflight":false,"preflightCommitment":"confirmed","maxRetries":0}])).await)?;
+        let result = self.reader.rpc.call("sendTransaction",json!([STANDARD.encode(&pending.signed_bytes),{"encoding":"base64","skipPreflight":false,"preflightCommitment":"confirmed","maxRetries":0}])).await;
+        if matches!(result, Err(crate::rpc::Error::Rejected(_))) && pending_has_handoff(pending, self.reader.basic_program) {
+            self.rejected_handoff = Some((pending.signature.clone(), now()?.saturating_add(6)));
+        }
+        let result = chain_error(result)?;
         if result.as_str() != Some(pending.signature.as_str()) {
             return Err(worker::Error::Chain);
         }
@@ -1967,6 +2100,9 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
         let status = result.pointer("/value/0").ok_or(worker::Error::Chain)?;
         if !status.is_null() {
             if status.get("err").is_some_and(|error| !error.is_null()) {
+                if pending_has_handoff(pending, self.reader.basic_program) {
+                    if let Some(control) = &self.inclusion { control.lock().map_err(|_| worker::Error::Storage)?.reject_handoff()?; }
+                }
                 return Ok(TransactionStatus::Expired);
             }
             if matches!(
@@ -1976,6 +2112,14 @@ impl<S: DraftSigner> worker::Chain for Executor<S> {
                 return Ok(TransactionStatus::Accepted);
             }
             return Ok(TransactionStatus::Pending);
+        }
+        if let Some((signature, until)) = &self.rejected_handoff {
+            if *signature == pending.signature {
+                if now()? < *until { return Ok(TransactionStatus::Pending) }
+                if let Some(control) = &self.inclusion { control.lock().map_err(|_| worker::Error::Storage)?.reject_handoff()?; }
+                self.rejected_handoff = None;
+                return Ok(TransactionStatus::Expired);
+            }
         }
         let height = chain_error(
             self.reader
@@ -2063,6 +2207,8 @@ mod tests {
         state.basic.staging_bytes = Some([16384, 16384]);
         assert!(staging_capacity_plan(&state, operator).unwrap().is_empty());
         state.basic.staging_bytes = Some([24576, 16384]);
+        assert!(staging_capacity_plan(&state, operator).unwrap().is_empty());
+        state.basic.staging_bytes = Some([49152, 16384]);
         assert_eq!(
             staging_capacity_plan(&state, operator),
             Err(worker::Error::Storage)
@@ -2078,6 +2224,26 @@ mod tests {
                 8192
             );
         }
+    }
+    #[tokio::test]
+    async fn position_growth_is_bounded_and_idle_or_accepted_work_does_not_read_accounts() {
+        let executor = dynamic_executor(61);
+        let mut state = crate::chain::tests::dynamic_state(61);
+        assert!(position_capacity_plan(&executor.reader, &state).await.unwrap().is_empty());
+        state.basic.pool.stage = Some(anchor_lang::prelude::Pubkey::new_unique());
+        assert!(position_capacity_plan(&executor.reader, &state).await.unwrap().is_empty());
+        assert_eq!(executor.reader.rpc.usage().unwrap().physical_http_requests, 0);
+        let owner = Address::new_from_array([99;32]);
+        let required = cox::dynamic_position_space(256);
+        let mut allocated = 4096;
+        while allocated < required {
+            let instruction = position_growth_instruction(&state.basic.accounts, executor.reader.operator, owner, allocated, required).unwrap().unwrap();
+            let growth = u32::from_le_bytes(instruction.data[8..12].try_into().unwrap()) as usize;
+            assert!((1..=8192).contains(&growth));
+            assert_eq!(instruction.accounts[3].pubkey, Address::find_program_address(&[b"position",state.basic.accounts.pool.as_ref(),owner.as_ref()], &state.basic.accounts.program).0);
+            allocated += growth;
+        }
+        assert!(position_growth_instruction(&state.basic.accounts, executor.reader.operator, owner, allocated, required).unwrap().is_none());
     }
     #[test]
     fn local_rehearsal_clock_is_scoped_and_restores_wall_time() {
@@ -2263,6 +2429,7 @@ mod tests {
         assert_eq!(executor.mapping, initial.mapping);
         state.basic.pool.stage = None;
         let stage = crate::epoch_stage::Stage {
+                asset_ids: None,
             schema: "relative.epoch-snapshot-stage/v1".into(),
             program: executor.reader.epoch_program.to_string(),
             config: executor.reader.epoch_config.to_string(),
@@ -2423,6 +2590,7 @@ mod tests {
             eligible_after_ms: 14_401_000,
         }];
         let stage = crate::epoch_stage::Stage {
+                asset_ids: None,
             schema: "relative.epoch-snapshot-stage/v1".into(),
             program: executor.reader.epoch_program.to_string(),
             config: executor.reader.epoch_config.to_string(),

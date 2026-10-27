@@ -454,3 +454,398 @@ fn schema_two_successor_receipts_preserve_crypto_zero_without_reinterpreting_leg
     assert_eq!(active.original_prices[..30], legacy.original_prices);
     assert_eq!(legacy.mapping[29].basic_id, 29);
 }
+
+fn handoff_genesis() -> Receipt {
+    use relative_publisher::universe_runtime::{Evidence, FreshGenesisRequest};
+    let (_, next) = receipts();
+    let Evidence::Inclusion(capture) = next.evidence else {
+        unreachable!()
+    };
+    let mapping = universe_runtime::view(&next.canonical)
+        .unwrap()
+        .mapping
+        .into_iter()
+        .enumerate()
+        .map(|(index, mut mapping)| {
+            mapping.basic_id = index as u16 + 1;
+            mapping
+        })
+        .collect();
+    universe_runtime::prepare_fresh_genesis(FreshGenesisRequest {
+        schema: "relative.fresh-genesis-universe-request/v1".into(),
+        basic_program: cox::ID.to_string(),
+        basic_pool_id: 7,
+        operator: UniverseVersion::from_canonical(&next.canonical)
+            .unwrap()
+            .operator
+            .to_string(),
+        policy_digest: [12; 32],
+        universe_digest: [13; 32],
+        mapping,
+        capture: capture.captured,
+    })
+    .unwrap()
+}
+
+fn handoff_successor(
+    previous: &Receipt,
+    count: usize,
+    admission_time: u64,
+    handoff_time: u64,
+    price: i64,
+) -> Receipt {
+    use anchor_lang::{prelude::Pubkey, AccountSerialize};
+    use relative_publisher::{
+        activation,
+        inclusion_pipeline::Commitment,
+        origin,
+        universe_runtime::{Evidence, HandoffConfirmation},
+    };
+    let old = UniverseVersion::from_canonical(&previous.canonical).unwrap();
+    let previous_view = previous.validate().unwrap();
+    let assets = (0..count)
+        .map(|index| origin::Asset {
+            id: old.instruments.get(index).map_or_else(
+                || format!("ASSET{index}"),
+                |instrument| instrument.symbol.clone(),
+            ),
+            feed_id: index as u32 + 1,
+        })
+        .collect::<Vec<_>>();
+    let (bytes, signers) = support::signed(admission_time * 1_000_000, count, price);
+    let admission = activation::verify_capture(
+        activation::Request {
+            schema: "relative.activation-capture-request/v1".into(),
+            previous_anchor: previous_view.anchor,
+            next_universe_digest: [count as u8; 32],
+            fullnext_assets: assets.clone(),
+            activation_timestamp_us: admission_time * 1_000_000,
+            max_feed_age_ms: 60_000,
+        },
+        (admission_time - 1) * 1_000_000,
+        &bytes,
+        &signers,
+        admission_time,
+    )
+    .unwrap();
+    let mut next = UniverseVersion::draft(
+        0,
+        old.pool,
+        old.operator,
+        old.source_methodology,
+        old.version + 1,
+        old.digest,
+        count as u16,
+        cox::UniverseCapture {
+            price_universe_digest: admission.next_anchor.universe_digest,
+            timestamp: admission_time,
+            benchmark: admission.old_benchmark,
+            prices_e8: admission
+                .captured
+                .assets
+                .iter()
+                .map(|asset| asset.price_e8)
+                .collect(),
+            signed_payload_digest: hex::decode(&admission.captured.signed_payload_sha256)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+            trusted_storage_digest: universe_runtime::trusted_storage_digest(&admission.captured)
+                .unwrap(),
+            predecessor_sequence: old.capture.predecessor_sequence + 1,
+            predecessor_state_digest: [8; 32],
+        },
+    )
+    .unwrap();
+    next.schema_version = 2;
+    next.instruments = old.instruments.clone();
+    for (index, asset) in admission
+        .captured
+        .assets
+        .iter()
+        .enumerate()
+        .skip(next.instruments.len())
+    {
+        next.instruments.push(cox::Instrument {
+            stable_id: asset.id.to_ascii_lowercase(),
+            symbol: asset.id.clone(),
+            class_id: index as u16 + 1,
+            epoch_id: index as u16,
+            pyth_pro_feed_id: asset.feed_id,
+            pyth_core_feed_id: [index as u8 + 1; 32],
+            token_mint: None,
+            original_price_e8: asset.price_e8,
+            original_benchmark: admission.old_benchmark,
+            original_timestamp: admission_time,
+        });
+    }
+    let canonical = next.canonical_bytes().unwrap();
+    let next = UniverseVersion::from_canonical(&canonical).unwrap();
+    let (mut bytes, signers) = support::signed(handoff_time * 1_000_000, count, price + 100);
+    {
+        use ed25519_dalek::{Signer, SigningKey};
+        let at = 102 + 14 + (count - 1) * 36 + 6;
+        bytes[at..at + 8].copy_from_slice(&(price + 300).to_le_bytes());
+        let signature = SigningKey::from_bytes(&[9; 32]).sign(&bytes[102..]);
+        bytes[4..68].copy_from_slice(&signature.to_bytes());
+    }
+    let capture = origin::verify_capture(
+        origin::Request {
+            schema: "relative.origin-request/v1".into(),
+            assets,
+            max_feed_age_ms: 60_000,
+        },
+        &bytes,
+        &signers,
+        handoff_time,
+    )
+    .unwrap();
+    let old_anchor = &admission.request.previous_anchor;
+    let benchmark = cox_math::geometric::geometric_level(
+        &old_anchor
+            .assets
+            .iter()
+            .map(|asset| asset.origin_price_e8)
+            .collect::<Vec<_>>(),
+        &capture.assets[..old.instruments.len()]
+            .iter()
+            .map(|asset| asset.price_e8)
+            .collect::<Vec<_>>(),
+        old_anchor.benchmark,
+    )
+    .unwrap();
+    let (address, bump) = Pubkey::find_program_address(
+        &[b"universe-handoff", old.pool.as_ref(), &next.digest],
+        &cox::ID,
+    );
+    let row = cox::UniverseHandoff {
+        schema_version: 1,
+        bump,
+        pool: old.pool,
+        schedule: Pubkey::find_program_address(
+            &[
+                b"universe-schedule",
+                old.pool.as_ref(),
+                &next.version.to_le_bytes(),
+            ],
+            &cox::ID,
+        )
+        .0,
+        methodology: Pubkey::find_program_address(&[b"methodology", &next.digest], &cox::ID).0,
+        predecessor_sequence: 10,
+        predecessor_state_digest: [7; 32],
+        sequence: 11,
+        snapshot_digest: [8; 32],
+        timestamp: handoff_time,
+        benchmark,
+        accepted_at: handoff_time + 1,
+        effective_from: handoff_time + 2,
+        committed_state_digest: [9; 32],
+        prices_e8: capture.assets.iter().map(|asset| asset.price_e8).collect(),
+    };
+    let mut account_data = vec![];
+    row.try_serialize(&mut account_data).unwrap();
+    let predecessor_handoff = match &previous.evidence {
+        Evidence::Handoff { handoff, .. } => Some(handoff.clone()),
+        _ => None,
+    };
+    Receipt {
+        schema: previous.schema.clone(),
+        genesis_hash: previous.genesis_hash.clone(),
+        canonical,
+        previous_canonical: Some(previous.canonical.clone()),
+        evidence: Evidence::Handoff {
+            admission,
+            handoff: HandoffConfirmation {
+                genesis_hash: previous.genesis_hash.clone(),
+                program: cox::ID.to_string(),
+                address: address.to_string(),
+                owner: cox::ID.to_string(),
+                slot: 100,
+                commitment: Commitment::Confirmed,
+                account_data,
+                capture,
+            },
+            predecessor_handoff,
+        },
+    }
+}
+
+#[test]
+fn sequential_handoffs_keep_admission_origins_and_use_confirmed_financial_anchors() {
+    use relative_publisher::universe_runtime::Evidence;
+    let first = handoff_genesis();
+    let second = handoff_successor(&first, 32, 7, 10, 400);
+    let third = handoff_successor(&second, 61, 15, 20, 700);
+    let initial = first.validate().unwrap();
+    let next = second.validate().unwrap();
+    let last = third.validate().unwrap();
+    assert_eq!(second.registry_effective_from().unwrap(), 12);
+    assert_eq!(third.registry_effective_from().unwrap(), 22);
+    assert_eq!(next.anchor.timestamp_us, 10_000_000);
+    assert_eq!(next.original_timestamps[31], 7);
+    assert_eq!(next.original_prices[31], 400);
+    assert_eq!(next.anchor.assets[31].origin_price_e8, 700);
+    assert_eq!(&last.original_prices[..32], &next.original_prices);
+    assert_eq!(&last.original_timestamps[..32], &next.original_timestamps);
+    assert_eq!(last.original_timestamps[32], 15);
+    assert_eq!(last.anchor.timestamp_us, 20_000_000);
+    assert_eq!(
+        third.captured_observation().unwrap().timestamp_us,
+        20_000_000
+    );
+    let mut candidate = third.clone();
+    let Evidence::Handoff {
+        admission,
+        predecessor_handoff,
+        ..
+    } = candidate.evidence
+    else {
+        unreachable!()
+    };
+    candidate.evidence = Evidence::Prepared {
+        admission,
+        predecessor_handoff,
+    };
+    assert_eq!(
+        candidate.validate().unwrap().anchor.timestamp_us,
+        15_000_000
+    );
+    assert!(candidate.registry_effective_from().is_err());
+    let root = fs::canonicalize(std::env::temp_dir()).unwrap().join(format!(
+        "relative-handoff-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    first.persist(&root).unwrap();
+    second.persist(&root).unwrap();
+    third.persist(&root).unwrap();
+    for receipt in [&first, &second, &second, &third, &third] {
+        assert_eq!(
+            universe_runtime::reconcile_committed(&root, &receipt.canonical, &initial.anchor)
+                .unwrap(),
+            receipt.validate().unwrap()
+        );
+    }
+    assert_eq!(
+        universe_runtime::initial_receipt(&root, &third.canonical).unwrap(),
+        first
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn handoff_receipts_reject_unconfirmed_identity_prices_and_missing_predecessor_proof() {
+    use anchor_lang::{AccountDeserialize, AccountSerialize};
+    use relative_publisher::universe_runtime::Evidence;
+    let first = handoff_genesis();
+    let next = handoff_successor(&first, 32, 7, 10, 400);
+    for mutation in 0..10 {
+        let mut changed = next.clone();
+        let Evidence::Handoff { handoff, .. } = &mut changed.evidence else {
+            unreachable!()
+        };
+        match mutation {
+            0 => handoff.genesis_hash = "other".into(),
+            1 => handoff.slot = 0,
+            2 => handoff.address = cox::ID.to_string(),
+            3 => handoff.owner = anchor_lang::prelude::Pubkey::new_unique().to_string(),
+            4 => handoff.capture.raw_signed_payload_hex.push_str("00"),
+            _ => {
+                let mut row =
+                    cox::UniverseHandoff::try_deserialize(&mut handoff.account_data.as_slice())
+                        .unwrap();
+                match mutation {
+                    5 => row.effective_from = 0,
+                    6 => row.committed_state_digest = [0; 32],
+                    7 => row.benchmark += 1,
+                    8 => row.prices_e8.pop().map(|_| ()).unwrap(),
+                    _ => row.timestamp += 1,
+                };
+                handoff.account_data.clear();
+                row.try_serialize(&mut handoff.account_data).unwrap();
+            }
+        }
+        assert!(changed.validate().is_err(), "mutation {mutation}");
+    }
+    let mut third = handoff_successor(&next, 61, 15, 20, 700);
+    let Evidence::Handoff {
+        predecessor_handoff,
+        ..
+    } = &mut third.evidence
+    else {
+        unreachable!()
+    };
+    *predecessor_handoff = None;
+    assert!(third.validate().is_err());
+}
+
+#[test]
+fn handoff_recovery_rebases_and_preserves_prepared_sidecar_history() {
+    use relative_publisher::{benchmark::History, journal::FileHistory};
+    let first = handoff_genesis();
+    let next = handoff_successor(&first, 32, 7, 10, 400);
+    let initial = first.validate().unwrap();
+    let active = next.validate().unwrap();
+    let admission = universe_runtime::view(&next.canonical).unwrap();
+    let root = fs::canonicalize(std::env::temp_dir()).unwrap().join(format!(
+        "relative-rebase-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    first.persist(&root).unwrap();
+    next.persist(&root).unwrap();
+    let mut history = FileHistory {
+        directory: root.join("prices"),
+    };
+    history.activate(&initial.anchor).unwrap();
+    history
+        .append(&first.captured_observation().unwrap())
+        .unwrap();
+    let (mut latest, _) = support::signed(12_000_000, 32, 600);
+    let candidate = relative_publisher::benchmark::Observation {
+        universe_digest: admission.anchor.universe_digest,
+        timestamp_us: 12_000_000,
+        benchmark: admission.anchor.benchmark * 600 / 400,
+        prices_e8: vec![600; 32],
+        signed_payload: std::mem::take(&mut latest),
+    };
+    history
+        .stage_observation(&admission.anchor, &candidate)
+        .unwrap();
+    universe_runtime::reconcile_committed(&root, &next.canonical, &initial.anchor).unwrap();
+    let resumed = history.latest().unwrap().unwrap();
+    assert_eq!(resumed.timestamp_us, 12_000_000);
+    assert_eq!(
+        resumed.benchmark,
+        cox_math::geometric::geometric_level(
+            &active
+                .anchor
+                .assets
+                .iter()
+                .map(|asset| asset.origin_price_e8)
+                .collect::<Vec<_>>(),
+            &vec![600; 32],
+            active.anchor.benchmark
+        )
+        .unwrap()
+    );
+    assert_ne!(resumed.benchmark, candidate.benchmark);
+    assert_eq!(history.active_anchor().unwrap(), Some(active.anchor));
+    assert!(root
+        .join("prices/prepared-admission")
+        .join(format!(
+            "{}-7000000",
+            hex::encode(admission.anchor.universe_digest)
+        ))
+        .join("anchor.json")
+        .exists());
+    universe_runtime::reconcile_committed(&root, &next.canonical, &initial.anchor).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}

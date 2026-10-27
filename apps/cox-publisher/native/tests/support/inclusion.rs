@@ -141,6 +141,7 @@ pub fn request_with_count(count: usize) -> Request {
         policy,
         operator: previous.operator.to_bytes(),
         previous_canonical: first.canonical,
+        previous_handoff: None,
         schedule: ScheduleEvidence {
             genesis_hash: relative_publisher::rpc::DEVNET_GENESIS.into(),
             program: cox::ID.to_string(),

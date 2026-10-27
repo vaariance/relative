@@ -193,7 +193,7 @@ impl Archive {
             || state.manifest != publication.manifest_digest
             || state.snapshot != publication.snapshot_digest
             || !valid_prices.contains(&state.prices.len())
-            || bytes.len() != expected_bytes
+            || if dynamic { bytes.len() < expected_bytes } else { bytes.len() != expected_bytes }
             || state.references.len() != state.prices.len() + 1
             || state.classes.len() != state.prices.len() + 1
             || state.prices.len() != publication.prices.len()
@@ -716,7 +716,8 @@ mod tests {
         wrong.state_preimage[end - 32..].fill(0);
         wrong.state_digest = Sha256::digest(&wrong.state_preimage).into();
         assert_eq!(check(&wrong, bytes.len()), Err(Error::State));
-        assert_eq!(check(&original, bytes.len() + 8192), Err(Error::State));
+        assert_eq!(check(&original, bytes.len() + 8192), Ok(()));
+        assert_eq!(check(&original, cox::dynamic_batch_space(256) + 8192), Err(Error::Identity));
         let oversized = dynamic_fixture(&archive, 256);
         assert_eq!(
             archive

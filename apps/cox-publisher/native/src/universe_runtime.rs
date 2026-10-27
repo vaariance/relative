@@ -28,6 +28,254 @@ pub struct View {
 pub enum Evidence {
     Genesis(origin::Captured),
     Inclusion(activation::Captured),
+    Prepared {
+        admission: activation::Captured,
+        predecessor_handoff: Option<HandoffConfirmation>,
+    },
+    Handoff {
+        admission: activation::Captured,
+        handoff: HandoffConfirmation,
+        predecessor_handoff: Option<HandoffConfirmation>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HandoffConfirmation {
+    pub genesis_hash: String,
+    pub program: String,
+    pub address: String,
+    pub owner: String,
+    pub slot: u64,
+    pub commitment: crate::inclusion_pipeline::Commitment,
+    pub account_data: Vec<u8>,
+    pub capture: origin::Captured,
+}
+impl HandoffConfirmation {
+    pub fn validate(&self, canonical: &[u8]) -> Result<Anchor, Error> {
+        use anchor_lang::{prelude::Pubkey, AccountDeserialize};
+        let universe = UniverseVersion::from_canonical(canonical).map_err(|_| Error::Manifest)?;
+        let program: Pubkey = self.program.parse().map_err(|_| Error::Evidence)?;
+        let address: Pubkey = self.address.parse().map_err(|_| Error::Evidence)?;
+        let (expected, bump) = Pubkey::find_program_address(
+            &[
+                b"universe-handoff",
+                universe.pool.as_ref(),
+                &universe.digest,
+            ],
+            &program,
+        );
+        let methodology =
+            Pubkey::find_program_address(&[b"methodology", &universe.digest], &program).0;
+        let schedule = Pubkey::find_program_address(
+            &[
+                b"universe-schedule",
+                universe.pool.as_ref(),
+                &universe.version.to_le_bytes(),
+            ],
+            &program,
+        )
+        .0;
+        if self.genesis_hash != crate::rpc::protocol_genesis()
+            || program != cox::ID
+            || self.owner != program.to_string()
+            || address != expected
+            || self.slot == 0
+            || self.account_data.len() > 8192
+        {
+            return Err(Error::Evidence);
+        }
+        let row = cox::UniverseHandoff::try_deserialize(&mut self.account_data.as_slice())
+            .map_err(|_| Error::Evidence)?;
+        origin::validate_capture(&self.capture).map_err(|_| Error::Evidence)?;
+        if row.schema_version != 1
+            || row.bump != bump
+            || row.pool != universe.pool
+            || row.methodology != methodology
+            || row.schedule != schedule
+            || row.sequence
+                != row
+                    .predecessor_sequence
+                    .checked_add(1)
+                    .ok_or(Error::Evidence)?
+            || row.predecessor_state_digest == [0; 32]
+            || row.snapshot_digest == [0; 32]
+            || row.committed_state_digest == [0; 32]
+            || row.timestamp < universe.capture.timestamp
+            || row.timestamp.checked_mul(1_000_000) != Some(self.capture.timestamp_us)
+            || row.effective_from == 0
+            || row.effective_from < row.timestamp
+            || row.accepted_at < row.timestamp
+            || row.accepted_at > row.timestamp.checked_add(5).ok_or(Error::Evidence)?
+            || row.effective_from < row.accepted_at
+            || row.benchmark <= 0
+            || row.prices_e8.len() != universe.instruments.len()
+            || self.capture.assets.len() != universe.instruments.len()
+            || universe
+                .instruments
+                .iter()
+                .zip(&self.capture.assets)
+                .zip(&row.prices_e8)
+                .any(|((instrument, asset), price)| {
+                    instrument.symbol != asset.id
+                        || instrument.pyth_pro_feed_id != asset.feed_id
+                        || *price == 0
+                        || asset.price_e8 != *price
+                })
+        {
+            return Err(Error::Evidence);
+        }
+        let mut anchor = view(canonical)?.anchor;
+        anchor.timestamp_us = self.capture.timestamp_us;
+        anchor.benchmark = row.benchmark;
+        for (asset, price) in anchor.assets.iter_mut().zip(row.prices_e8) {
+            asset.origin_price_e8 = price;
+        }
+        Ok(anchor)
+    }
+}
+
+pub fn view_with_handoff(canonical: &[u8], handoff: &HandoffConfirmation) -> Result<View, Error> {
+    let mut view = view(canonical)?;
+    view.anchor = handoff.validate(canonical)?;
+    Ok(view)
+}
+
+pub fn validate_previous_anchor(
+    canonical: &[u8],
+    handoff: Option<&HandoffConfirmation>,
+    expected: &Anchor,
+) -> Result<(), Error> {
+    let view = match handoff {
+        Some(handoff) => view_with_handoff(canonical, handoff)?,
+        None => view(canonical)?,
+    };
+    if view.anchor != *expected {
+        return Err(Error::Lineage);
+    }
+    Ok(())
+}
+
+fn rebase_handoff_observation(
+    receipt: &Receipt,
+    anchor: &Anchor,
+    observation: Observation,
+) -> Result<Observation, Error> {
+    let Evidence::Handoff {
+        admission, handoff, ..
+    } = &receipt.evidence
+    else {
+        return Ok(observation);
+    };
+    if observation.universe_digest != anchor.universe_digest
+        || observation.timestamp_us < anchor.timestamp_us
+    {
+        return Err(Error::Evidence);
+    }
+    let signers = handoff
+        .capture
+        .verification
+        .trusted_signers
+        .iter()
+        .map(|signer| crate::pyth::TrustedSigner {
+            public_key: signer.public_key,
+            expires_at_seconds: signer.expires_at_seconds,
+        })
+        .collect::<Vec<_>>();
+    let signed = crate::pyth::verify_payload(
+        &observation.signed_payload,
+        &signers,
+        observation.timestamp_us / 1_000_000,
+        admission
+            .request
+            .max_feed_age_ms
+            .checked_mul(1000)
+            .ok_or(Error::Evidence)?,
+    )
+    .map_err(|_| Error::Evidence)?;
+    if signed.timestamp_us != observation.timestamp_us || signed.prices.len() != anchor.assets.len()
+    {
+        return Err(Error::Evidence);
+    }
+    let prices = anchor
+        .assets
+        .iter()
+        .map(|asset| {
+            let price = signed
+                .prices
+                .iter()
+                .find(|price| price.feed_id == asset.feed_id)
+                .ok_or(Error::Evidence)?;
+            crate::benchmark::price_e8(price.price, price.exponent).map_err(|_| Error::Evidence)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if prices != observation.prices_e8 {
+        return Err(Error::Evidence);
+    }
+    let benchmark = cox_math::geometric::geometric_level(
+        &anchor
+            .assets
+            .iter()
+            .map(|asset| asset.origin_price_e8)
+            .collect::<Vec<_>>(),
+        &prices,
+        anchor.benchmark,
+    )
+    .map_err(|_| Error::Evidence)?;
+    Ok(Observation {
+        benchmark,
+        ..observation
+    })
+}
+
+fn archive_admission_staging(
+    directory: &Path,
+    canonical: &View,
+    expected: &View,
+) -> Result<(), Error> {
+    if canonical.anchor == expected.anchor {
+        return Ok(());
+    }
+    let root = directory.join("prices");
+    let key = hex::encode(expected.anchor.universe_digest);
+    let anchor_path = root.join("anchors").join(format!("{key}.json"));
+    let prior: Option<Anchor> = journal::read(&anchor_path).map_err(|_| Error::Storage)?;
+    if prior.as_ref() == Some(&expected.anchor) {
+        return Ok(());
+    }
+    if prior
+        .as_ref()
+        .is_some_and(|prior| *prior != canonical.anchor)
+    {
+        return Err(Error::Lineage);
+    }
+    let archive = root
+        .join("prepared-admission")
+        .join(format!("{key}-{}", canonical.anchor.timestamp_us));
+    fs::create_dir_all(&archive).map_err(|_| Error::Storage)?;
+    let observations = root.join(&key);
+    let archived = archive.join(&key);
+    if observations.exists() {
+        if archived.exists() {
+            return Err(Error::Storage);
+        }
+        fs::rename(&observations, &archived).map_err(|_| Error::Storage)?;
+    }
+    if prior.is_some() {
+        let archived = archive.join("anchor.json");
+        if archived.exists() {
+            return Err(Error::Storage);
+        }
+        fs::rename(&anchor_path, archived).map_err(|_| Error::Storage)?;
+    }
+    for directory in [&root, &archive, &root.join("anchors")] {
+        if directory.exists() {
+            fs::File::open(directory)
+                .and_then(|file| file.sync_all())
+                .map_err(|_| Error::Storage)?;
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -269,7 +517,7 @@ pub fn initial_receipt(directory: &Path, canonical: &[u8]) -> Result<Receipt, Er
         )
         .map_err(|_| Error::Storage)?
         .ok_or(Error::Storage)?;
-        if receipt.canonical != canonical || receipt.validate()? != current {
+        if receipt.canonical != canonical || receipt.validate()?.digest != current.digest {
             return Err(Error::Lineage);
         }
         match receipt.previous_canonical.as_ref() {
@@ -346,6 +594,15 @@ pub fn trusted_storage_digest(capture: &origin::Captured) -> Result<[u8; 32], Er
 }
 
 impl Receipt {
+    pub fn registry_effective_from(&self) -> Result<u64, Error> {
+        use anchor_lang::AccountDeserialize;
+        self.validate()?;
+        match &self.evidence {
+            Evidence::Prepared { .. } => Err(Error::Lineage),
+            Evidence::Handoff { handoff, .. } => cox::UniverseHandoff::try_deserialize(&mut handoff.account_data.as_slice()).map(|record| record.effective_from).map_err(|_| Error::Evidence),
+            _ => UniverseVersion::from_canonical(&self.canonical).map(|universe| universe.capture.timestamp).map_err(|_| Error::Manifest),
+        }
+    }
     pub fn validate(&self) -> Result<View, Error> {
         if self.schema != "relative.runtime-universe-receipt/v1"
             || self.genesis_hash != DEVNET_GENESIS
@@ -354,7 +611,7 @@ impl Receipt {
         }
         let current =
             UniverseVersion::from_canonical(&self.canonical).map_err(|_| Error::Manifest)?;
-        let result = view(&self.canonical)?;
+        let mut result = view(&self.canonical)?;
         let capture = match &self.evidence {
             Evidence::Genesis(capture) => {
                 origin::validate_capture(capture).map_err(|_| Error::Evidence)?;
@@ -370,12 +627,29 @@ impl Receipt {
                 }
                 capture
             }
-            Evidence::Inclusion(capture) => {
+            Evidence::Inclusion(capture)
+            | Evidence::Prepared {
+                admission: capture, ..
+            }
+            | Evidence::Handoff {
+                admission: capture, ..
+            } => {
                 activation::validate_capture(capture).map_err(|_| Error::Evidence)?;
                 let previous_bytes = self.previous_canonical.as_ref().ok_or(Error::Lineage)?;
                 let previous =
                     UniverseVersion::from_canonical(previous_bytes).map_err(|_| Error::Lineage)?;
-                let previous_view = view(previous_bytes)?;
+                let mut previous_view = view(previous_bytes)?;
+                if let Evidence::Handoff {
+                    predecessor_handoff: Some(proof),
+                    ..
+                }
+                | Evidence::Prepared {
+                    predecessor_handoff: Some(proof),
+                    ..
+                } = &self.evidence
+                {
+                    previous_view.anchor = proof.validate(previous_bytes)?;
+                }
                 if current.version != previous.version.checked_add(1).ok_or(Error::Lineage)?
                     || current.predecessor_digest != previous.digest
                     || current.source_methodology != previous.source_methodology
@@ -436,6 +710,30 @@ impl Receipt {
         {
             return Err(Error::Evidence);
         }
+        if let Evidence::Handoff {
+            admission, handoff, ..
+        } = &self.evidence
+        {
+            let anchor = handoff.validate(&self.canonical)?;
+            let previous = &admission.request.previous_anchor;
+            let benchmark = cox_math::geometric::geometric_level(
+                &previous
+                    .assets
+                    .iter()
+                    .map(|asset| asset.origin_price_e8)
+                    .collect::<Vec<_>>(),
+                &anchor.assets[..previous.assets.len()]
+                    .iter()
+                    .map(|asset| asset.origin_price_e8)
+                    .collect::<Vec<_>>(),
+                previous.benchmark,
+            )
+            .map_err(|_| Error::Evidence)?;
+            if anchor.benchmark != benchmark {
+                return Err(Error::Evidence);
+            }
+            result.anchor = anchor;
+        }
         Ok(result)
     }
 
@@ -472,6 +770,8 @@ impl Receipt {
         let capture = match &self.evidence {
             Evidence::Genesis(capture) => capture,
             Evidence::Inclusion(capture) => &capture.captured,
+            Evidence::Prepared { admission, .. } => &admission.captured,
+            Evidence::Handoff { handoff, .. } => &handoff.capture,
         };
         Ok(Observation {
             universe_digest: active.anchor.universe_digest,
@@ -502,23 +802,31 @@ pub(crate) fn reconcile_committed_checked(
     initial_anchor: &Anchor,
     validate: impl FnOnce(&View, &Observation) -> Result<(), Error>,
 ) -> Result<View, Error> {
-    let expected = view(canonical)?;
+    let manifest = view(canonical)?;
     let receipt: Receipt = journal::read(
         &state_directory
             .join("universes")
-            .join(format!("{}.json", hex::encode(expected.digest))),
+            .join(format!("{}.json", hex::encode(manifest.digest))),
     )
     .map_err(|_| Error::Storage)?
     .ok_or(Error::Storage)?;
-    if receipt.canonical != canonical || receipt.validate()? != expected {
+    if receipt.canonical != canonical {
         return Err(Error::Evidence);
     }
-    let previous_anchor = receipt
-        .previous_canonical
-        .as_ref()
-        .map(|bytes| view(bytes).map(|previous| previous.anchor))
-        .transpose()?
-        .unwrap_or_else(|| initial_anchor.clone());
+    if matches!(receipt.evidence, Evidence::Prepared { .. }) {
+        return Err(Error::Evidence);
+    }
+    let expected = receipt.validate()?;
+    let previous_anchor = if let Evidence::Handoff { admission, .. } = &receipt.evidence {
+        admission.request.previous_anchor.clone()
+    } else {
+        receipt
+            .previous_canonical
+            .as_ref()
+            .map(|bytes| view(bytes).map(|previous| previous.anchor))
+            .transpose()?
+            .unwrap_or_else(|| initial_anchor.clone())
+    };
     if matches!(receipt.evidence, Evidence::Genesis(_)) && expected.anchor != *initial_anchor {
         return Err(Error::Lineage);
     }
@@ -530,10 +838,38 @@ pub(crate) fn reconcile_committed_checked(
             return Err(Error::Lineage);
         }
     }
-    let resumed = history
+    let mut staged = history
         .latest_staged(&expected.anchor)
-        .map_err(|_| Error::Storage)?
-        .unwrap_or(receipt.captured_observation()?);
+        .map_err(|_| Error::Storage)?;
+    let staged_anchor: Option<Anchor> = journal::read(&history.directory.join("anchors").join(
+        format!("{}.json", hex::encode(expected.anchor.universe_digest)),
+    ))
+    .map_err(|_| Error::Storage)?;
+    let mut rebase = staged_anchor
+        .as_ref()
+        .is_some_and(|anchor| *anchor == manifest.anchor && *anchor != expected.anchor);
+    if staged.is_none() && matches!(receipt.evidence, Evidence::Handoff { .. }) {
+        let archived = FileHistory {
+            directory: state_directory
+                .join("prices")
+                .join("prepared-admission")
+                .join(format!(
+                    "{}-{}",
+                    hex::encode(expected.anchor.universe_digest),
+                    manifest.anchor.timestamp_us
+                )),
+        };
+        staged = archived
+            .latest_staged(&expected.anchor)
+            .map_err(|_| Error::Storage)?;
+        rebase = staged.is_some();
+    }
+    let resumed = staged.unwrap_or(receipt.captured_observation()?);
+    let resumed = if rebase {
+        rebase_handoff_observation(&receipt, &expected.anchor, resumed)?
+    } else {
+        resumed
+    };
     crate::benchmark::Benchmark::new(
         expected.anchor.clone(),
         history.clone(),
@@ -541,6 +877,9 @@ pub(crate) fn reconcile_committed_checked(
     )
     .map_err(|_| Error::Storage)?;
     validate(&expected, &resumed)?;
+    if matches!(receipt.evidence, Evidence::Handoff { .. }) {
+        archive_admission_staging(state_directory, &manifest, &expected)?;
+    }
     history
         .activate(&expected.anchor)
         .map_err(|_| Error::Storage)?;

@@ -29,6 +29,7 @@ pub enum Phase {
     PersistReceipt,
     RegisterRegistryVersion,
     Activate,
+    ReadyForHandoff,
     Complete,
     RescheduleRequired,
 }
@@ -45,6 +46,7 @@ pub enum Status {
     Transaction,
     PersistReceipt,
     Complete,
+    ReadyForHandoff,
     RescheduleRequired(RescheduleReason),
 }
 #[derive(Clone, Debug)]
@@ -213,13 +215,14 @@ pub fn plan(
     if state.now_ms / 1000 > schedule.expires_at {
         return Ok(reschedule(RescheduleReason::ExpiredSchedule));
     }
+    let staged = schedule.schema_version == 2;
     let boundary = next.capture.timestamp;
     let pool_timestamp = state
         .pool
         .origin
         .checked_add(state.pool.last_batch)
         .ok_or(Error::State)?;
-    if pool_timestamp > boundary {
+    if !staged && pool_timestamp > boundary {
         return Ok(reschedule(RescheduleReason::BoundaryAlreadyPassed));
     }
     let accepted_boundary = state.pool.stage.is_some()
@@ -228,7 +231,7 @@ pub fn plan(
                 && batch.pool == previous.pool
                 && state.pool.stage == Some(pubkey(accounts.batch))
         });
-    if pool_timestamp < boundary
+    if !staged && pool_timestamp < boundary
         && !accepted_boundary
         && state.now_ms
             > boundary
@@ -238,21 +241,21 @@ pub fn plan(
     {
         return Ok(reschedule(RescheduleReason::BoundaryWindowMissed));
     }
-    if state.pool.stage.is_some() {
+    if !staged && state.pool.stage.is_some() {
         return Ok(wait(Phase::WaitingAcceptedBasicBatch));
     }
-    if pool_timestamp < boundary || state.now_ms / 1000 < boundary {
+    if !staged && (pool_timestamp < boundary || state.now_ms / 1000 < boundary) {
         return Ok(wait(Phase::WaitingBoundaryPublication));
     }
-    if state.pool.sequence != next.capture.predecessor_sequence
+    if !staged && (state.pool.sequence != next.capture.predecessor_sequence
         || state.pool.state_digest != next.capture.predecessor_state_digest
         || state.pool.benchmark != next.capture.benchmark
         || next.capture.prices_e8.get(..state.pool.last_prices.len())
-            != Some(state.pool.last_prices.as_slice())
+            != Some(state.pool.last_prices.as_slice()))
     {
         return Ok(reschedule(RescheduleReason::BoundaryDoesNotMatchCapture));
     }
-    if state.epoch_stage_present {
+    if !staged && state.epoch_stage_present {
         return Ok(wait(Phase::WaitingEpochStage));
     }
     let runtime = pubkey(operator);
@@ -351,6 +354,9 @@ pub fn plan(
         return Err(Error::Capacity);
     }
     if allocated < required && !methodology.sealed {
+        if state.pool.stage.is_some() {
+            return Ok(wait(Phase::WaitingAcceptedBasicBatch));
+        }
         return Ok(grow(
             Phase::GrowMethodology,
             next_key,
@@ -402,6 +408,9 @@ pub fn plan(
         return Err(Error::Capacity);
     }
     if state.pool_bytes < required_pool {
+        if state.pool.stage.is_some() {
+            return Ok(wait(Phase::WaitingAcceptedBasicBatch));
+        }
         return Ok(grow(
             Phase::GrowPool,
             pool,
@@ -453,6 +462,9 @@ pub fn plan(
     }
     inclusion_pipeline::validate_execution_capacity(&prepared.request.preparation)
         .map_err(|_| Error::Capacity)?;
+    if staged {
+        return Ok(emit(Phase::ReadyForHandoff, Status::ReadyForHandoff, vec![]));
+    }
     Ok(transact(
         Phase::Activate,
         cox::instruction::ActivateUniverse {}.data(),

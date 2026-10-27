@@ -491,9 +491,7 @@ impl ChainReader {
         let methodology_key = address(pool.methodology);
         let batch_key = pda(self.basic_program, &[b"batch", pool_key.as_ref()]);
         let mut keys = vec![methodology_key];
-        let expanded_staging = pool.schema_version == 5
-            && pool.initialized
-            && cox::dynamic_batch_space(pool.classes.len()) > 8192;
+        let expanded_staging = pool.schema_version == 5 && pool.initialized;
         if pool.stage.is_some() || expanded_staging {
             keys.push(batch_key);
         }

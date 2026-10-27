@@ -157,7 +157,7 @@ impl<C: Chain, P: Snapshots, S: Store> Publisher<C, P, S> {
         if state.unsigned.is_some() {
             return self.sign_and_send(state, next_ms).await;
         }
-        let work = self.chain.authoritative_work(now_ms).await?;
+        let work = self.chain.authoritative_work(now_ms).await.map_err(|error| { #[cfg(test)] eprintln!("Publisher authoritative work failed: {error:?}"); error })?;
         match decide(now_ms, &state, &work, self.batch_limit).map_err(|_| Error::Chain)? {
             Decision::Idle { wake_ms } => {
                 let wake_ms = wake_ms.into_iter().chain(self.chain.next_wake_ms()).min();
@@ -172,7 +172,7 @@ impl<C: Chain, P: Snapshots, S: Store> Publisher<C, P, S> {
             Decision::Maintenance { work, next_pool } => {
                 state.next_attempt_ms = next_ms;
                 self.persist(state.clone())?;
-                let draft = self.chain.prepare(&work, None).await?;
+                let draft = self.chain.prepare(&work, None).await.map_err(|error| { #[cfg(test)] eprintln!("Publisher maintenance preparation failed: {error:?}"); error })?;
                 state.next_pool = next_pool;
                 state.maintenance_next = false;
                 state.unsigned = Some(draft);
@@ -211,7 +211,7 @@ impl<C: Chain, P: Snapshots, S: Store> Publisher<C, P, S> {
                 if snapshot.benchmark <= 0 || snapshot.signed_payload.is_empty() || timestamp > selection_ms || timestamp > ceiling_ms
                     || closing_ms.is_some_and(|close| timestamp != close)
                     || (closing_ms.is_none() && (selection_ms - timestamp > self.max_price_age_ms || work.iter().any(|item| matches!(item, Work::Entry { eligible_after_ms, .. } if timestamp <= *eligible_after_ms)))) { return Err(Error::Snapshot); }
-                let draft = self.chain.prepare(&work, Some(&snapshot)).await?;
+                let draft = self.chain.prepare(&work, Some(&snapshot)).await.map_err(|error| { #[cfg(test)] eprintln!("Publisher priced preparation failed: {error:?}"); error })?;
                 if draft.request_id.is_empty()
                     || draft.unsigned_bytes.is_empty()
                     || draft.unsigned_bytes.len() > 4096

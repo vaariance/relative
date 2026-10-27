@@ -15,6 +15,7 @@ fn approved() -> Approved {
         preparation: request.preparation,
         policy: request.policy,
         previous_canonical: request.previous_canonical,
+        previous_handoff: None,
         schedule: request.schedule,
         capture_request: request.captured.request,
     }
@@ -200,28 +201,34 @@ fn invalid_admission_never_creates_hold_or_cutoff_and_no_approval_means_no_local
     std::fs::remove_dir_all(directory).unwrap();
 }
 #[test]
-fn unsupported_execution_capacity_rejects_candidate_without_holding_the_current_market() {
+fn full_universe_capacity_uses_bounded_basket_snapshots_without_holding_the_market() {
+    use anchor_lang::{AccountDeserialize, AccountSerialize};
     let directory = directory();
     let request = support::request_with_count(255);
-    let value = Approved {
+    let mut value = Approved {
         schema: "relative.inclusion-approved/v1".into(),
         preparation: request.preparation,
         policy: request.policy,
         previous_canonical: request.previous_canonical,
+        previous_handoff: None,
         schedule: request.schedule,
         capture_request: request.captured.request,
     };
-    assert!(value.validate().is_err());
+    let mut schedule = cox::UniverseSchedule::try_deserialize(&mut value.schedule.account_data.as_slice()).unwrap();
+    schedule.schema_version = 2;
+    value.schedule.account_data.clear();
+    schedule.try_serialize(&mut value.schedule.account_data).unwrap();
+    value.validate().unwrap();
     journal::atomic_write(&directory.join("inclusion-approved.json"), &value).unwrap();
     let shared = Controller::open(&directory).unwrap();
-    assert!(shared.lock().unwrap().refresh_file().is_err());
-    assert!(!directory.join("inclusion-execution.json").exists());
+    assert!(shared.lock().unwrap().refresh_file().unwrap());
+    assert!(directory.join("inclusion-execution.json").exists());
     assert!(!directory.join("inclusion-preview-cutoff.json").exists());
     let mut work = vec![Work::Entry { id: "basic:1".into(), pool: Pool::Basic, eligible_after_ms: 0 }];
     let expected = work.clone();
     inclusion_execution::filter_work(&shared, u64::MAX, &mut work).unwrap();
     assert_eq!(work, expected);
-    assert_eq!(shared.lock().unwrap().wake_ms(0), None);
+    assert!(shared.lock().unwrap().wake_ms(0).is_some());
     std::fs::remove_dir_all(directory).unwrap();
 }
 #[test]
@@ -326,6 +333,7 @@ async fn deterministic_successor_failure_records_reschedule_and_unblocks_current
         preparation: request.preparation,
         policy: request.policy,
         previous_canonical: request.previous_canonical,
+        previous_handoff: None,
         schedule: request.schedule,
         capture_request: request.captured.request.clone(),
     };
@@ -443,4 +451,37 @@ fn bounded_journal_rejects_nonregular_symlinks_and_oversized_inputs() {
         assert!(journal::read::<Option<serde_json::Value>>(&link).is_err());
     }
     std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn prepared_proposal_never_filters_basic_epoch_entries_or_future_closing_work() {
+    use anchor_lang::{AccountDeserialize, AccountSerialize};
+    let path = directory();
+    let mut approved = approved();
+    let mut schedule = cox::UniverseSchedule::try_deserialize(&mut approved.schedule.account_data.as_slice()).unwrap();
+    schedule.schema_version = 2;
+    approved.schedule.account_data.clear();
+    schedule.try_serialize(&mut approved.schedule.account_data).unwrap();
+    approved.validate().unwrap();
+    journal::atomic_write(&path.join("inclusion-approved.json"), &approved).unwrap();
+    let shared = Controller::open(&path).unwrap();
+    assert!(shared.lock().unwrap().refresh_file().unwrap());
+    let boundary = approved.capture_request.activation_timestamp_us / 1000;
+    let expected = vec![
+        Work::Entry { id: "basic:deposit".into(), pool: Pool::Basic, eligible_after_ms: 0 },
+        Work::Entry { id: "epoch:entry".into(), pool: Pool::Epoch, eligible_after_ms: 0 },
+        Work::Maintenance { id: "basic:accepted-stage".into(), pool: Pool::Basic },
+        Work::Maintenance { id: "epoch:accepted-snapshot".into(), pool: Pool::Epoch },
+        Work::Close { id: "epoch:next-close".into(), timestamp_ms: boundary + 14_400_000 },
+    ];
+    for timestamp in [boundary - 1, boundary, boundary + 5000, boundary + 14_400_000] {
+        let mut actual = expected.clone();
+        inclusion_execution::filter_work(&shared, timestamp, &mut actual).unwrap();
+        assert_eq!(actual, expected);
+    }
+    assert!(shared.lock().unwrap().expire_if_due(boundary + 5001).unwrap());
+    let mut after_expiry = expected.clone();
+    inclusion_execution::filter_work(&shared, boundary + 5001, &mut after_expiry).unwrap();
+    assert_eq!(after_expiry, expected);
+    std::fs::remove_dir_all(path).unwrap();
 }

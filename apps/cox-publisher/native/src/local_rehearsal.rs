@@ -56,6 +56,7 @@ struct Rehearsal {
     inclusion_candidate_path: Option<PathBuf>,
     inclusion_schedule_path: Option<PathBuf>,
     inclusion_enabled: Option<bool>,
+    after_inclusion_timestamp_seconds: Option<u64>,
 }
 
 impl Rehearsal {
@@ -363,6 +364,7 @@ fn approve_inclusion(settings: &Rehearsal, config: &Config) {
         preparation: candidate.preparation,
         policy: candidate.policy,
         previous_canonical: candidate.previous_canonical,
+        previous_handoff: None,
         schedule,
         capture_request: candidate.capture_request,
     };
@@ -487,11 +489,11 @@ struct ContinuousSidecar {
     armed: bool,
 }
 impl ContinuousSidecar {
-    fn new(config: &Config, approved: Approved, now: u64) -> Self {
-        approved
+    fn new(config: &Config, approved: Approved, now: u64, captured: Option<activation::Captured>) -> Self {
+        if captured.is_none() { approved
             .capture_request
             .validate_schedule(now * 1000)
-            .unwrap();
+            .unwrap(); }
         let history = FileHistory {
             directory: config.state_directory.join("prices"),
         };
@@ -500,14 +502,18 @@ impl ContinuousSidecar {
             .unwrap()
             .unwrap_or_else(|| config.anchor.clone());
         let resumed = history.latest_for_anchor(&anchor).unwrap();
+        let next = captured.as_ref().map(|capture| {
+            let resumed = history.latest_staged(&capture.next_anchor).unwrap();
+            Benchmark::new(capture.next_anchor.clone(), StagedLocalHistory { history: history.clone(), anchor: capture.next_anchor.clone() }, resumed).unwrap()
+        });
         Self {
             active: Benchmark::new(anchor, history, resumed).unwrap(),
-            next: None,
+            next,
             approved,
             requested_at_us: now * 1000,
             anchor_adoptions: 0,
-            captured: false,
-            armed: false,
+            captured: captured.is_some(),
+            armed: captured.is_some(),
         }
     }
     fn tick(
@@ -530,6 +536,7 @@ impl ContinuousSidecar {
         };
         let committed = history.active_anchor().unwrap().unwrap();
         if committed != *self.active.anchor() {
+            self.next = None;
             self.active = Benchmark::new(
                 committed.clone(),
                 history.clone(),
@@ -568,7 +575,7 @@ impl ContinuousSidecar {
                 .collect()
         });
         assert_eq!(prices.len(), config.anchor.assets.len());
-        prices.push(10_000_000_000);
+        prices.resize(self.approved.capture_request.fullnext_assets.len(), 10_000_000_000);
         let payload = signed_feed(&settings.feed_key(), &feed_config, now / 1000, &prices);
         let batch = pyth::verify_payload(
             &payload,
@@ -843,6 +850,7 @@ async fn run(settings: &Rehearsal, config: &Config) {
             config,
             approved,
             chain_time(&rpc).await,
+            inclusion.lock().unwrap().captured(),
         ))
     } else {
         None
@@ -896,13 +904,25 @@ async fn run(settings: &Rehearsal, config: &Config) {
     let mut ticks = Vec::new();
     let mut idle = 0;
     let advance_seconds = settings.advance_clock_seconds.unwrap_or(1);
+    let mut after_inclusion_jump = false;
     assert!(
         advance_seconds <= 60,
         "bounded local tick clock advancement"
     );
     for index in 0..settings.max_ticks.unwrap_or(200).min(10_000) {
         let mut timestamp_ms = chain_time(&rpc).await;
-        if index > 0 && advance_seconds > 0 {
+        let mut jumped_this_tick = false;
+        if !after_inclusion_jump && sidecar.as_ref().is_some_and(|sidecar| sidecar.anchor_adoptions == 1) {
+            if let Some(target) = settings.after_inclusion_timestamp_seconds {
+                let target = target.checked_mul(1000).unwrap();
+                assert!(target > timestamp_ms && target - timestamp_ms <= cox_epoch::EPOCH_SECONDS * 1000);
+                rpc.call("surfnet_timeTravel", json!([{"absoluteTimestamp":target}])).await.unwrap();
+                timestamp_ms = chain_time(&rpc).await;
+                after_inclusion_jump = true;
+                jumped_this_tick = true;
+            }
+        }
+        if index > 0 && advance_seconds > 0 && !jumped_this_tick {
             let next = timestamp_ms
                 .checked_add(advance_seconds.checked_mul(1000).unwrap())
                 .unwrap();
@@ -932,6 +952,7 @@ async fn run(settings: &Rehearsal, config: &Config) {
             json!({"timestampMs":timestamp_ms,"result":format!("{tick:?}"),"chain":chain_audit}),
         );
         journal::atomic_write(&settings.report_path, &json!({"mode":"run","evidence":"actual-V1-loopback-RPC-controlled-local-test-signers", "feedEvidence":"controlled-test-signatures-not-live-Pyth","wireVersion":1,"signedV1Transactions":signed_v1.load(Ordering::Relaxed),"actualLocalGenesis":local_genesis,"continuousProcessId":std::process::id(),"anchorAdoptions":sidecar.as_ref().map(|sidecar|sidecar.anchor_adoptions),"activeAssets":sidecar.as_ref().map(|sidecar|sidecar.active.anchor().assets.len()),"exactBoundaryCaptured":sidecar.as_ref().map(|sidecar|sidecar.captured),"subscriptionFeedIds":feed_watch.borrow().clone(),"ticks":ticks,"rpcUsage":rpc.usage().unwrap()})).unwrap();
+        if matches!(tick, Err(worker::Error::StaleDraft)) { continue; }
         match tick.expect("actual publisher tick") {
             Tick::Idle(_) => idle += 1,
             _ => idle = 0,

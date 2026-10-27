@@ -12,7 +12,7 @@ use crate::{
     scheduler::Work,
     worker,
 };
-use anchor_lang::AccountDeserialize;
+use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use relative_methodology::{inclusion::InclusionPolicy, transition::Preparation};
 use serde::{Deserialize, Serialize};
@@ -27,6 +27,7 @@ use std::{
 use tokio::sync::{mpsc, watch};
 pub const BOUNDARY_ID: &str = "basic:universe-boundary";
 pub const ROLLOUT_ID: &str = "basic:universe-rollout";
+pub const HANDOFF_ID: &str = "basic:universe-handoff";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Approved {
@@ -34,6 +35,8 @@ pub struct Approved {
     pub preparation: Preparation,
     pub policy: InclusionPolicy,
     pub previous_canonical: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_handoff: Option<crate::universe_runtime::HandoffConfirmation>,
     pub schedule: ScheduleEvidence,
     pub capture_request: activation::Request,
 }
@@ -41,7 +44,7 @@ impl Approved {
     pub fn validate(&self) -> Result<(), worker::Error> {
         let previous = cox::UniverseVersion::from_canonical(&self.previous_canonical)
             .map_err(|_| worker::Error::Snapshot)?;
-        let view = crate::universe_runtime::view(&self.previous_canonical)
+        crate::universe_runtime::validate_previous_anchor(&self.previous_canonical, self.previous_handoff.as_ref(), &self.capture_request.previous_anchor)
             .map_err(|_| worker::Error::Snapshot)?;
         inclusion_pipeline::validate_admission(&self.preparation, &self.policy).map_err(err)?;
         inclusion_pipeline::validate_execution_capacity(&self.preparation).map_err(err)?;
@@ -51,7 +54,6 @@ impl Approved {
             .decode(&previous)
             .map_err(|_| worker::Error::Snapshot)?;
         if self.schema != "relative.inclusion-approved/v1"
-            || self.capture_request.previous_anchor != view.anchor
             || self.preparation.activation_timestamp_us
                 != self.capture_request.activation_timestamp_us
             || schedule.activation_timestamp.checked_mul(1_000_000)
@@ -160,6 +162,8 @@ struct Stored {
     captured: Option<activation::Captured>,
     prepared: Option<Prepared>,
     cursor: Option<Cursor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    handoff_observation: Option<crate::origin::Captured>,
     phase: Phase,
     reason: Option<String>,
 }
@@ -263,6 +267,7 @@ impl Controller {
             captured: None,
             prepared: None,
             cursor: None,
+            handoff_observation: None,
             phase: Phase::Waiting,
             reason: None,
         };
@@ -339,6 +344,7 @@ impl Controller {
     pub fn matches(work: &Work) -> bool {
         matches!(work,Work::Close{id,..} if id==BOUNDARY_ID)
             || matches!(work,Work::Maintenance{id,..} if id==ROLLOUT_ID)
+            || matches!(work,Work::Entry{id,..} if id==HANDOFF_ID)
     }
     fn cutoff(&self, value: Option<&Approved>) -> Result<(), worker::Error> {
         let cutoff = value.map(|value| PreviewCutoff {
@@ -364,6 +370,24 @@ impl Controller {
     }
     pub fn capture_stopped(&mut self) {
         self.capturing = false;
+    }
+    pub fn captured(&self) -> Option<activation::Captured> {
+        self.active().and_then(|stored| stored.captured.clone())
+    }
+    pub fn reject_handoff(&mut self) -> Result<(), worker::Error> {
+        self.reschedule("Prepared handoff transaction rejected; ordinary publication continues")
+    }
+    pub fn prepared_mode(&self) -> bool {
+        self.active().is_some_and(|stored| cox::UniverseVersion::from_canonical(&stored.approved.previous_canonical)
+            .ok().and_then(|previous| stored.approved.schedule.decode(&previous).ok()).is_some_and(|schedule| schedule.schema_version == 2))
+    }
+    fn complete(&mut self, digest: [u8; 32]) -> Result<(), worker::Error> {
+        let stored = self.stored.as_mut().ok_or(worker::Error::Storage)?;
+        if stored.digest != digest { return Err(worker::Error::Storage) }
+        if stored.phase == Phase::Complete { return Ok(()) }
+        stored.phase = Phase::Complete;
+        self.cutoff(None)?;
+        self.persist()
     }
     pub fn capture_request(&mut self, now: u64) -> Option<activation::Request> {
         if self.capturing || !self.approved_onchain {
@@ -499,6 +523,18 @@ pub async fn observe(
         return Ok(vec![]);
     }
     guard.approved_onchain = true;
+    let approved_schedule = fresh.decode(&previous).map_err(err)?;
+    if approved_schedule.schema_version == 2 {
+        guard.cutoff(None)?;
+        if stored.captured.is_none() {
+            return Ok(vec![]);
+        }
+        if state.basic.batch.is_some() { return Ok(vec![]) }
+        if stored.cursor.as_ref().is_some_and(|cursor| cursor.phase == inclusion_rollout::Phase::ReadyForHandoff) {
+            return Ok(if state.basic.batch.is_none() { vec![Work::Entry { id: HANDOFF_ID.into(), pool: crate::scheduler::Pool::Basic, eligible_after_ms: stored.approved.boundary_ms() }] } else { vec![] });
+        }
+        return Ok(vec![Work::Maintenance { id: ROLLOUT_ID.into(), pool: crate::scheduler::Pool::Basic }]);
+    }
     guard.cutoff(Some(&stored.approved))?;
     let boundary = stored.approved.boundary_ms();
     let committed = state
@@ -560,7 +596,8 @@ pub async fn observe(
 pub fn filter_work(shared: &Shared, now: u64, work: &mut Vec<Work>) -> Result<(), worker::Error> {
     let guard = shared.lock().map_err(err)?;
     if let Some(stored) = guard.active() {
-        if now >= stored.approved.boundary_ms() {
+        let previous = cox::UniverseVersion::from_canonical(&stored.approved.previous_canonical).map_err(err)?;
+        if stored.approved.schedule.decode(&previous).map_err(err)?.schema_version == 1 && now >= stored.approved.boundary_ms() {
             work.retain(|work| !matches!(work, Work::Entry { .. }) && !matches!(work,Work::Close{timestamp_ms,..} if *timestamp_ms>stored.approved.boundary_ms()));
         }
     }
@@ -588,6 +625,7 @@ pub async fn plan(
             preparation: stored.approved.preparation.clone(),
             policy: stored.approved.policy.clone(),
             previous_canonical: stored.approved.previous_canonical.clone(),
+            previous_handoff: stored.approved.previous_handoff.clone(),
             schedule: stored.approved.schedule.clone(),
             captured,
             operator: operator.to_bytes(),
@@ -654,8 +692,10 @@ pub async fn plan(
         return Err(worker::Error::StaleDraft);
     }
     let directory = shared.lock().map_err(err)?.directory.clone();
-    let receipt_path = directory
-        .join("universes")
+    let staged = schedule.decode(&cox::UniverseVersion::from_canonical(&stored.approved.previous_canonical).map_err(err)?).map_err(err)?.schema_version == 2;
+    let receipt_directory = directory.join("universes");
+    let receipt_directory = if staged { receipt_directory.join("prepared") } else { receipt_directory };
+    let receipt_path = receipt_directory
         .join(format!("{}.json", hex::encode(next.digest)));
     let receipt_persisted = journal::read::<crate::universe_runtime::Receipt>(&receipt_path)
         .map_err(|_| worker::Error::Storage)?
@@ -714,6 +754,16 @@ pub async fn plan(
             return Ok(Action::Waiting);
         }
     };
+    if matches!(result.status, Status::ReadyForHandoff) {
+        let required = cox::dynamic_batch_space(next.instruments.len() + 1);
+        let sizes = state.basic.staging_bytes.ok_or(worker::Error::Storage)?;
+        for (target, allocated) in [state.basic.accounts.batch, state.basic.accounts.publication].into_iter().zip(sizes) {
+            if allocated < required {
+                if state.basic.pool.stage.is_some() { return Ok(Action::Waiting) }
+                return Ok(Action::Instructions(vec![state.basic.accounts.grow_staging(operator, target, (required - allocated).min(cox::DYNAMIC_MAX_GROWTH) as u32).map_err(err)?]));
+            }
+        }
+    }
     {
         let mut guard = shared.lock().map_err(err)?;
         let current = guard.stored.as_mut().ok_or(worker::Error::Storage)?;
@@ -728,9 +778,8 @@ pub async fn plan(
     match result.status {
         Status::Transaction => Ok(Action::Instructions(result.instructions)),
         Status::PersistReceipt => {
-            prepared
-                .receipt
-                .persist(&directory)
+            let persist = if staged { journal::atomic_write(&receipt_path, &prepared.receipt).map_err(|_| crate::universe_runtime::Error::Storage) } else { prepared.receipt.persist(&directory).map(|_| ()) };
+            persist
                 .map_err(|error| match error {
                     crate::universe_runtime::Error::Storage => worker::Error::Storage,
                     _ => worker::Error::Snapshot,
@@ -746,14 +795,18 @@ pub async fn plan(
             Ok(Action::Waiting)
         }
         Status::Waiting => Ok(Action::Waiting),
+        Status::ReadyForHandoff => Ok(Action::Waiting),
     }
 }
 struct StagedHistory {
     history: FileHistory,
     anchor: Anchor,
+    controller: Shared,
 }
 impl History for StagedHistory {
     fn append(&mut self, value: &Observation) -> Result<(), crate::benchmark::Error> {
+        let guard = self.controller.lock().map_err(|_| crate::benchmark::Error::Persistence)?;
+        if guard.active().is_none() { return Err(crate::benchmark::Error::TimeRegression) }
         self.history.stage_observation(&self.anchor, value)
     }
 }
@@ -804,6 +857,7 @@ pub async fn capture(
                 StagedHistory {
                     history,
                     anchor: captured.next_anchor,
+                    controller: shared.clone(),
                 },
                 resumed,
             )
@@ -817,7 +871,7 @@ pub async fn capture(
         changed=stop.changed()=>{changed.map_err(err)?;if *stop.borrow(){return Ok(());}},
         _=timeout.tick()=>{if next.is_none() && now_ms()?>request.activation_timestamp_us/1000+5_000{return Err(worker::Error::Snapshot);}if shared.lock().map_err(err)?.active().is_none(){return Ok(());}},
         bytes=receive.recv()=>{let bytes=bytes.ok_or(worker::Error::Snapshot)?;let now=now_ms()?;let signers=archive.trusted_keys()?;
-            if next.is_none(){match activation::capture_update(&request,requested_at,&bytes,&signers,now/1000){Ok(Some(captured))=>{shared.lock().map_err(err)?.accept_capture(captured.clone())?;let history=FileHistory{directory:directory.join("prices")};next=Some(Benchmark::new(captured.next_anchor.clone(),StagedHistory{history,anchor:captured.next_anchor},None).map_err(err)?);},Ok(None)=>continue,Err(activation::Error::Verification)=>continue,Err(_)=>return Err(worker::Error::Snapshot)}}
+            if next.is_none(){match activation::capture_update(&request,requested_at,&bytes,&signers,now/1000){Ok(Some(captured))=>{shared.lock().map_err(err)?.accept_capture(captured.clone())?;let history=FileHistory{directory:directory.join("prices")};next=Some(Benchmark::new(captured.next_anchor.clone(),StagedHistory{history,anchor:captured.next_anchor,controller:shared.clone()},None).map_err(err)?);},Ok(None)=>continue,Err(activation::Error::Verification)=>continue,Err(_)=>return Err(worker::Error::Snapshot)}}
             if let Some(benchmark)=next.as_mut(){let batch=match pyth::verify_payload(&bytes,&signers,now/1000,request.max_feed_age_ms*1000){Ok(batch)=>batch,Err(_)=>continue};if batch.timestamp_us<request.activation_timestamp_us{continue;}match benchmark.observe(&batch,|_|Ok(())){Ok(_)|Err(crate::benchmark::Error::TimeRegression)=>{},Err(_)=>return Err(worker::Error::Storage)}}
         }
     }}}.await;
@@ -837,4 +891,158 @@ pub async fn capture(
             .reschedule("Exact inclusion capture unavailable")?;
     }
     result
+}
+
+fn key(value: Address) -> anchor_lang::prelude::Pubkey {
+    anchor_lang::prelude::Pubkey::new_from_array(value.to_bytes())
+}
+fn handoff_instruction(data: Vec<u8>, accounts: Vec<anchor_lang::solana_program::instruction::AccountMeta>) -> Instruction {
+    Instruction {
+        program_id: Address::new_from_array(cox::ID.to_bytes()), data,
+        accounts: accounts.into_iter().map(|meta| solana_instruction::AccountMeta {
+            pubkey: Address::new_from_array(meta.pubkey.to_bytes()), is_signer: meta.is_signer, is_writable: meta.is_writable,
+        }).collect(),
+    }
+}
+fn prepared_handoff(shared: &Shared) -> Result<Option<Stored>, worker::Error> {
+    let guard = shared.lock().map_err(err)?;
+    let Some(stored) = guard.active() else { return Ok(None) };
+    let previous = cox::UniverseVersion::from_canonical(&stored.approved.previous_canonical).map_err(err)?;
+    if stored.approved.schedule.decode(&previous).map_err(err)?.schema_version != 2
+        || !stored.cursor.as_ref().is_some_and(|cursor| cursor.phase == inclusion_rollout::Phase::ReadyForHandoff)
+    { return Ok(None) }
+    Ok(Some(stored.clone()))
+}
+pub fn attach_handoff_begin(
+    shared: &Shared, state: &ChainState, operator: Address, observation: &Observation,
+    archive: &crate::runtime::SnapshotArchive, now: u64, instructions: &mut Vec<Instruction>,
+) -> Result<(), worker::Error> {
+    let Some(stored) = prepared_handoff(shared)? else { return Ok(()) };
+    let Some(begin) = instructions.iter().position(|instruction| instruction.program_id == state.basic.accounts.program
+        && instruction.data.get(..8) == Some(&Sha256::digest(b"global:begin_dynamic_publication")[..8])) else { return Ok(()) };
+    let prepared = stored.prepared.as_ref().ok_or(worker::Error::Storage)?;
+    let next = cox::UniverseVersion::from_canonical(&prepared.receipt.canonical).map_err(err)?;
+    let directory = shared.lock().map_err(err)?.directory.clone();
+    let captured = stored.captured.as_ref().ok_or(worker::Error::Storage)?;
+    let history = FileHistory { directory: directory.join("prices") };
+    let Some(full) = history.exact(&captured.next_anchor.universe_digest, observation.timestamp_us).map_err(|_| worker::Error::Storage)? else { return Ok(()) };
+    let capture = crate::origin::verify_capture(crate::origin::Request {
+        schema: "relative.origin-request/v1".into(), assets: next.instruments.iter().map(|instrument| crate::origin::Asset {
+            id: instrument.symbol.clone(), feed_id: instrument.pyth_pro_feed_id,
+        }).collect(), max_feed_age_ms: stored.approved.capture_request.max_feed_age_ms,
+    }, &full.signed_payload, &archive.trusted_keys()?, now / 1000).map_err(err)?;
+    if capture.timestamp_us != observation.timestamp_us || capture.assets.len() != next.instruments.len()
+        || !capture.assets.iter().take(observation.prices_e8.len()).map(|asset| asset.price_e8).eq(observation.prices_e8.iter().copied())
+    { return Ok(()) }
+    let next_methodology = anchor_lang::prelude::Pubkey::find_program_address(&[b"methodology", &next.digest], &cox::ID).0;
+    let handoff = anchor_lang::prelude::Pubkey::find_program_address(&[b"universe-handoff", next.pool.as_ref(), &next.digest], &cox::ID).0;
+    let schedule = stored.approved.schedule.address.parse().map_err(err)?;
+    let instruction = handoff_instruction(cox::instruction::BeginUniverseHandoff {}.data(), cox::accounts::BeginUniverseHandoff {
+        runtime: key(operator), registry: key(state.basic.accounts.registry), pool: next.pool, batch: key(state.basic.accounts.batch),
+        methodology: key(state.basic.accounts.methodology), next_methodology, schedule, handoff,
+        system_program: anchor_lang::system_program::ID,
+    }.to_account_metas(None));
+    {
+        let mut guard = shared.lock().map_err(err)?;
+        let current = guard.stored.as_mut().ok_or(worker::Error::Storage)?;
+        if current.digest != stored.digest { return Err(worker::Error::StaleDraft) }
+        current.handoff_observation = Some(capture);
+        guard.persist()?;
+    }
+    instructions.insert(begin + 1, instruction);
+    Ok(())
+}
+pub async fn handoff_maintenance(
+    shared: &Shared, rpc: &Rpc, state: &ChainState, operator: Address,
+) -> Result<Option<Vec<Instruction>>, worker::Error> {
+    let Some(stored) = prepared_handoff(shared)? else { return Ok(None) };
+    let Some(batch) = state.basic.batch.as_ref() else { return Ok(None) };
+    let prepared = stored.prepared.as_ref().ok_or(worker::Error::Storage)?;
+    let next = cox::UniverseVersion::from_canonical(&prepared.receipt.canonical).map_err(err)?;
+    let next_methodology = anchor_lang::prelude::Pubkey::find_program_address(&[b"methodology", &next.digest], &cox::ID).0;
+    let (handoff, _) = Address::find_program_address(&[b"universe-handoff", next.pool.as_ref(), &next.digest], &state.basic.accounts.program);
+    let (_, row) = account(rpc, handoff, state.slot).await?;
+    let Some((bytes, _)) = row else { return Ok(None) };
+    let saved = cox::UniverseHandoff::try_deserialize(&mut bytes.as_slice()).map_err(err)?;
+    if saved.effective_from != 0 || saved.sequence != batch.sequence || saved.snapshot_digest != batch.snapshot_digest
+        || saved.timestamp != batch.cutoff || saved.predecessor_sequence != batch.predecessor_sequence
+        || saved.predecessor_state_digest != batch.predecessor_digest
+    { return Ok(None) }
+    let capture = stored.handoff_observation.as_ref().ok_or(worker::Error::Storage)?;
+    if capture.timestamp_us / 1_000_000 != batch.cutoff { return Ok(None) }
+    let old = state.basic.pool.origin_prices.len();
+    let additional = &capture.assets.get(old..).ok_or(worker::Error::Storage)?;
+    if saved.prices_e8.len() > additional.len() || saved.prices_e8.iter().zip(additional.iter()).any(|(price, asset)| *price != asset.price_e8) {
+        return Err(worker::Error::Storage)
+    }
+    if saved.prices_e8.len() == additional.len() { return Ok(None) }
+    let offset = saved.prices_e8.len();
+    let prices = additional[offset..].iter().take(16).map(|asset| asset.price_e8).collect();
+    Ok(Some(vec![handoff_instruction(cox::instruction::AppendUniverseHandoffPrices { offset: offset.try_into().map_err(err)?, prices }.data(), cox::accounts::AppendUniverseHandoffPrices {
+        runtime: key(operator), registry: key(state.basic.accounts.registry), pool: next.pool, batch: key(state.basic.accounts.batch),
+        methodology: key(state.basic.accounts.methodology), next_methodology, handoff: key(handoff),
+    }.to_account_metas(None))]))
+}
+pub async fn attach_handoff_commit(
+    shared: &Shared, rpc: &Rpc, state: &ChainState, operator: Address, now: u64, instructions: &mut Vec<Instruction>,
+) -> Result<(), worker::Error> {
+    if now / 1000 % cox_epoch::EPOCH_SECONDS == 0 { return Ok(()) }
+    let Some(finalize) = instructions.iter().position(|instruction| instruction.program_id == state.basic.accounts.program
+        && instruction.data.get(..8) == Some(&Sha256::digest(b"global:finalize")[..8])) else { return Ok(()) };
+    let Some(stored) = prepared_handoff(shared)? else { return Ok(()) };
+    let Some(batch) = state.basic.batch.as_ref() else { return Ok(()) };
+    let prepared = stored.prepared.as_ref().ok_or(worker::Error::Storage)?;
+    let next = cox::UniverseVersion::from_canonical(&prepared.receipt.canonical).map_err(err)?;
+    let next_methodology = anchor_lang::prelude::Pubkey::find_program_address(&[b"methodology", &next.digest], &cox::ID).0;
+    let (handoff, _) = Address::find_program_address(&[b"universe-handoff", next.pool.as_ref(), &next.digest], &state.basic.accounts.program);
+    let (_, row) = account(rpc, handoff, state.slot).await?;
+    let Some((bytes, _)) = row else { return Ok(()) };
+    let h = cox::UniverseHandoff::try_deserialize(&mut bytes.as_slice()).map_err(err)?;
+    if h.effective_from != 0 || h.sequence != batch.sequence || h.snapshot_digest != batch.snapshot_digest
+        || h.timestamp != batch.cutoff || h.prices_e8.len() != next.instruments.len() - state.basic.pool.origin_prices.len()
+    { return Ok(()) }
+    let asset_registry = state.basic.pool.asset_registry;
+    let version = |digest: &[u8; 32]| anchor_lang::prelude::Pubkey::find_program_address(&[b"asset-version", asset_registry.as_ref(), digest], &cox::ID).0;
+    let instruction = handoff_instruction(cox::instruction::ActivatePreparedUniverse {}.data(), cox::accounts::ActivatePreparedUniverse {
+        runtime: key(operator), registry: key(state.basic.accounts.registry), pool: next.pool, batch: key(state.basic.accounts.batch),
+        methodology: key(state.basic.accounts.methodology), next_methodology, schedule: stored.approved.schedule.address.parse().map_err(err)?,
+        handoff: key(handoff), vault: key(state.basic.accounts.vault), instructions: anchor_lang::solana_program::sysvar::instructions::ID,
+        test_vault: state.basic.accounts.test_vault.map(key), asset_registry: Some(asset_registry),
+        next_registry_version: Some(version(&next.digest)), previous_registry_version: Some(version(&next.predecessor_digest)),
+    }.to_account_metas(None));
+    instructions.insert(finalize + 1, instruction);
+    Ok(())
+}
+pub async fn recover_handoff_commit(shared: &Shared, rpc: &Rpc, state: &ChainState) -> Result<(), worker::Error> {
+    let stored = shared.lock().map_err(err)?.stored.clone();
+    let Some(stored) = stored else { return Ok(()) };
+    let Some(prepared) = &stored.prepared else { return Ok(()) };
+    let previous = cox::UniverseVersion::from_canonical(&stored.approved.previous_canonical).map_err(err)?;
+    if stored.approved.schedule.decode(&previous).map_err(err)?.schema_version != 2 { return Ok(()) }
+    let next = cox::UniverseVersion::from_canonical(&prepared.receipt.canonical).map_err(err)?;
+    if state.basic.methodology.digest != next.digest { return Ok(()) }
+    let directory = shared.lock().map_err(err)?.directory.clone();
+    let path = directory.join("universes").join(format!("{}.json", hex::encode(next.digest)));
+    if let Some(receipt) = journal::read::<crate::universe_runtime::Receipt>(&path).map_err(|_| worker::Error::Storage)? {
+        if receipt.canonical != prepared.receipt.canonical || !matches!(receipt.evidence, crate::universe_runtime::Evidence::Handoff { .. }) { return Err(worker::Error::Storage) }
+        receipt.validate().map_err(err)?;
+        return shared.lock().map_err(err)?.complete(stored.digest)
+    }
+    let (handoff, _) = Address::find_program_address(&[b"universe-handoff", next.pool.as_ref(), &next.digest], &state.basic.accounts.program);
+    let (slot, row) = account(rpc, handoff, state.slot).await?;
+    let (account_data, _) = row.ok_or(worker::Error::Storage)?;
+    let confirmation = crate::universe_runtime::HandoffConfirmation {
+        genesis_hash: crate::rpc::protocol_genesis(), program: cox::ID.to_string(), address: handoff.to_string(), owner: cox::ID.to_string(),
+        slot, commitment: Commitment::Confirmed, account_data, capture: stored.handoff_observation.clone().ok_or(worker::Error::Storage)?,
+    };
+    let receipt = crate::universe_runtime::Receipt {
+        schema: prepared.receipt.schema.clone(), genesis_hash: prepared.receipt.genesis_hash.clone(), canonical: prepared.receipt.canonical.clone(),
+        previous_canonical: prepared.receipt.previous_canonical.clone(), evidence: crate::universe_runtime::Evidence::Handoff {
+            admission: stored.captured.clone().ok_or(worker::Error::Storage)?, handoff: confirmation, predecessor_handoff: stored.approved.previous_handoff.clone(),
+        },
+    };
+    receipt.validate().map_err(err)?;
+    receipt.persist(&directory).map_err(|_| worker::Error::Storage)?;
+    let mut guard = shared.lock().map_err(err)?;
+    guard.complete(stored.digest)
 }

@@ -48,17 +48,18 @@ fn opening_manifest(
     let mut current =
         cox::UniverseVersion::from_canonical(canonical).map_err(|_| worker::Error::Snapshot)?;
     for _ in 0..255 {
-        if current.capture.timestamp <= opening {
-            return Ok(current);
-        }
-        let receipt: crate::universe_runtime::Receipt = crate::journal::read(
+        let receipt: Option<crate::universe_runtime::Receipt> = crate::journal::read(
             &directory
                 .join("universes")
                 .join(format!("{}.json", hex::encode(current.digest))),
         )
-        .map_err(|_| worker::Error::Storage)?
-        .ok_or(worker::Error::Storage)?;
-        receipt.validate().map_err(|_| worker::Error::Storage)?;
+        .map_err(|error| { eprintln!("Epoch registry receipt read failed: {error:?}"); worker::Error::Storage })?;
+        let effective = if let Some(receipt) = &receipt {
+            if cox::dynamic_digest(&receipt.canonical) != current.digest { eprintln!("Epoch registry receipt canonical mismatch"); return Err(worker::Error::Storage) }
+            receipt.registry_effective_from().map_err(|error| { eprintln!("Epoch registry activation evidence rejected: {error:?}"); worker::Error::Storage })?
+        } else if current.version == 1 { current.capture.timestamp } else { return Err(worker::Error::Storage) };
+        if effective <= opening { return Ok(current) }
+        let receipt = receipt.ok_or(worker::Error::Storage)?;
         let previous = receipt.previous_canonical.ok_or(worker::Error::Snapshot)?;
         current =
             cox::UniverseVersion::from_canonical(&previous).map_err(|_| worker::Error::Snapshot)?;
@@ -109,9 +110,6 @@ pub async fn plan(
     {
         return Err(worker::Error::Snapshot);
     }
-    if registry.pending_activation != 0 && opens >= registry.pending_activation {
-        return Ok(vec![]);
-    }
     let universe = opening_manifest(directory, &state.basic.methodology.canonical, opens)?;
     let version_key = Address::find_program_address(
         &[b"asset-version", registry_key.as_ref(), &universe.digest],
@@ -123,7 +121,7 @@ pub async fn plan(
     let versions = accounts(reader, &[version_key], &[reader.basic_program], state.slot).await?;
     let version: cox::AssetRegistryVersion =
         decode(versions[0].as_ref().ok_or(worker::Error::Chain)?)?;
-    if version.schema_version != 1
+    if !matches!(version.schema_version, 1 | 2)
         || !version.sealed
         || version.registry != config.asset_registry
         || version.generation != registry.generation
