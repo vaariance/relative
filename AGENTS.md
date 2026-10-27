@@ -2399,3 +2399,10 @@ another agent needs to know.
   - **Deployed:** `5a2ab66` to production (`cox-9cuz5ieft-gef-228639f6`).
 - **Rules for agents:** Do not route Solana browser wallets through Privy's wallet login while the app runs on devnet. The Privy dashboard still has Solana wallet login enabled, which logs a harmless console warning; turning it off is Godwin's call.
 - **Refs:** commit `5a2ab66`.
+
+### 2026-10-27 · Peter (Codex) · Current pool roundtrip requested before any reset decision
+
+- **Area:** Existing live Basic3/Epoch3 through deployed API and unchanged publisher; private test evidence only.
+- **What:** Peter requested a real roundtrip to decide whether to retain the current benchmark and include assets in place. Basic BTC-class1 deposit1000000, redemption and withdrawal999601 all finalized successfully; fees200+199, remaining units/locks/payable zero. Existing test-wallet balance2999601→2999202 reconciles. Then one1000000rlUSD Epoch lot entered the current12–16UTC round and executed at1793109841, nonce0,30-member basket backed byBTC. Exact closing/payout/withdrawal remain pending16UTC(17Lagos).
+- **Rules for agents:** Do not reset, include assets, redeploy or restart the publisher for this test. Preserve old claims and every existing history. Local launchd com.relative.current-pool-roundtrip-1793116800 is armed for16:00:15UTC to verify exact closing, candidate payout, custody and deployed-API withdrawal; isolated test key stays local. It has bounded waits and durable journals; never create duplicate entries or blindly retry a signed withdrawal. A bounded COUNT=1 reporting follow-up is separate from the transaction runner. Do not resume old fresh-generation cutover without Peter's next decision. New test activity changes the earlier discard inventory; do not silently reuse its old baseline.
+- **Refs:** Private `.cox/current-roundtrip-20261027/basic-roundtrip.json`, transaction receipts, `epoch-lifecycle.json`, `run-epoch-close.py`. Basic signatures41rkGWgJ…S7tc/QnmJEWe2…8rF/4cVYzfCY…Gond; Epoch5KGvDAA5…EDQG. No source changes, commits or deployment performed.
