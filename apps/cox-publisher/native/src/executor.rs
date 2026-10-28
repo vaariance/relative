@@ -97,15 +97,15 @@ fn position_growth_instruction(accounts: &transactions::BasicAccounts, operator:
     accounts.grow_position(operator, owner, (required-allocated).min(8192) as u32)
         .map(Some).map_err(|_| worker::Error::Chain)
 }
+fn position_capacity_owners(state: &ChainState) -> Vec<Address> {
+    if state.basic.pool.schema_version != 5 || cox::dynamic_position_space(state.basic.pool.classes.len()) <= 4096 { return vec![] }
+    state.basic.requests.iter().filter(|request| request.status == 0)
+        .map(|request| Address::new_from_array(request.owner.to_bytes())).collect::<BTreeSet<_>>().into_iter().collect()
+}
 async fn position_capacity_plan(reader: &ChainReader, state: &ChainState) -> Result<Vec<Instruction>, worker::Error> {
     let basic = &state.basic;
     let required = cox::dynamic_position_space(basic.pool.classes.len());
-    if basic.pool.schema_version != 5 || basic.pool.stage.is_some() || required <= 4096 {
-        return Ok(vec![]);
-    }
-    let owners: BTreeSet<_> = basic.requests.iter().filter(|request| request.status == 0)
-        .map(|request| Address::new_from_array(request.owner.to_bytes())).collect();
-    let owners: Vec<_> = owners.into_iter().collect();
+    let owners = position_capacity_owners(state);
     for page in owners.chunks(100) {
         let keys: Vec<_> = page.iter().map(|owner| Address::find_program_address(
             &[b"position", basic.accounts.pool.as_ref(), owner.as_ref()], &reader.basic_program).0).collect();
@@ -2225,8 +2225,23 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn later_request_pages_still_prepare_position_storage_after_batch_acceptance() {
+        use anchor_lang::Discriminator;
+        let mut state = crate::chain::tests::dynamic_stage(61, 0, 16);
+        let owner = anchor_lang::prelude::Pubkey::new_unique();
+        let mut bytes = vec![0;512];bytes[..8].copy_from_slice(cox::Request::DISCRIMINATOR);
+        let mut request = cox::Request::try_deserialize(&mut bytes.as_slice()).unwrap();
+        request.schema_version = 3; request.pool = anchor_lang::prelude::Pubkey::new_from_array(state.basic.accounts.pool.to_bytes()); request.nonce = 16; request.owner = owner; request.status = 0;
+        state.basic.requests = vec![request];
+        state.basic.batch.as_mut().unwrap().closed_queue_end = 17;
+        state.basic.pool.next_request_nonce = 17;
+        assert_eq!(position_capacity_owners(&state), vec![Address::new_from_array(owner.to_bytes())]);
+        state.basic.requests[0].status = 1;
+        assert!(position_capacity_owners(&state).is_empty());
+    }
     #[tokio::test]
-    async fn position_growth_is_bounded_and_idle_or_accepted_work_does_not_read_accounts() {
+    async fn position_growth_is_bounded_and_idle_or_empty_accepted_work_does_not_read_accounts() {
         let executor = dynamic_executor(61);
         let mut state = crate::chain::tests::dynamic_state(61);
         assert!(position_capacity_plan(&executor.reader, &state).await.unwrap().is_empty());
