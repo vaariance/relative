@@ -2435,3 +2435,18 @@ another agent needs to know.
 - **Verification:** Native247, SDK109, signer99, compiled Basic65 and compiled Epoch23 tests pass; SDK/signer TypeScript checks pass. Controlled compiled-program rehearsal31→32 used one publisher process through adoption, frozen31-asset closing/withdrawals and32-asset successor preparation. Compiled maximum255 inclusion and subsequent pending-deposit execution pass. These are local controlled-feed tests, not live Pyth activation or live255 latency evidence.
 - **Rules for agents:** Consumers must accept registry-version/schedule schema2 and use registry effectiveFrom rather than capture time for opening selection. The fixture is `packages/cox/fixtures/generation/prepared-inclusion.json`. Joel received the compatibility heads-up; source approval, committed-source release and deployed consumer verification remain gates. Keep fresh4 disabled, the current live publisher running and all Alchemy entries uncommitted. No live inclusion is scheduled.
 - **Refs:** Existing publisher/SDK READMEs; private `.cox/prepared-inclusion-complete/completion-verification.json`, `.cox/pyth-inclusion-20261027/final-source-verification.json`; Joel email1a17ee877c2da7e8.
+
+### 2026-10-28 · Joel (Claude Code) · App API on schema 2 registry readers; images built with Cloud Build
+
+- **Area:** `apps/app-api/test`; Cloud Run `cox-app-api-live`, dev VM; GCP IAM.
+- **What:** Peter's 2026-10-27 prepared-inclusion handoff (SDK `af1bfc4`, IDL and fixture `d750bb4`, `working` at `3fa2f28`).
+  - **Readers:** the API already reads registry versions and schedules through the SDK's `decodeAccount`, which now accepts schemas 1 and 2. Each Epoch round binds the version whose `effectiveFrom`/`effectiveUntil` covers its opening, not the capture time. No API source change was needed.
+  - **Tests:** 162 pass, including 4 on `packages/cox/fixtures/generation/prepared-inclusion.json` (`5d81145`):
+    - Both version schemas and the schema 2 schedule decode, with the new version effective at 1793199619 after the 1793199600 capture.
+    - The market serves 32 assets with CRYPTO at class 0, and the previous methodology still lists 31.
+    - The frozen round keeps the previous version and 31 coins, and the successor uses the new version and 32.
+    - Preparing the next round binds the new version, not the previous one.
+  - **Deployed:** Cloud Run `cox-app-api-live-00041-62s` (image `cox-app-api:5d81145`) and the VM at `5d81145`, both still on pool 3; market selection unchanged.
+  - **Cloud Build:** local image builds failed on slow npm downloads, so images are now built with `gcloud builds submit` (about 1.5 minutes). Joel granted the default compute service account `529206295845-compute@developer` read access on bucket `colosseum-eox_cloudbuild` and push access (`roles/artifactregistry.writer`) on the `eox` repository. Build logs are not written to Cloud Logging; that account has no Logs Writer role.
+- **Rules for agents:** Build the API image with Cloud Build when local downloads are slow; do not widen that account's roles further without Joel.
+- **Refs:** commit `5d81145`.
