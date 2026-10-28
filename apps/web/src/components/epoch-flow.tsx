@@ -32,7 +32,7 @@ export function PerformerPrompt({ epoch, coins, now, next, marketClosed, active,
     return (
       <section className={`${card} flex flex-col items-center gap-4 px-6 py-12 text-center`}>
         <Trophy size={32} aria-hidden="true" className="text-white/15" />
-        <h2 className="max-w-md text-xl font-semibold">Which coin will rise the most this round?</h2>
+        <h2 className="max-w-md text-xl font-semibold">Which coin will beat the benchmark this round?</h2>
         <div className="max-w-lg">
           <EntryClosed epoch={epoch} now={now} next={next} marketClosed={marketClosed} onSelect={onSelect} />
         </div>
@@ -75,7 +75,7 @@ export function PerformerPrompt({ epoch, coins, now, next, marketClosed, active,
       <span className="grid size-14 place-items-center rounded-full bg-accent/10">
         <Trophy size={26} aria-hidden="true" className="text-accent" />
       </span>
-      <h2 className="max-w-md text-xl font-semibold">Which coin will rise the most this round?</h2>
+      <h2 className="max-w-md text-xl font-semibold">Which coin will beat the benchmark this round?</h2>
       <p className="max-w-md text-sm text-muted">Pick your performer then curate a basket around it.</p>
       <Link href="/epochs/pick" className={`${primary} mt-2 max-w-xs cursor-pointer`}>
         Pick your performer <ChevronRight size={16} aria-hidden="true" />
