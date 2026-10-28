@@ -320,9 +320,10 @@ export async function checkDynamicCoxLinkage(binding: SolanaProgramBinding, link
       continue;
     }
     if (name === "grow_dynamic_account") {
-      bind(keys.slice(0, 3), [operator, registry, pool]); if (keys.length !== 5 || bytes.length !== 12 || fields.stage) return deny("invalid dynamic growth"); same(keys[4]!, SystemProgram.programId, "growth system program");
+      bind(keys.slice(0, 3), [operator, registry, pool]); if (keys.length !== 5 || bytes.length !== 12) return deny("invalid dynamic growth"); same(keys[4]!, SystemProgram.programId, "growth system program");
       const [target] = await fetch([keys[3]!]); const growth = bytes.readUInt32LE(8); if (!target || !target.owner.equals(program) || growth < 1 || growth > 8192) return deny("invalid dynamic growth target");
       let limit = 0;
+      let positionTarget = false;
       if (keys[3]!.equals(pool)) limit = 32768;
       else if (keys[3]!.equals(batchKey) || keys[3]!.equals(publication)) {
         limit = Math.ceil((4096 + fields.classes * 128) / 8192) * 8192;
@@ -333,13 +334,14 @@ export async function checkDynamicCoxLinkage(binding: SolanaProgramBinding, link
         }
       }
       else if (target.data.subarray(0, 8).equals(disc("account", "Position")) && target.data.length >= 75 && target.data.readUInt16LE(8) === 1) {
-        same(new PublicKey(target.data.subarray(11, 43)), pool, "position growth pool"); same(keys[3]!, pda(Buffer.from("position"), pool.toBuffer(), target.data.subarray(43, 75)), "position growth PDA"); limit = Math.ceil((512 + fields.classes * 80) / 4096) * 4096;
+        same(new PublicKey(target.data.subarray(11, 43)), pool, "position growth pool"); same(keys[3]!, pda(Buffer.from("position"), pool.toBuffer(), target.data.subarray(43, 75)), "position growth PDA"); positionTarget = true; limit = Math.ceil((512 + fields.classes * 80) / 4096) * 4096;
       } else if (target.data.subarray(0, 8).equals(disc("account", "Methodology"))) {
         const next = method(target.data, false); if (next.sealed) return deny("sealed methodology growth forbidden"); same(keys[3]!, pda(Buffer.from("methodology"), next.digest), "growth methodology PDA");
         const approved = await schedule(pda(Buffer.from("universe-schedule"), pool.toBuffer(), u64(current!.value!.version + 1n)));
         if (next.activation !== approved.timestamp - fields.origin) return deny("unapproved methodology growth"); limit = next.expected + 512;
       }
-      if (!limit || target.data.length + growth > limit || target.data.length + growth > 131072) return deny("dynamic growth exceeds target bound");
+      if (fields.stage && !positionTarget) return deny("active batch only permits position storage growth");
+      if (!limit || target.data.length > limit || !positionTarget && target.data.length + growth > limit || target.data.length + growth > 131072) return deny("dynamic growth exceeds target bound");
       continue;
     }
     if (name === "begin_dynamic_publication") {

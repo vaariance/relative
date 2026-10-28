@@ -232,3 +232,23 @@ test("prepared approval bounds staging preallocation without changing the curren
   f.approval.writeUInt16LE(1, 8);
   await rejected(f.check("grow_dynamic_account", keys, num(8192, 4)), /prepared universe approval/);
 });
+
+test("active batches permit bounded position storage growth but reject batch resizing and foreign positions", async () => {
+  const f = fixture(61), owner = Keypair.generate().publicKey;
+  const stageOffset = f.root.length - 26;
+  assert.equal(f.root[stageOffset], 0);
+  f.put(f.pool, Buffer.concat([f.root.subarray(0, stageOffset), num(1, 1), f.batch.toBuffer(), f.root.subarray(stageOffset + 1)]));
+  const position = f.pda(Buffer.from("position"), f.pool.toBuffer(), owner.toBuffer());
+  const bytes = Buffer.alloc(4096);
+  disc("account", "Position").copy(bytes); bytes.writeUInt16LE(1, 8);
+  f.pool.toBuffer().copy(bytes, 11); owner.toBuffer().copy(bytes, 43); f.put(position, bytes);
+  const keys = [operator, f.registry, f.pool, position, SystemProgram.programId];
+  await f.check("grow_dynamic_account", keys, num(4096, 4));
+  await f.check("grow_dynamic_account", keys, num(8192, 4));
+  f.put(position, Buffer.concat([bytes, Buffer.alloc(4096)]));
+  await f.check("grow_dynamic_account", keys, num(4096, 4));
+  await rejected(f.check("grow_dynamic_account", keys, num(8193, 4)), /invalid dynamic growth target/);
+  await rejected(f.check("grow_dynamic_account", [operator, f.registry, f.pool, f.batch, SystemProgram.programId], num(4096, 4)), /active batch only/);
+  f.put(stranger, bytes);
+  await rejected(f.check("grow_dynamic_account", [operator, f.registry, f.pool, stranger, SystemProgram.programId], num(4096, 4)), /position growth PDA/);
+});
