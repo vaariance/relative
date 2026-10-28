@@ -209,10 +209,9 @@ interface Slide {
 }
 
 const PAYOUT_SLIDES: Slide[] = [
-  { kicker: "Step 1", title: "Pick an asset", body: "Choose the asset whose performance you think will beat the benchmark. Your entry counts from when it executes until the round closes." },
-  { kicker: "Step 2", title: "Add to basket", body: "Curate a basket around your position. It is locked for a four-hour round, so choose your basket wisely." },
-  { kicker: "Step 3", title: "Get a score", body: "Your score is your asset's gain over the benchmark as a share of the gains of every coin in your basket. Coins behind the benchmark count as zero." },
-  { kicker: "Step 4", title: "Share the pot", body: "The pot is every stake after fees, split by stake × score. If your asset is behind the benchmark at the close, you get nothing back. If every entry scores zero, everyone is refunded in full, fee included." },
+  { kicker: "Step 1", title: "Pick a performer", body: "Choose the coin you think will beat the market this round." },
+  { kicker: "Step 2", title: "Build your basket", body: "Curate a basket around your pick. It is your case for why your coin wins, so pick wisely." },
+  { kicker: "Step 3", title: "Get paid", body: "If your coin beats the market and stands out from your basket, you win a share of the pot. The bigger the lead, the bigger your share." },
 ];
 
 function PayoutModal({ onClose }: { onClose: () => void }) {

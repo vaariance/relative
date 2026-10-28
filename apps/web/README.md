@@ -146,8 +146,8 @@ The layout:
   for pot and entries. The right side ranks the coins of the open round, or
   else the last finished round, by their move against $CRYPTO: three cards at a
   time on wide screens, one on phones, scrolled sideways. "How Epoch Works"
-  opens the explainer: back one coin, add to basket, get a score, share the
-  pot.
+  opens a three-step explainer: pick a performer, build your basket, get
+  paid.
 - **Coin board:** the shown round's coins in two groups, Ahead of $CRYPTO and
   Behind $CRYPTO, each as a fixed-size tile. Moves start from the live estimate
   at the round's opening (an Epoch has no on-chain opening reference) and end
