@@ -145,6 +145,7 @@ export function EntryTicket(props: { epoch: Epoch; coins: string[]; backed: stri
         <ul className="flex flex-col gap-4">
           <PickRow id={backed} detail="Performer" change={props.move} onRemove={props.onClear} label={`Remove ${backed} and start over`} />
         </ul>
+        <p className="text-xs text-muted">Your entry counts from when it executes, not from the open.</p>
       </div>
 
       <div className="border-t border-dashed border-white/10" />

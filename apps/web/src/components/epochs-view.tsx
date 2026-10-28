@@ -59,6 +59,7 @@ function useHeroRanking(epoch: Epoch, coins: string[], now: number): { rows: Mov
 
 function RankingCarousel({ epoch, coins, now }: { epoch: Epoch; coins: string[]; now: number }) {
   const { rows, empty } = useHeroRanking(epoch, coins, now);
+  const open = stageOf(epoch, now) === "open";
   const track = useRef<HTMLOListElement>(null);
 
   useEffect(() => {
@@ -83,6 +84,7 @@ function RankingCarousel({ epoch, coins, now }: { epoch: Epoch; coins: string[];
           ))}
         </ol>
       )}
+      {!empty && <p className="mt-2 text-xs text-muted">{open ? "Moves since the round opened" : "Moves from the open to the close"}</p>}
     </div>
   );
 }
