@@ -2477,3 +2477,11 @@ another agent needs to know.
 - **Verification:** New official-V1 serialization tests fail on the prior committed pool3 config and pass after correction. They cover combined begin+handoff(+prices), handoff pages and finalize+activation, default-disabled rejection, writable-methodology rejection and wrong-pool rejection. All101 signer tests and TypeScript checking pass. Actual state/ABI validation remains covered separately by the compiled running-services rehearsal and dynamic linkage tests.
 - **Rules for agents:** Deriving per-instruction writable permissions from IDL alone is insufficient for combined V1 messages; reuse the reviewed privilege unions and test the exact producer groups for every deployment binding. Do not route to the initial1fa5249 candidate. New source commit approval is requested; Linux compilation and the reviewed Basic buffer remain independent and reusable. No live program, publisher, market or schedule changed.
 - **Refs:** Private `.cox/prepared-inclusion-release-20261028/signer-old-policy-regression.log`, `signer-corrected-tests.log`; approved templatef535519. This entry remains uncommitted pending approval.
+
+### 2026-10-28 · Peter (Codex) · Accepted-batch position capacity remains resumable
+
+- **Area:** Basic dynamic allocation, native publisher, signer linkage and compiled regression tests.
+- **What:** Found that only the first 16 queued requests were prepared before acceptance; later owners could need larger position storage after inclusion. Allows validated position-only bounded growth during accepted batches, clamps concurrent growth to the required allocation and makes completed growth retry-safe. Pool, batch and sealed methodology resizing remain forbidden during acceptance.
+- **Rules for agents:** Prepare capacity for each queued request page, including accepted batches. Preserve financial bytes and cursor; do not bypass owner/PDA checks or introduce idle polling.
+- **Open:** Source approval and committed release are still required; no live program, signer route, publisher or schedule was changed by this fix.
+- **Refs:** `apps/cox-publisher/README.md`; compiled regression `position_storage_growth_during_an_accepted_batch_preserves_financial_state`. Native 248, compiled Basic 66, compiled Epoch 23 and signer 102 tests pass; signer TypeScript check passes.
