@@ -2462,3 +2462,10 @@ another agent needs to know.
 - **Rules for agents:** `estimatedScore` is an estimate of the score only; never estimate a payout in the web app.
 - **Open:** Peter: with user-chosen baskets the score's denominator differs per entry, so backing a volatile coin and filling the basket with calm coins raises the score without any forecast. With one common basket the denominator cancels out of the payout. Decide before the 31 → 61 asset expansion.
 - **Refs:** commits `8f7b95e`..`764f439`.
+
+### 2026-10-28 · Peter (Codex) · Prepared pool3 signer configuration reviewed, not released
+
+- **Area:** New disabled `apps/signer/config/dev-prepared-pool3.json`; ignored release preparation only.
+- **What:** Peter selected08:00Lagos/07:00UTC28October as the next PYTH target, subject to release readiness. Prepared current pool3/config3 bindings using the existing operator, generation and source policy. Added the three runtime handoff instructions and removed legacy shared-registry activation; all program bindings remain disabled. Configuration loader,40 instruction-policy checks and four combined shapes pass. Existing identities, other roles and admin boundaries are preserved. Actual compiled protocol linkage is covered separately by the prior prepared-inclusion tests; this configuration shape test is not a live signing test.
+- **Open:** Explicit commit/build/rollout approval requested for this new configuration under repository rules. Source context staged from3fa2f28 and uploaded for preparation; no Linux build, contract upgrade, signer/publisher rollout, schedule or capture arming has occurred. Target must not override readiness or permit substituted later prices. Existing publisher stays running.
+- **Refs:** Private `.cox/prepared-inclusion-release-20261028/readiness.json`, disabled signer review and policy checks. Keep this entry separate from Alchemy/unrelated records when approved.
