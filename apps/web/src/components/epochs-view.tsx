@@ -9,10 +9,11 @@ import Link from "next/link";
 import { createPortal } from "react-dom";
 import { walletEpochLots } from "@/app/actions";
 import { COLLATERAL } from "@/lib/config";
-import { type LotGroup, type Move, type Stage, STAGE_LABEL, type VaultBalances, type EpochsSnapshot, heroRounds, latestEpochs, countdown, epochBasket, estimatedScore, executionReferences, finalPayout, lotView, marketClosedReason, moves, refundMint, refundStage, scoreOf, stageOf, units, utcTime, windowText, withdrawSource } from "@/lib/epoch";
+import { type LotGroup, type Move, type Stage, STAGE_LABEL, type VaultBalances, type EpochsSnapshot, heroRounds, latestEpochs, countdown, epochBasket, byMove, estimatedScore, executionReferences, finalPayout, type LotView, lotOutcome, lotView, marketClosedReason, moves, refundMint, refundStage, scoreOf, stageOf, units, utcTime, windowText, withdrawSource } from "@/lib/epoch";
 import { formatAmount } from "@/lib/format";
 import { clock, type Collateral, collateralsOf } from "@/lib/market";
 import { useAccount } from "./account";
+import { stencilPath } from "@/landing/stencil-glyphs";
 import { CoinIcon } from "./coin-icon";
 import { useLive } from "./live";
 import { SendButton } from "./send-button";
@@ -22,6 +23,7 @@ import { CoinBadge, PREVIEW_BASE, REFERENCE_DIGITS, TOKEN_PROGRAM, card, gradien
 import { TradeModes } from "./trade-modes";
 
 const LOTS_MS = 20_000;
+const wordmark = stencilPath("RELATIVE", 1, 0.34);
 const lotsCache = new Map<string, EpochLot[]>();
 
 
@@ -329,6 +331,16 @@ const STATUS_TONE: Record<LotGroup, string> = {
   history: "bg-surface-2 text-muted",
 };
 
+function badgeTone(view: LotView): string {
+  if (view.outcome === "won") return "bg-up/15 text-up";
+  if (view.outcome === "lost") return "bg-down/15 text-down";
+  return STATUS_TONE[view.group];
+}
+
+function signed(value: number, digits = 2): string {
+  return `${value > 0 ? "+" : value < 0 ? "−" : ""}${formatAmount(Math.abs(value), digits)}`;
+}
+
 function useEntryMoves(lot: EpochLot, epoch: Epoch | null): { rows: Move[]; backed: Move | null; basis: string | null } {
   const { estimate, freshness } = useLive();
   return useMemo(() => {
@@ -383,10 +395,8 @@ function TeamCard({ lot, epoch, now, decimals, entriesOpen }: { lot: EpochLot; e
   const filled = lot.execution !== null;
   const settled = scoreOf(lot, epoch);
   const score = settled ?? (since.basis && since.basis !== "at close" ? estimatedScore(since.rows, lot.backedAsset) : null);
-  const paid = finalPayout(lot, epoch);
-  const gross = units(lot.grossStake, decimals);
-  const payout = paid === null ? null : units(paid, decimals);
-  const result = payout !== null && !view.refund ? payout - gross : null;
+  const settledOutcome = view.refund ? null : lotOutcome(lot, epoch);
+  const refunded = view.refund ? finalPayout(lot, epoch) : null;
 
   return (
     <section id="your-team" className={`${card} flex scroll-mt-4 flex-col gap-5 p-5 sm:p-6`}>
@@ -394,7 +404,7 @@ function TeamCard({ lot, epoch, now, decimals, entriesOpen }: { lot: EpochLot; e
         <h2 className="text-base font-semibold">Your team</h2>
         <span className="flex items-center gap-2">
           {since.basis && <span className="text-xs text-muted">{since.basis}</span>}
-          <span className={`rounded-pill px-2.5 py-0.5 text-[11px] ${STATUS_TONE[view.group]}`}>{view.label}</span>
+          <span className={`rounded-pill px-2.5 py-0.5 text-[11px] ${badgeTone(view)}`}>{view.label}</span>
         </span>
       </div>
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,13rem)_minmax(0,1fr)]">
@@ -412,13 +422,22 @@ function TeamCard({ lot, epoch, now, decimals, entriesOpen }: { lot: EpochLot; e
               <span className="num text-2xl font-semibold">{formatAmount(score * 100, 2)}%</span>
             </div>
           )}
-          {payout !== null && (
+          {settledOutcome && (
+            <dl className="grid grid-cols-2 gap-2 text-xs">
+              <div className="flex flex-col gap-0.5">
+                <dt className="text-muted">Payout</dt>
+                <dd className={`num text-sm font-medium ${settledOutcome.payout > 0n ? "text-up" : ""}`}>{formatAmount(units(settledOutcome.payout, decimals), 2)} {COLLATERAL.symbol}</dd>
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <dt className="text-muted">Result</dt>
+                <dd className={`num text-sm font-medium ${tone(Number(settledOutcome.result))}`}>{signed(units(settledOutcome.result, decimals))} {COLLATERAL.symbol}</dd>
+              </div>
+            </dl>
+          )}
+          {refunded !== null && (
             <div className="flex flex-col gap-0.5 text-xs">
-              <span className="text-muted">{view.refund ? "Refund" : "Payout"}</span>
-              <span className="num text-sm font-medium">
-                {formatAmount(payout, 2)} {COLLATERAL.symbol}
-                {result !== null && <span className={`ml-1 ${tone(result)}`}>({result >= 0 ? "+" : "−"}{formatAmount(Math.abs(result), 2)})</span>}
-              </span>
+              <span className="text-muted">Refund</span>
+              <span className="num text-sm font-medium">{formatAmount(units(refunded, decimals), 2)} {COLLATERAL.symbol}</span>
             </div>
           )}
         </div>
@@ -439,16 +458,17 @@ function TeamCard({ lot, epoch, now, decimals, entriesOpen }: { lot: EpochLot; e
   );
 }
 
-function EntryCard({ lot, epoch, now, decimals, program, collaterals, selected, onSelect, onSent }: { lot: EpochLot; epoch: Epoch | null; now: number; decimals: number; program: string; collaterals: Collateral[]; selected: boolean; onSelect: (() => void) | null; onSent: () => void }) {
+function EntryCard({ lot, epoch, now, decimals, program, collaterals, onSent }: { lot: EpochLot; epoch: Epoch | null; now: number; decimals: number; program: string; collaterals: Collateral[]; onSent: () => void }) {
   const [sent, setSent] = useState(0);
+  const [open, setOpen] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
   const view = lotView(lot, epoch, now);
   const gross = units(lot.grossStake, decimals);
   const paid = finalPayout(lot, epoch);
-  const payout = paid === null ? null : units(paid, decimals);
+  const outcome = view.refund ? null : lotOutcome(lot, epoch);
   const owed = lot.state === "claimable" && paid !== null && paid > 0n;
   const refundable = lot.refund !== null && lot.state !== "withdrawn";
   const cancellable = !refundable && lot.state !== "withdrawn" && lot.execution !== null && epoch?.voidable === true;
-  const result = payout !== null && !view.refund ? payout - gross : null;
   const vaults = useEpochVaults(program, (owed || refundable) && epoch ? epoch.address : null, sent);
   const mints = collaterals.map((item) => item.mint);
   const source = owed && vaults !== undefined && paid !== null ? withdrawSource(mints, vaults, paid) : null;
@@ -458,91 +478,258 @@ function EntryCard({ lot, epoch, now, decimals, program, collaterals, selected, 
     onSent();
   };
   const sourceSymbol = source ? (collaterals[source.index]?.symbol ?? COLLATERAL.symbol) : COLLATERAL.symbol;
-  const withdrawLabel = source?.amount ? `Withdraw ${formatAmount(units(source.amount, decimals), 2)} ${sourceSymbol}` : view.refund ? "Withdraw refund" : "Withdraw";
-  const payoutText = refundable
-    ? `${formatAmount(gross, 2)} ${COLLATERAL.symbol} refund`
-    : payout !== null
-      ? `${formatAmount(payout, 2)} ${COLLATERAL.symbol}${view.refund ? " refund" : ""}`
-      : lot.state === "withdrawn"
-        ? "Withdrawn"
-        : view.group === "active" || view.label === "Waiting to execute" || lot.state === "pending"
-          ? "After the close"
-          : "Refund due";
+  const withdrawAmount = source?.amount ? BigInt(source.amount) : paid;
+  const withdrawLabel = withdrawAmount !== null ? `Withdraw ${formatAmount(units(withdrawAmount, decimals), 2)} ${sourceSymbol}` : "Withdraw";
+  const pendingText =
+    lot.state === "withdrawn"
+      ? "Withdrawn"
+      : view.group === "active" || lot.state === "pending"
+        ? "After the close"
+        : "Refund due";
+  const refundText = refundable ? gross : view.refund && paid !== null ? units(paid, decimals) : null;
+
+  const action =
+    refundable && epoch && refundFrom ? (
+      <SendButton
+        intent={{ operation: "epoch-refund", opensAt: epoch.opensAt, nonce: lot.nonce, collateralMint: refundFrom.mint }}
+        label="Get refund"
+        connectLabel="Connect wallet"
+        onDone={done}
+        className="h-9 rounded-pill bg-accent px-4 text-xs font-medium text-white"
+      />
+    ) : refundable ? (
+      <span className="text-[11px] text-muted">{vaults === undefined ? "Checking…" : "Not refundable yet"}</span>
+    ) : cancellable && epoch ? (
+      <SendButton
+        intent={{ operation: "epoch-void", opensAt: epoch.opensAt }}
+        label="Cancel round"
+        connectLabel="Connect wallet"
+        onDone={done}
+        className="h-9 rounded-pill bg-accent px-4 text-xs font-medium text-white"
+      />
+    ) : owed && epoch && source ? (
+      <SendButton
+        intent={{ operation: "epoch-withdraw", opensAt: epoch.opensAt, nonce: lot.nonce, amount: source.amount, collateralMint: source.mint }}
+        label={withdrawLabel}
+        connectLabel="Connect wallet"
+        onDone={done}
+        className="h-9 rounded-pill bg-accent px-4 text-xs font-medium text-white"
+      />
+    ) : owed ? (
+      <span className="text-[11px] text-muted">{vaults === undefined ? "Checking…" : "Not withdrawable yet"}</span>
+    ) : null;
 
   return (
-    <li
-      onClick={(event) => {
-        if (onSelect && !(event.target as HTMLElement).closest("button, a")) onSelect();
-      }}
-      className={`${well} flex flex-col gap-3 p-4 ring-1 transition-colors duration-150 ${selected ? "ring-accent/60" : "ring-transparent"} ${onSelect ? "cursor-pointer hover:ring-white/15" : ""} ${selected && onSelect ? "hover:ring-accent/60" : ""}`}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <span className="flex min-w-0 items-center gap-2.5">
-          <CoinIcon id={lot.backedAsset} size={28} />
-          <span className="flex min-w-0 flex-col">
-            {onSelect ? (
-              <button type="button" onClick={onSelect} aria-pressed={selected} className="w-fit cursor-pointer text-left text-sm font-semibold">
+    <>
+      <li
+        onClick={(event) => {
+          if (!(event.target as HTMLElement).closest("button, a")) setOpen(true);
+        }}
+        className={`${well} flex cursor-pointer flex-col gap-3 p-4 ring-1 ring-transparent transition-colors duration-150 hover:ring-white/15`}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <span className="flex min-w-0 items-center gap-2.5">
+            <CoinIcon id={lot.backedAsset} size={28} />
+            <span className="flex min-w-0 flex-col">
+              <button type="button" onClick={() => setOpen(true)} className="w-fit cursor-pointer text-left text-sm font-semibold">
                 {lot.backedAsset}
-                <span className="sr-only"> — show this team</span>
+                <span className="sr-only"> — show entry details</span>
               </button>
-            ) : (
-              <span className="text-sm font-semibold">{lot.backedAsset}</span>
-            )}
-            <span className="num truncate text-[11px] text-muted">{epoch ? windowText(epoch) : `${utcTime(lot.epochOpensAt)} UTC`}</span>
+              <span className="num truncate text-[11px] text-muted">{epoch ? windowText(epoch) : `${utcTime(lot.epochOpensAt)} UTC`}</span>
+            </span>
           </span>
-        </span>
-        <span className={`shrink-0 rounded-pill px-2 py-0.5 text-[11px] ${STATUS_TONE[view.group]}`}>{view.label}</span>
-      </div>
-      {cancellable && <p className="text-xs text-muted">This round missed its closing time. Cancel it to get your full stake back.</p>}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <dl className="flex gap-6 text-xs">
-          <div className="flex flex-col">
+          <span className="flex shrink-0 items-center gap-1">
+            <span className={`rounded-pill px-2 py-0.5 text-[11px] ${badgeTone(view)}`}>{view.label}</span>
+            <ChevronRight size={14} aria-hidden="true" className="text-muted" />
+          </span>
+        </div>
+        {cancellable && <p className="text-xs text-muted">This round missed its closing time. Cancel it to get your full stake back.</p>}
+        <dl className="grid grid-cols-3 gap-3 text-xs">
+          <div className="flex min-w-0 flex-col">
             <dt className="text-[11px] text-muted">Stake</dt>
-            <dd className="num font-medium">{formatAmount(gross, 2)} {COLLATERAL.symbol}</dd>
+            <dd className="num font-medium">{formatAmount(gross, 2)}</dd>
           </div>
-          <div className="flex flex-col">
-            <dt className="text-[11px] text-muted">Payout</dt>
-            <dd className="num font-medium">
-              {payoutText}
-              {result !== null && <span className={`ml-1 ${result > 0 ? "text-up" : result < 0 ? "text-down" : "text-muted"}`}>({result >= 0 ? "+" : "−"}{formatAmount(Math.abs(result), 2)})</span>}
+          <div className="flex min-w-0 flex-col">
+            <dt className="text-[11px] text-muted">{refundText !== null ? "Refund" : "Payout"}</dt>
+            <dd className={`num font-medium ${outcome && outcome.payout > 0n ? "text-up" : ""}`}>
+              {refundText !== null ? formatAmount(refundText, 2) : outcome ? formatAmount(units(outcome.payout, decimals), 2) : <span className="text-muted">{pendingText}</span>}
             </dd>
           </div>
+          <div className="flex min-w-0 flex-col">
+            <dt className="text-[11px] text-muted">Result</dt>
+            <dd className={`num font-medium ${outcome ? tone(Number(outcome.result)) : "text-muted"}`}>{outcome ? signed(units(outcome.result, decimals)) : "—"}</dd>
+          </div>
         </dl>
-        {refundable && epoch && refundFrom ? (
-          <SendButton
-            intent={{ operation: "epoch-refund", opensAt: epoch.opensAt, nonce: lot.nonce, collateralMint: refundFrom.mint }}
-            label="Get refund"
-            connectLabel="Connect wallet"
-            onDone={done}
-            className="h-9 rounded-pill bg-accent px-4 text-xs font-medium text-white"
-          />
-        ) : refundable ? (
-          <span className="text-[11px] text-muted">{vaults === undefined ? "Checking…" : "Not refundable yet"}</span>
-        ) : cancellable && epoch ? (
-          <SendButton
-            intent={{ operation: "epoch-void", opensAt: epoch.opensAt }}
-            label="Cancel round"
-            connectLabel="Connect wallet"
-            onDone={done}
-            className="h-9 rounded-pill bg-accent px-4 text-xs font-medium text-white"
-          />
-        ) : owed && epoch && source ? (
-          <SendButton
-            intent={{ operation: "epoch-withdraw", opensAt: epoch.opensAt, nonce: lot.nonce, amount: source.amount, collateralMint: source.mint }}
-            label={withdrawLabel}
-            connectLabel="Connect wallet"
-            onDone={done}
-            className="h-9 rounded-pill bg-accent px-4 text-xs font-medium text-white"
-          />
-        ) : owed ? (
-          <span className="text-[11px] text-muted">{vaults === undefined ? "Checking…" : "Not withdrawable yet"}</span>
-        ) : null}
-      </div>
-    </li>
+        {owed && outcome?.outcome === "lost" && (
+          <p className="text-[11px] text-muted">
+            {formatAmount(units(outcome.returned, decimals), 2)} {COLLATERAL.symbol} of your stake is left. Withdraw it to your wallet.
+          </p>
+        )}
+        {action && <div className="flex justify-start">{action}</div>}
+      </li>
+      {open && <EntryDetails lot={lot} epoch={epoch} decimals={decimals} view={view} owed={owed} action={action} onClose={close} />}
+    </>
   );
 }
 
-function YourEntries({ epochs, lots, now, decimals, configuration, collaterals, teamLot, onShowTeam, onSent }: { epochs: Epoch[]; lots: EpochLot[]; now: number; decimals: number; configuration: EpochConfiguration; collaterals: Collateral[]; teamLot: string | null; onShowTeam: (lot: EpochLot) => void; onSent: () => void }) {
+function DetailRow({ label, children, note }: { label: string; children: ReactNode; note?: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 py-2">
+      <dt className="flex flex-col text-xs text-muted">
+        {label}
+        {note && <span className="text-[11px] text-muted/70">{note}</span>}
+      </dt>
+      <dd className="num text-right text-sm font-medium">{children}</dd>
+    </div>
+  );
+}
+
+function EntryDetails({ lot, epoch, decimals, view, owed, action, onClose }: { lot: EpochLot; epoch: Epoch | null; decimals: number; view: LotView; owed: boolean; action: ReactNode; onClose: () => void }) {
+  const since = useEntryMoves(lot, epoch);
+  const symbol = COLLATERAL.symbol;
+  const money = (value: bigint | string) => `${formatAmount(units(value, decimals), 2)} ${symbol}`;
+  const gross = BigInt(lot.grossStake);
+  const fee = BigInt(lot.fee);
+  const outcome = view.refund ? null : lotOutcome(lot, epoch);
+  const refunded = view.refund ? (finalPayout(lot, epoch) ?? (lot.refund !== null ? gross : null)) : null;
+  const finalShare = scoreOf(lot, epoch);
+  const liveShare = finalShare === null && since.basis && since.basis !== "at close" ? estimatedScore(since.rows, lot.backedAsset) : null;
+  const share = finalShare ?? liveShare;
+  const stakeValue = units(gross, decimals);
+  const resultValue = outcome ? units(outcome.result, decimals) : null;
+  const ratio = resultValue !== null && stakeValue > 0 ? resultValue / stakeValue : null;
+  const rows = [...(since.rows.length > 0 ? since.rows : lot.basket.map((id) => ({ id, change: null })))].sort((a, b) => byMove(b.change, a.change));
+  const performer = rows.find((row) => row.id === lot.backedAsset) ?? { id: lot.backedAsset, change: null };
+  const team = rows.filter((row) => row.id !== lot.backedAsset);
+
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", key);
+    return () => {
+      document.body.style.overflow = overflow;
+      window.removeEventListener("keydown", key);
+    };
+  }, [onClose]);
+
+  const headline = outcome
+    ? outcome.outcome === "won"
+      ? { title: `You won ${signed(units(outcome.result, decimals))} ${symbol}`, color: "text-up" }
+      : outcome.outcome === "lost"
+        ? { title: `You lost ${formatAmount(Math.abs(units(outcome.result, decimals)), 2)} ${symbol}`, color: "text-down" }
+        : { title: "You broke even", color: "text-ink" }
+    : refunded !== null
+      ? { title: `Refund of ${money(refunded)}`, color: "text-ink" }
+      : { title: view.label, color: "text-ink" };
+  const subline = outcome
+    ? `${signed((ratio ?? 0) * 100, 1)}% on your ${money(gross)} stake`
+    : refunded !== null
+      ? "Your full stake comes back, including the entry fee."
+      : epoch
+        ? `The result is known after the close at ${utcTime(epoch.closesAt)} UTC.`
+        : null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center sm:p-6"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClose();
+      }}
+    >
+      <div aria-hidden="true" className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="entry-title"
+        onClick={(event) => event.stopPropagation()}
+        className="relative flex max-h-[90dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border border-white/[0.08] bg-surface shadow-[0_30px_80px_rgba(0,0,0,0.6)] sm:rounded-3xl"
+      >
+        <header className="flex items-start justify-between gap-3 px-5 pt-5 sm:px-6">
+          <span className="flex min-w-0 items-center gap-3">
+            <CoinIcon id={lot.backedAsset} size={36} />
+            <span className="flex min-w-0 flex-col">
+              <span id="entry-title" className="text-base font-semibold">{lot.backedAsset} entry</span>
+              <span className="num truncate text-[11px] text-muted">{epoch ? windowText(epoch) : `${utcTime(lot.epochOpensAt)} UTC`}</span>
+            </span>
+          </span>
+          <span className="flex shrink-0 items-center gap-2">
+            <button type="button" onClick={onClose} aria-label="Close" className="grid size-9 cursor-pointer place-items-center rounded-full bg-white/5 text-muted transition-colors duration-150 hover:bg-white/10 hover:text-ink">
+              <X size={16} aria-hidden="true" />
+            </button>
+          </span>
+        </header>
+
+        <div className="flex flex-col gap-5 overflow-y-auto px-5 pb-5 pt-4 sm:px-6">
+          <div className="flex flex-col gap-1">
+            <span className={`num text-2xl font-semibold tracking-tight ${headline.color}`}>{headline.title}</span>
+            {subline && <span className="text-xs text-muted">{subline}</span>}
+          </div>
+
+          <dl className="flex flex-col divide-y divide-white/[0.06] rounded-xl bg-bg/60 px-4">
+            <DetailRow label="Stake">{money(gross)}</DetailRow>
+            <DetailRow label="Entry fee" note={refunded !== null ? "Refunded with your stake" : "Kept by the pool"}>{fee > 0n && units(fee, decimals) < 0.01 ? `${formatAmount(units(fee, decimals), 4)} ${symbol}` : money(fee)}</DetailRow>
+            <DetailRow label="Into the pot">{money(gross - fee)}</DetailRow>
+            <DetailRow label="Score" note={finalShare !== null ? `${lot.backedAsset}'s share of your basket's gains` : liveShare !== null ? "Live estimate" : undefined}>
+              {share !== null ? `${formatAmount(share * 100, 2)}%` : "—"}
+            </DetailRow>
+            {outcome && (
+              <>
+                <DetailRow label="Payout" note="Winnings above your stake">
+                  <span className={outcome.payout > 0n ? "text-up" : ""}>{money(outcome.payout)}</span>
+                </DetailRow>
+                <DetailRow label={lot.state === "withdrawn" ? "Withdrawn to wallet" : owed ? "Left to withdraw" : "Back to you"}>{money(outcome.returned)}</DetailRow>
+              </>
+            )}
+            {refunded !== null && <DetailRow label="Refund">{money(refunded)}</DetailRow>}
+          </dl>
+
+          <dl className="flex flex-col divide-y divide-white/[0.06] rounded-xl bg-bg/60 px-4">
+            <DetailRow label="Entered">{utcTime(lot.admittedAt, true)} UTC</DetailRow>
+            <DetailRow label="Started counting">{lot.execution ? `${utcTime(lot.execution.timestamp, true)} UTC` : "Not executed"}</DetailRow>
+            {epoch?.settlementPot != null && <DetailRow label="Round pot">{money(epoch.settlementPot)}</DetailRow>}
+          </dl>
+
+          <div className="flex flex-col gap-2">
+            <div className="flex items-baseline justify-between gap-3">
+              <h3 className="text-sm font-semibold">Your basket</h3>
+              <span className="text-[11px] text-muted">{since.basis ? `Moves since your entry started · ${since.basis}` : "Moves since your entry started"}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-accent/50 bg-accent/10 px-3 py-2">
+              <span className="flex items-center gap-2">
+                <CoinIcon id={performer.id} size={20} />
+                <span className="text-sm font-semibold">{performer.id}</span>
+                <span className="text-[11px] uppercase tracking-wide text-accent">Performer</span>
+              </span>
+              <span className={`num text-sm ${tone(performer.change)}`}>{pct(performer.change, 2)}</span>
+            </div>
+            <ul className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+              {team.map((row) => (
+                <li key={row.id}>
+                  <CoinBadge id={row.id} change={row.change} />
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {action && <div className="flex justify-end">{action}</div>}
+        </div>
+        <footer className="flex items-center justify-center gap-2 border-t border-white/[0.06] px-5 py-3 text-muted">
+          <span className="text-[11px]">Powered by</span>
+          <svg aria-label="Relative" role="img" viewBox={`-0.5 -0.5 ${wordmark.width + 1} 7`} className="h-3 w-auto overflow-visible">
+            <path d={wordmark.path} fill="none" stroke="currentColor" strokeWidth={1} />
+          </svg>
+        </footer>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
+function YourEntries({ epochs, lots, now, decimals, configuration, collaterals, onSent }: { epochs: Epoch[]; lots: EpochLot[]; now: number; decimals: number; configuration: EpochConfiguration; collaterals: Collateral[]; onSent: () => void }) {
   const { owner } = useAccount();
   const [filter, setFilter] = useState<LotGroup | "all">("all");
   const byOpen = new Map(epochs.map((epoch) => [epoch.opensAt, epoch]));
@@ -584,8 +771,6 @@ function YourEntries({ epochs, lots, now, decimals, configuration, collaterals, 
               decimals={decimals}
               program={configuration.program}
               collaterals={collaterals}
-              selected={item.lot.address === teamLot}
-              onSelect={item.epoch ? () => onShowTeam(item.lot) : null}
               onSent={onSent}
             />
           ))}
@@ -690,16 +875,8 @@ export function EpochsView({
   );
   const marketClosed = marketClosedReason(overview.configuration);
   const entriesKnown = owner ? lots !== null : !connecting;
-  const [chosenLot, setChosenLot] = useState<string | null>(null);
-  const roundLot = epoch && lots ? ([...lots].filter((item) => item.epochOpensAt === epoch.opensAt && item.owner === owner).sort((a, b) => Number(b.nonce) - Number(a.nonce))[0] ?? null) : null;
-  const pickedLot = lots?.find((item) => item.address === chosenLot && item.owner === owner) ?? null;
-  const pickedEpoch = pickedLot ? (epochs.find((item) => item.opensAt === pickedLot.epochOpensAt) ?? null) : null;
-  const teamLot = pickedLot && pickedEpoch ? pickedLot : roundLot;
-  const teamEpoch = pickedLot && pickedEpoch ? pickedEpoch : epoch;
-  const showTeam = useCallback((lot: EpochLot) => {
-    setChosenLot(lot.address);
-    requestAnimationFrame(() => document.getElementById("your-team")?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }, []);
+  const teamLot = epoch && lots ? ([...lots].filter((item) => item.epochOpensAt === epoch.opensAt && item.owner === owner).sort((a, b) => Number(b.nonce) - Number(a.nonce))[0] ?? null) : null;
+  const teamEpoch = epoch;
   const notices = (
     <>
       {marketClosed && <Notice>{marketClosed}</Notice>}
@@ -735,7 +912,7 @@ export function EpochsView({
         <PerformerPrompt epoch={epoch} coins={coins} now={now} next={next} marketClosed={marketClosed} active={overview.configuration.lifecycle === "active"} onSelect={setSelected} />
       )}
 
-      <YourEntries epochs={epochs} lots={lots ?? []} now={now} decimals={decimals} configuration={overview.configuration} collaterals={collaterals} teamLot={teamLot?.address ?? null} onShowTeam={showTeam} onSent={() => void loadLots()} />
+      <YourEntries epochs={epochs} lots={lots ?? []} now={now} decimals={decimals} configuration={overview.configuration} collaterals={collaterals} onSent={() => void loadLots()} />
 
       {explain && <PayoutModal onClose={closeExplain} />}
     </div>

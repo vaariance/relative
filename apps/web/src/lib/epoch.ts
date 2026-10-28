@@ -249,26 +249,47 @@ export function feeOf(gross: bigint, bps: number, cap: bigint): bigint {
 
 export type LotGroup = "pending" | "active" | "withdrawable" | "history";
 
+export type LotResult = "won" | "lost" | "even";
+
 export interface LotView {
   group: LotGroup;
   label: string;
   refund: boolean;
+  outcome: LotResult | null;
 }
+
+export interface LotOutcome {
+  returned: bigint;
+  payout: bigint;
+  result: bigint;
+  outcome: LotResult;
+}
+
+export function lotOutcome(lot: EpochLot, epoch: Epoch | null): LotOutcome | null {
+  const returned = finalPayout(lot, epoch);
+  if (returned === null) return null;
+  const result = returned - BigInt(lot.grossStake);
+  return { returned, payout: result > 0n ? result : 0n, result, outcome: result > 0n ? "won" : result < 0n ? "lost" : "even" };
+}
+
+const OUTCOME_LABEL: Record<LotResult, string> = { won: "Won", lost: "Lost", even: "Broke even" };
 
 export function lotView(lot: EpochLot, epoch: Epoch | null, now: number): LotView {
   const stage = epoch ? stageOf(epoch, now) : null;
   const afterClose = epoch !== null && now >= epoch.closesAt;
   const refund = lot.refund !== null || (stage !== null && refundStage(stage)) || epoch?.allZero === true || lot.execution === null;
   const owed = lot.claimable !== null && BigInt(lot.claimable) > 0n;
-  if (lot.state === "withdrawn") return { group: "history", label: "Withdrawn", refund };
-  if (lot.refund !== null) return { group: "withdrawable", label: "Refund ready", refund: true };
-  if (owed) return { group: "withdrawable", label: refund ? "Refund withdrawable" : "Payout withdrawable", refund };
-  if (lot.state === "claimable") return { group: "history", label: "Settled · no payout", refund };
-  if (stage === "expired") return { group: "pending", label: "Round not closed", refund: true };
-  if (stage === "voided") return { group: "pending", label: "Awaiting refund", refund: true };
-  if (lot.state === "pending") return afterClose ? { group: "pending", label: "Not executed · refund due", refund: true } : { group: "pending", label: "Awaiting execution", refund };
-  if (lot.state === "scored") return { group: "active", label: "Scored", refund };
-  return { group: "active", label: "Active", refund };
+  const outcome = refund ? null : (lotOutcome(lot, epoch)?.outcome ?? null);
+  const view = (group: LotGroup, label: string, isRefund = refund): LotView => ({ group, label, refund: isRefund, outcome: isRefund ? null : outcome });
+  if (lot.state === "withdrawn") return view("history", outcome ? `${OUTCOME_LABEL[outcome]} · withdrawn` : "Withdrawn");
+  if (lot.refund !== null) return view("withdrawable", "Refund ready", true);
+  if (owed) return view("withdrawable", refund ? "Refund withdrawable" : outcome ? OUTCOME_LABEL[outcome] : "Settled");
+  if (lot.state === "claimable") return view("history", refund ? "Settled" : "Lost");
+  if (stage === "expired") return view("pending", "Round not closed", true);
+  if (stage === "voided") return view("pending", "Awaiting refund", true);
+  if (lot.state === "pending") return afterClose ? view("pending", "Not executed · refund due", true) : view("pending", "Awaiting execution");
+  if (lot.state === "scored") return view("active", "Scored");
+  return view("active", "Active");
 }
 
 export function countdown(seconds: number): string {
