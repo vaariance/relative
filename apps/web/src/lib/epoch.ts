@@ -167,6 +167,19 @@ export function basketScore(entry: readonly bigint[], close: readonly bigint[], 
   return sum === 0n ? 0n : (backed * SCALE) / sum;
 }
 
+export function estimatedScore(rows: readonly Move[], backed: string): number | null {
+  let sum = 0;
+  let own: number | null = null;
+  for (const row of rows) {
+    if (row.change === null) return null;
+    const rise = Math.max(row.change, 0);
+    sum += rise;
+    if (row.id === backed) own = rise;
+  }
+  if (own === null) return null;
+  return sum === 0 ? 0 : own / sum;
+}
+
 export function finalScore(lot: EpochLot, epoch: Epoch | null): bigint | null {
   if (lot.score !== null) return BigInt(lot.score);
   const references = lot.execution?.references;

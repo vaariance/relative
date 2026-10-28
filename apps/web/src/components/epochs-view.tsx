@@ -9,7 +9,7 @@ import Link from "next/link";
 import { createPortal } from "react-dom";
 import { walletEpochLots } from "@/app/actions";
 import { COLLATERAL } from "@/lib/config";
-import { type LotGroup, type Move, type Stage, STAGE_LABEL, type VaultBalances, type EpochsSnapshot, heroRounds, latestEpochs, countdown, epochBasket, executionReferences, finalPayout, lotView, marketClosedReason, moves, refundMint, refundStage, stageOf, units, utcTime, windowText, withdrawSource } from "@/lib/epoch";
+import { type LotGroup, type Move, type Stage, STAGE_LABEL, type VaultBalances, type EpochsSnapshot, heroRounds, latestEpochs, countdown, epochBasket, estimatedScore, executionReferences, finalPayout, lotView, marketClosedReason, moves, refundMint, refundStage, scoreOf, stageOf, units, utcTime, windowText, withdrawSource } from "@/lib/epoch";
 import { formatAmount } from "@/lib/format";
 import { clock, type Collateral, collateralsOf } from "@/lib/market";
 import { useAccount } from "./account";
@@ -373,13 +373,19 @@ function useEpochVaults(program: string, epochAddress: string | null, refreshKey
   return held && held.key === `${epochAddress}:${refreshKey}` ? held.value : undefined;
 }
 
-function TeamCard({ lot, epoch, now, entriesOpen }: { lot: EpochLot; epoch: Epoch; now: number; entriesOpen: boolean }) {
+function TeamCard({ lot, epoch, now, decimals, entriesOpen }: { lot: EpochLot; epoch: Epoch; now: number; decimals: number; entriesOpen: boolean }) {
   const since = useEntryMoves(lot, epoch);
   const view = lotView(lot, epoch, now);
   const rows = since.rows.length > 0 ? since.rows : lot.basket.map((id) => ({ id, change: null }));
   const performer = rows.find((row) => row.id === lot.backedAsset) ?? { id: lot.backedAsset, change: null };
   const team = rows.filter((row) => row.id !== lot.backedAsset);
   const filled = lot.execution !== null;
+  const settled = scoreOf(lot, epoch);
+  const score = settled ?? (since.basis && since.basis !== "at close" ? estimatedScore(since.rows, lot.backedAsset) : null);
+  const paid = finalPayout(lot, epoch);
+  const gross = units(lot.grossStake, decimals);
+  const payout = paid === null ? null : units(paid, decimals);
+  const result = payout !== null && !view.refund ? payout - gross : null;
 
   return (
     <section id="your-team" className={`${card} flex scroll-mt-4 flex-col gap-5 p-5 sm:p-6`}>
@@ -399,10 +405,19 @@ function TeamCard({ lot, epoch, now, entriesOpen }: { lot: EpochLot; epoch: Epoc
               <span className="text-xl font-semibold">{performer.id}</span>
             </span>
           </div>
-          {filled && performer.change !== null && (
+          {filled && score !== null && (
             <div className="flex flex-col gap-0.5">
-              <span className={`num text-2xl font-semibold ${tone(performer.change)}`}>{pct(performer.change, 2)}</span>
-              <span className="text-xs text-muted">vs benchmark since {utcTime(lot.execution!.timestamp)} UTC</span>
+              <span className="text-[11px] uppercase tracking-wide text-accent">Score</span>
+              <span className="num text-2xl font-semibold">{formatAmount(score * 100, 2)}%</span>
+            </div>
+          )}
+          {payout !== null && (
+            <div className="flex flex-col gap-0.5 text-xs">
+              <span className="text-muted">{view.refund ? "Refund" : "Payout"}</span>
+              <span className="num text-sm font-medium">
+                {formatAmount(payout, 2)} {COLLATERAL.symbol}
+                {result !== null && <span className={`ml-1 ${tone(result)}`}>({result >= 0 ? "+" : "−"}{formatAmount(Math.abs(result), 2)})</span>}
+              </span>
             </div>
           )}
         </div>
@@ -714,7 +729,7 @@ export function EpochsView({
       {!entriesKnown ? (
         <section aria-busy="true" aria-label="Loading your entry" className={`${card} min-h-[18rem] animate-pulse`} />
       ) : teamLot && teamEpoch ? (
-        <TeamCard key={teamLot.address} lot={teamLot} epoch={teamEpoch} now={now} entriesOpen={stageOf(teamEpoch, now) === "open" && teamEpoch.entriesOpen && marketClosed === null && overview.configuration.lifecycle === "active"} />
+        <TeamCard key={teamLot.address} lot={teamLot} epoch={teamEpoch} now={now} decimals={decimals} entriesOpen={stageOf(teamEpoch, now) === "open" && teamEpoch.entriesOpen && marketClosed === null && overview.configuration.lifecycle === "active"} />
       ) : (
         <PerformerPrompt epoch={epoch} coins={coins} now={now} next={next} marketClosed={marketClosed} active={overview.configuration.lifecycle === "active"} onSelect={setSelected} />
       )}

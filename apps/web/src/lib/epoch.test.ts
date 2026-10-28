@@ -1,7 +1,7 @@
 import type { Epoch, EpochLot } from "@eox/app-api";
 import { describe, expect, it } from "vitest";
 import settled from "../../test/fixtures/epoch-2026-10-23-0800.json";
-import { TEAMMATES, basketProblem, basketScore, byMove, defaultTeam, entryBasket, heroRounds, latestEpochs, mateLocked, basketMode, startingTeam, withToken, toggleMate, epochBasket, countdown, executionReferences, feeOf, finalPayout, finalScore, lotView, marketClosedReason, moves, refundMint, stageOf, timelineStep, withdrawSource } from "./epoch";
+import { TEAMMATES, basketProblem, basketScore, byMove, defaultTeam, entryBasket, heroRounds, latestEpochs, mateLocked, basketMode, startingTeam, withToken, toggleMate, epochBasket, countdown, estimatedScore, executionReferences, feeOf, finalPayout, finalScore, lotView, marketClosedReason, moves, refundMint, stageOf, timelineStep, withdrawSource } from "./epoch";
 
 const epoch = (phase: Epoch["phase"], extra: Partial<Epoch> = {}): Epoch => ({ address: "x", opensAt: 1000, closesAt: 2000, phase, sealed: true, entriesOpen: false, universe: [], nextNonce: null, lots: null, totalWeight: null, settlementPot: null, allZero: null, closingReferences: [], closingDeadline: 88_400, voidable: false, terminal: false, ledger: null, registry: null, ...extra });
 const lot = (extra: Partial<EpochLot>): EpochLot => ({ address: "l", epochOpensAt: 1000, nonce: "0", owner: "o", grossStake: "100000000", fee: "20000", admittedAt: 1100, basket: [], backedAsset: "ETH", execution: { timestamp: 1101, references: [] }, state: "executed", score: null, weight: null, claimable: null, refund: null, ...extra });
@@ -112,6 +112,19 @@ describe("final score and payout", () => {
     expect(basketScore([100n, 100n, 100n], [110n, 130n, 90n], 0)).toBe(250_000_000_000n);
     expect(basketScore([100n, 100n], [90n, 100n], 0)).toBe(0n);
     expect(basketScore([100n], [110n, 120n], 0)).toBeNull();
+  });
+
+  it("estimates a score as the backed coin's share of the basket's gains", () => {
+    const rows = [
+      { id: "A", change: 0.3 },
+      { id: "B", change: 0.1 },
+      { id: "C", change: -0.1 },
+    ];
+    expect(estimatedScore(rows, "B")).toBeCloseTo(0.25);
+    expect(estimatedScore(rows, "C")).toBe(0);
+    expect(estimatedScore([{ id: "A", change: -0.1 }], "A")).toBe(0);
+    expect(estimatedScore([{ id: "A", change: 0.1 }, { id: "B", change: null }], "A")).toBeNull();
+    expect(estimatedScore(rows, "Z")).toBeNull();
   });
 
   it("uses the program's values while they exist and refunds the gross stake when there is no result", () => {
