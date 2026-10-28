@@ -4,7 +4,7 @@ import { EPOCH_BASKET_SIZE, type Epoch, type EpochOverview } from "@eox/app-api"
 import { ChevronLeft, ChevronRight, Trophy } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { type Move, TEAMMATES, basketMode, basketProblem, epochBasket, marketClosedReason, mateLocked, stageOf } from "@/lib/epoch";
 import { collateralsOf } from "@/lib/market";
 import { useAccount } from "./account";
@@ -155,8 +155,10 @@ export function BasketView({ overview, roster, serverNow }: { overview: EpochOve
   const picks = useEpochPicks(epoch, coins);
   const { rows } = useRoundMoves(shown, coins, now);
   const collaterals = useMemo(() => collateralsOf(overview.configuration), [overview.configuration]);
+  const leaving = useRef(false);
 
   useEffect(() => {
+    if (leaving.current) return;
     if (picks.ready && (!epoch || !picks.backed)) router.replace(epoch ? "/epochs/pick" : "/epochs");
   }, [picks.ready, picks.backed, epoch, router]);
 
@@ -201,8 +203,9 @@ export function BasketView({ overview, roster, serverNow }: { overview: EpochOve
               router.push("/epochs/pick");
             }}
             onSent={() => {
-              picks.clear();
+              leaving.current = true;
               router.push("/epochs");
+              picks.clear();
             }}
           />
         </aside>
