@@ -227,6 +227,9 @@
                 },
                 "v1WritableAccounts": [
                   0,
+                  1,
+                  2,
+                  3,
                   7
                 ]
               },
@@ -239,6 +242,7 @@
                   "3": "9DVQCEWyiEj4iZ511N62Rddex4aZjAkzFvNsnVjrdS95"
                 },
                 "v1WritableAccounts": [
+                  3,
                   6
                 ]
               },
@@ -255,7 +259,9 @@
                   "11": "94dvDz5JVuWCionhG2MWQy8vAKCS27FqWYedwaxiY9Fb"
                 },
                 "v1WritableAccounts": [
+                  1,
                   2,
+                  3,
                   6,
                   7,
                   11,
