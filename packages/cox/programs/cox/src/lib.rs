@@ -780,7 +780,7 @@ pub mod cox {
     }
     pub fn grow_dynamic_account(ctx: Context<GrowDynamicAccount>, additional_bytes: u32) -> Result<()> {
         let p = &ctx.accounts.pool;
-        require!(matches!(p.schema_version, 4 | 5) && p.stage.is_none(), CoxError::BatchBusy);
+        require!(matches!(p.schema_version, 4 | 5), CoxError::BatchBusy);
         let target = &ctx.accounts.target;
         let key = target.key();
         let pool_key = p.key();
@@ -789,12 +789,14 @@ pub mod cox {
         let authority = ctx.accounts.payer.key();
         let privileged = authority == ctx.accounts.registry.admin || authority == ctx.accounts.registry.runtime;
         let mut valid = privileged && fixed.contains(&key);
+        let mut position_target = false;
         let mut limit = if key == pool_key { 32768 } else { dynamic_batch_space(DYNAMIC_MAX_ASSETS + 1) };
         if !valid {
             let data = target.try_borrow_data()?;
             if let Ok(position) = Position::try_deserialize(&mut data.as_ref()) {
                 valid = (privileged || position.owner == authority) && position.pool == pool_key
                     && Pubkey::find_program_address(&[b"position", pool_key.as_ref(), position.owner.as_ref()], &crate::ID).0 == key;
+                position_target = valid;
                 limit = dynamic_position_space(p.classes.len());
             }
             if !valid && privileged {
@@ -806,8 +808,12 @@ pub mod cox {
             }
         }
         require!(valid, CoxError::Unauthorized);
-        let next = validate_growth(target.data_len(), additional_bytes as usize)?;
+        require!(p.stage.is_none() || position_target, CoxError::BatchBusy);
+        let requested = validate_growth(target.data_len(), additional_bytes as usize)?;
+        require!(!position_target || target.data_len() <= limit, CoxError::CapacityExceeded);
+        let next = if position_target { requested.min(limit) } else { requested };
         require!(next <= limit, CoxError::CapacityExceeded);
+        if next == target.data_len() { return Ok(()); }
         let rent = Rent::get()?.minimum_balance(next);
         let needed = rent.saturating_sub(target.lamports());
         if needed > 0 { anchor_lang::system_program::transfer(CpiContext::new(ctx.accounts.system_program.to_account_info(), anchor_lang::system_program::Transfer {

@@ -1165,3 +1165,43 @@ fn verify_prepared_inclusion(count:usize) {
     assert_eq!(p.pool_state().origin_prices.len(),count);
     p.assert_vault();
 }
+
+#[test]
+fn position_storage_growth_during_an_accepted_batch_preserves_financial_state() {
+    let (mut p, _) = fresh_generation(61, false);
+    let owner = p.h.alice.insecure_clone();
+    let runtime = p.h.runtime.insecure_clone();
+    let position = pda(&[b"position", p.pool.as_ref(), owner.pubkey().as_ref()]);
+    p.h.send("initialize_small_position", &[Harness::instruction(a::InitializeDynamicPosition {
+        owner: owner.pubkey(), pool: p.pool, position, system_program: system_program::ID,
+    }, i::InitializeDynamicPosition {})], &[&owner], true);
+    let before_position = p.h.svm.get_account(&position).unwrap().data;
+    let before_pool = p.pool_state();
+    let batch = pda(&[b"batch", p.pool.as_ref()]);
+    p.h.time(ORIGIN + 61);
+    p.h.send("accept_before_position_growth", &[Harness::instruction(a::BeginDynamicPublication {
+        payer: runtime.pubkey(), runtime: runtime.pubkey(), registry: p.registry, pool: p.pool,
+        methodology: p.methodology, batch, vault: p.vault, system_program: system_program::ID, test_vault: None,
+    }, i::BeginDynamicPublication { batch_id: 61, sequence: before_pool.sequence + 1,
+        predecessor: before_pool.state_digest, snapshot: [73;32], benchmark: before_pool.benchmark })], &[&runtime], true);
+    let accepted = p.h.svm.get_account(&p.pool).unwrap().data;
+    let accepted_batch = p.h.svm.get_account(&batch).unwrap().data;
+    p.h.send("owner_partial_growth_during_batch", &[Harness::instruction(a::GrowDynamicAccount {
+        payer: owner.pubkey(), registry: p.registry, pool: p.pool, target: position, system_program: system_program::ID,
+    }, i::GrowDynamicAccount { additional_bytes: 1024 })], &[&owner], true);
+    p.h.send("grow_later_request_page_position", &[Harness::instruction(a::GrowDynamicAccount {
+        payer: runtime.pubkey(), registry: p.registry, pool: p.pool, target: position, system_program: system_program::ID,
+    }, i::GrowDynamicAccount { additional_bytes: 4096 })], &[&runtime], true);
+    let grown = p.h.svm.get_account(&position).unwrap().data;
+    assert_eq!(grown.len(), 8192);
+    p.h.send("duplicate_position_growth_is_harmless", &[Harness::instruction(a::GrowDynamicAccount {
+        payer: runtime.pubkey(), registry: p.registry, pool: p.pool, target: position, system_program: system_program::ID,
+    }, i::GrowDynamicAccount { additional_bytes: 4096 })], &[&runtime], true);
+    assert_eq!(p.h.svm.get_account(&position).unwrap().data, grown);
+    assert_eq!(&grown[..before_position.len()], before_position.as_slice());
+    assert_eq!(p.h.svm.get_account(&p.pool).unwrap().data, accepted);
+    assert_eq!(p.h.svm.get_account(&batch).unwrap().data, accepted_batch);
+    p.h.send("cannot_grow_batch_after_acceptance", &[Harness::instruction(a::GrowDynamicAccount {
+        payer: runtime.pubkey(), registry: p.registry, pool: p.pool, target: batch, system_program: system_program::ID,
+    }, i::GrowDynamicAccount { additional_bytes: 8192 })], &[&runtime], false);
+}
