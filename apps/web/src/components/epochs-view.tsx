@@ -3,7 +3,7 @@
 import { type Epoch, type EpochConfiguration, type EpochLot, type EpochOverview } from "@eox/app-api";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
-import { ChevronDown, ChevronLeft, ChevronRight, Info, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Info, X } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { createPortal } from "react-dom";
@@ -18,7 +18,7 @@ import { useLive } from "./live";
 import { SendButton } from "./send-button";
 import { useSigner } from "./signer";
 import { PerformerPrompt } from "./epoch-flow";
-import { PREVIEW_BASE, REFERENCE_DIGITS, TOKEN_PROGRAM, card, gradient, pct, pickDefault, tone, useNow, useOpeningReferences, well } from "./epoch-shared";
+import { CoinBadge, PREVIEW_BASE, REFERENCE_DIGITS, TOKEN_PROGRAM, card, gradient, pct, pickDefault, tone, useNow, useOpeningReferences, well } from "./epoch-shared";
 import { TradeModes } from "./trade-modes";
 
 const LOTS_MS = 20_000;
@@ -382,7 +382,7 @@ function TeamCard({ lot, epoch, now, entriesOpen }: { lot: EpochLot; epoch: Epoc
   const filled = lot.execution !== null;
 
   return (
-    <section className={`${card} flex flex-col gap-5 p-5 sm:p-6`}>
+    <section id="your-team" className={`${card} flex scroll-mt-4 flex-col gap-5 p-5 sm:p-6`}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-base font-semibold">Your team</h2>
         <span className="flex items-center gap-2">
@@ -408,10 +408,8 @@ function TeamCard({ lot, epoch, now, entriesOpen }: { lot: EpochLot; epoch: Epoc
         </div>
         <ul className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 xl:grid-cols-5">
           {team.map((row) => (
-            <li key={row.id} className="flex h-10 items-center gap-2 rounded-xl bg-bg/60 px-2.5">
-              <CoinIcon id={row.id} size={16} />
-              <span className="min-w-0 flex-1 truncate text-xs font-medium">{row.id}</span>
-              {row.change !== null && <span className={`num text-[11px] ${tone(row.change)}`}>{pct(row.change, 2)}</span>}
+            <li key={row.id}>
+              <CoinBadge id={row.id} change={row.change} />
             </li>
           ))}
         </ul>
@@ -425,11 +423,9 @@ function TeamCard({ lot, epoch, now, entriesOpen }: { lot: EpochLot; epoch: Epoc
   );
 }
 
-function EntryCard({ lot, epoch, now, decimals, program, collaterals, onSent }: { lot: EpochLot; epoch: Epoch | null; now: number; decimals: number; program: string; collaterals: Collateral[]; onSent: () => void }) {
-  const [open, setOpen] = useState(false);
+function EntryCard({ lot, epoch, now, decimals, program, collaterals, selected, onSelect, onSent }: { lot: EpochLot; epoch: Epoch | null; now: number; decimals: number; program: string; collaterals: Collateral[]; selected: boolean; onSelect: (() => void) | null; onSent: () => void }) {
   const [sent, setSent] = useState(0);
   const view = lotView(lot, epoch, now);
-  const since = useEntryMoves(lot, epoch);
   const gross = units(lot.grossStake, decimals);
   const paid = finalPayout(lot, epoch);
   const payout = paid === null ? null : units(paid, decimals);
@@ -447,14 +443,6 @@ function EntryCard({ lot, epoch, now, decimals, program, collaterals, onSent }: 
   };
   const sourceSymbol = source ? (collaterals[source.index]?.symbol ?? COLLATERAL.symbol) : COLLATERAL.symbol;
   const withdrawLabel = source?.amount ? `Withdraw ${formatAmount(units(source.amount, decimals), 2)} ${sourceSymbol}` : view.refund ? "Withdraw refund" : "Withdraw";
-  const change = since.backed?.change ?? null;
-  const line = lot.execution
-    ? change !== null
-      ? `${change > 0 ? "Ahead of" : "Behind"} the benchmark by ${pct(Math.abs(change), 2).replace(/^[+−]/, "")} since ${utcTime(lot.execution.timestamp)} UTC${since.basis === "at close" ? " · final" : since.basis ? ` · ${since.basis}` : ""}`
-      : `Counting from ${utcTime(lot.execution.timestamp)} UTC`
-    : epoch && now >= epoch.closesAt
-      ? "Never executed, so your stake comes back in full"
-      : "Waiting to execute";
   const payoutText = refundable
     ? `${formatAmount(gross, 2)} ${COLLATERAL.symbol} refund`
     : payout !== null
@@ -466,18 +454,29 @@ function EntryCard({ lot, epoch, now, decimals, program, collaterals, onSent }: 
           : "Refund due";
 
   return (
-    <li className={`${well} flex flex-col gap-3 p-4`}>
+    <li
+      onClick={(event) => {
+        if (onSelect && !(event.target as HTMLElement).closest("button, a")) onSelect();
+      }}
+      className={`${well} flex flex-col gap-3 p-4 ring-1 transition-colors duration-150 ${selected ? "ring-accent/60" : "ring-transparent"} ${onSelect ? "cursor-pointer hover:ring-white/15" : ""} ${selected && onSelect ? "hover:ring-accent/60" : ""}`}
+    >
       <div className="flex items-start justify-between gap-3">
         <span className="flex min-w-0 items-center gap-2.5">
           <CoinIcon id={lot.backedAsset} size={28} />
           <span className="flex min-w-0 flex-col">
-            <span className="text-sm font-semibold">{lot.backedAsset}</span>
+            {onSelect ? (
+              <button type="button" onClick={onSelect} aria-pressed={selected} className="w-fit cursor-pointer text-left text-sm font-semibold">
+                {lot.backedAsset}
+                <span className="sr-only"> — show this team</span>
+              </button>
+            ) : (
+              <span className="text-sm font-semibold">{lot.backedAsset}</span>
+            )}
             <span className="num truncate text-[11px] text-muted">{epoch ? windowText(epoch) : `${utcTime(lot.epochOpensAt)} UTC`}</span>
           </span>
         </span>
         <span className={`shrink-0 rounded-pill px-2 py-0.5 text-[11px] ${STATUS_TONE[view.group]}`}>{view.label}</span>
       </div>
-      <p className={`num text-xs ${change === null ? "text-muted" : change > 0 ? "text-up" : "text-down"}`}>{line}</p>
       {cancellable && <p className="text-xs text-muted">This round missed its closing time. Cancel it to get your full stake back.</p>}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <dl className="flex gap-6 text-xs">
@@ -523,33 +522,11 @@ function EntryCard({ lot, epoch, now, decimals, program, collaterals, onSent }: 
           <span className="text-[11px] text-muted">{vaults === undefined ? "Checking…" : "Not withdrawable yet"}</span>
         ) : null}
       </div>
-      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-fit cursor-pointer items-center gap-1 text-[11px] text-muted hover:text-ink">
-        {open ? "Hide basket" : "Show basket"}
-        <ChevronDown size={12} aria-hidden="true" className={`transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open &&
-        (lot.execution ? (
-          <ol className="flex flex-col gap-1">
-            {(since.rows.length > 0 ? since.rows : lot.basket.map((id) => ({ id, change: null }))).map((row, index) => (
-              <li key={row.id} className={`flex h-8 items-center gap-2 rounded-lg px-2 text-xs ${row.id === lot.backedAsset ? "bg-accent/15" : ""}`}>
-                <span className="num w-5 shrink-0 text-right text-[11px] text-muted">{index + 1}</span>
-                <CoinIcon id={row.id} size={16} />
-                <span className={`min-w-0 flex-1 truncate font-medium ${row.id === lot.backedAsset ? "text-accent" : ""}`}>
-                  {row.id}
-                  {row.id === lot.backedAsset && <span className="ml-1.5 font-normal text-accent/80">your token</span>}
-                </span>
-                <span className={`num ${tone(row.change)}`}>{pct(row.change, 2)}</span>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className={`${well} text-xs text-muted`}>Your basket appears here once this entry fills.</p>
-        ))}
     </li>
   );
 }
 
-function YourEntries({ epochs, lots, now, decimals, configuration, collaterals, onSent }: { epochs: Epoch[]; lots: EpochLot[]; now: number; decimals: number; configuration: EpochConfiguration; collaterals: Collateral[]; onSent: () => void }) {
+function YourEntries({ epochs, lots, now, decimals, configuration, collaterals, teamLot, onShowTeam, onSent }: { epochs: Epoch[]; lots: EpochLot[]; now: number; decimals: number; configuration: EpochConfiguration; collaterals: Collateral[]; teamLot: string | null; onShowTeam: (lot: EpochLot) => void; onSent: () => void }) {
   const { owner } = useAccount();
   const [filter, setFilter] = useState<LotGroup | "all">("all");
   const byOpen = new Map(epochs.map((epoch) => [epoch.opensAt, epoch]));
@@ -583,7 +560,18 @@ function YourEntries({ epochs, lots, now, decimals, configuration, collaterals, 
       ) : (
         <ul className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
           {shown.map((item) => (
-            <EntryCard key={item.lot.address} lot={item.lot} epoch={item.epoch} now={now} decimals={decimals} program={configuration.program} collaterals={collaterals} onSent={onSent} />
+            <EntryCard
+              key={item.lot.address}
+              lot={item.lot}
+              epoch={item.epoch}
+              now={now}
+              decimals={decimals}
+              program={configuration.program}
+              collaterals={collaterals}
+              selected={item.lot.address === teamLot}
+              onSelect={item.epoch ? () => onShowTeam(item.lot) : null}
+              onSent={onSent}
+            />
           ))}
         </ul>
       )}
@@ -686,7 +674,16 @@ export function EpochsView({
   );
   const marketClosed = marketClosedReason(overview.configuration);
   const entriesKnown = owner ? lots !== null : !connecting;
+  const [chosenLot, setChosenLot] = useState<string | null>(null);
   const roundLot = epoch && lots ? ([...lots].filter((item) => item.epochOpensAt === epoch.opensAt && item.owner === owner).sort((a, b) => Number(b.nonce) - Number(a.nonce))[0] ?? null) : null;
+  const pickedLot = lots?.find((item) => item.address === chosenLot && item.owner === owner) ?? null;
+  const pickedEpoch = pickedLot ? (epochs.find((item) => item.opensAt === pickedLot.epochOpensAt) ?? null) : null;
+  const teamLot = pickedLot && pickedEpoch ? pickedLot : roundLot;
+  const teamEpoch = pickedLot && pickedEpoch ? pickedEpoch : epoch;
+  const showTeam = useCallback((lot: EpochLot) => {
+    setChosenLot(lot.address);
+    requestAnimationFrame(() => document.getElementById("your-team")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }, []);
   const notices = (
     <>
       {marketClosed && <Notice>{marketClosed}</Notice>}
@@ -716,13 +713,13 @@ export function EpochsView({
 
       {!entriesKnown ? (
         <section aria-busy="true" aria-label="Loading your entry" className={`${card} min-h-[18rem] animate-pulse`} />
-      ) : roundLot ? (
-        <TeamCard lot={roundLot} epoch={epoch} now={now} entriesOpen={stage === "open" && epoch.entriesOpen && marketClosed === null && overview.configuration.lifecycle === "active"} />
+      ) : teamLot && teamEpoch ? (
+        <TeamCard key={teamLot.address} lot={teamLot} epoch={teamEpoch} now={now} entriesOpen={stageOf(teamEpoch, now) === "open" && teamEpoch.entriesOpen && marketClosed === null && overview.configuration.lifecycle === "active"} />
       ) : (
         <PerformerPrompt epoch={epoch} coins={coins} now={now} next={next} marketClosed={marketClosed} active={overview.configuration.lifecycle === "active"} onSelect={setSelected} />
       )}
 
-      <YourEntries epochs={epochs} lots={lots ?? []} now={now} decimals={decimals} configuration={overview.configuration} collaterals={collaterals} onSent={() => void loadLots()} />
+      <YourEntries epochs={epochs} lots={lots ?? []} now={now} decimals={decimals} configuration={overview.configuration} collaterals={collaterals} teamLot={teamLot?.address ?? null} onShowTeam={showTeam} onSent={() => void loadLots()} />
 
       {explain && <PayoutModal onClose={closeExplain} />}
     </div>

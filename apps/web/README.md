@@ -158,19 +158,23 @@ The layout:
   the wallet balance of the chosen collateral (USDC or rlUSD, sent as
   `collateralMint`), the exact fee with its rate and cap, then one button that
   goes to the wallet. The basket is the 30 coins the contract scores against,
-  the backed coin included, and must be exactly 30. It fills itself: every coin
-  in a 30-coin round, and in a larger round the other coins in the round's own
-  order (`defaultTeam` in `src/lib/epoch.ts`). Edit basket opens a picker that
-  lists the other coins by their move against $CRYPTO, behind first. With up to
-  58 coins it asks which coins to leave out (`leaveOutCount`); with more it asks
-  for 29 to include. Entries use the API's `entriesOpen` gate and cannot be
-  sold or cancelled, so there is no Sell side. When no round is open, the panel
+  the backed coin included, and must be exactly 30. Step 1 picks the
+  performer; step 2 (`/epochs/basket`) chooses the rest of the basket. A 30-coin
+  round fills it with every other coin and cannot be changed. A larger round,
+  of any size, starts filled with the first 29 other coins in the round's own
+  order (`startingTeam`), never ranked by move, so the user can enter as it is.
+  They swap coins on coin badges (`CoinBadge`) with a search: while 29 are in
+  the basket the rest are locked until one is removed, and Reset basket goes
+  back to the prefilled 29 (`basketMode`, `toggleMate` and `mateLocked` in
+  `src/lib/epoch.ts`). Changing the performer to a coin already in the basket
+  puts the old performer in its place.
+  Entries use the API's `entriesOpen` gate and cannot be sold or cancelled, so there is no Sell side. When no round is open, the panel
   says whether another one is open or scheduled. Below 1280px a bottom button
   ("Back SOL") opens the panel as a sheet once a coin is picked.
 - **Your entries:** one card per entry with All / Running / Waiting / To
-  withdraw / Past filters. Each shows the status, the backed coin's move against
-  $CRYPTO since its execution, the stake, the payout and gain or loss, and its
-  basket. The program keeps a score only while an entry is
+  withdraw / Past filters. Each shows the status, the stake, the payout and gain
+  or loss. Clicking one shows its basket in the Your team card, with each
+  coin's move since execution. The program keeps a score only while an entry is
   scored and drops the payout once it is withdrawn, so `finalPayout` in
   `src/lib/epoch.ts` recomputes it from on-chain values (execution and closing
   references, net stake, pot and total weight) with the contract's integer

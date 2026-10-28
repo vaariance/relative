@@ -3,12 +3,13 @@
 import { type Epoch, type PreviewHistory } from "@eox/app-api";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
-import { ChevronRight, Clock } from "lucide-react";
+import { Check, ChevronRight, Clock } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { type Move, moves, refundStage, stageOf, utcTime, windowText } from "@/lib/epoch";
 import { historyEstimates } from "@/lib/estimate";
 import { formatAmount } from "@/lib/format";
 import { useAccount } from "./account";
+import { CoinIcon } from "./coin-icon";
 import { useLive } from "./live";
 
 export const REFERENCE_DIGITS = 12;
@@ -37,6 +38,38 @@ export function pct(value: number | null, digits = 3): string {
 
 export function tone(value: number | null): string {
   return value === null || value === 0 ? "text-muted" : value > 0 ? "text-up" : "text-down";
+}
+
+export function CoinBadge({ id, change, selected = false, disabled = false, checkbox = false, onClick, label }: { id: string; change: number | null; selected?: boolean; disabled?: boolean; checkbox?: boolean; onClick?: () => void; label?: string }) {
+  const mark = !onClick ? null : checkbox ? (
+    <span aria-hidden="true" className={`grid size-4 shrink-0 place-items-center rounded-[5px] border ${selected ? "border-ink bg-ink text-bg" : "border-white/25"}`}>
+      {selected && <Check size={11} strokeWidth={3} />}
+    </span>
+  ) : (
+    selected && <Check size={14} strokeWidth={2.5} aria-hidden="true" className="shrink-0 text-ink" />
+  );
+  const body = (
+    <>
+      <CoinIcon id={id} size={16} />
+      <span className="min-w-0 flex-1 truncate text-left text-xs font-medium">{id}</span>
+      {change !== null && <span className={`num text-[11px] ${tone(change)}`}>{pct(change, 2)}</span>}
+      {mark}
+    </>
+  );
+  const base = "flex h-10 w-full items-center gap-2 rounded-xl px-2.5";
+  if (!onClick) return <span className={`${base} bg-bg/60`}>{body}</span>;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={selected}
+      aria-label={label}
+      className={`${base} bg-bg/60 ring-1 transition-colors duration-150 ${selected && !checkbox ? "ring-white/30" : "ring-transparent"} ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:ring-white/20"}`}
+    >
+      {body}
+    </button>
+  );
 }
 
 export function pickDefault(epochs: readonly Epoch[], now: number): string | null {

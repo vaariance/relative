@@ -94,7 +94,7 @@ function PickRow({ id, detail, change, onRemove, label }: { id: string; detail: 
   );
 }
 
-export function EntryTicket(props: { epoch: Epoch; coins: string[]; backed: string; mates: string[]; move: number | null; decimals: number; fee: { bps: number; cap: string }; collaterals: Collateral[]; onClear: () => void; onToggle: (id: string) => void; onSent: () => void }) {
+export function EntryTicket(props: { epoch: Epoch; coins: string[]; backed: string; mates: string[]; move: number | null; decimals: number; fee: { bps: number; cap: string }; collaterals: Collateral[]; onClear: () => void; onSent: () => void }) {
   const { epoch, coins, backed, mates, decimals, fee, collaterals } = props;
   const { owner } = useAccount();
   const [amount, setAmount] = useState("");
@@ -122,9 +122,7 @@ export function EntryTicket(props: { epoch: Epoch; coins: string[]; backed: stri
   const intent: Intent | null = problem === null && gross !== null ? { operation: "epoch-entry", opensAt: epoch.opensAt, grossStake: gross.toString(), basket: entryBasket(coins, backed, mates), backedAsset: backed, collateralMint: collaterals.length > 1 && chosen ? chosen.mint : undefined } : null;
   const mode = basketMode(coins);
   const extra = mates.length - TEAMMATES;
-  const basketAction = mode === "leave-out" && extra > 0 ? `Leave out ${extra} ${extra === 1 ? "coin" : "coins"}` : mode === "pick" && extra < 0 ? `Pick ${-extra} more` : "Finish basket";
-  const left = coins.filter((id) => id !== backed && !mates.includes(id));
-  const listed = mode === "pick" ? mates : left;
+  const basketAction = mode === "pick" && extra < 0 ? `Pick ${-extra} more` : "Finish basket";
   const preset = (dollars: number) => setAmount(String(dollars));
   const max = () => {
     if (wallet === null) return;
@@ -144,11 +142,8 @@ export function EntryTicket(props: { epoch: Epoch; coins: string[]; backed: stri
             Clear all
           </button>
         </div>
-        <ul className="flex max-h-72 flex-col gap-4 overflow-y-auto pr-1">
+        <ul className="flex flex-col gap-4">
           <PickRow id={backed} detail="Performer" change={props.move} onRemove={props.onClear} label={`Remove ${backed} and start over`} />
-          {listed.map((id) => (
-            <PickRow key={id} id={id} detail={mode === "pick" ? "In basket" : "Left out of basket"} onRemove={() => props.onToggle(id)} label={mode === "pick" ? `Remove ${id}` : `Put ${id} back`} />
-          ))}
         </ul>
       </div>
 

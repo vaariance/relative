@@ -53,40 +53,26 @@ export function byMove(a: number | null, b: number | null): number {
   return a - b;
 }
 
-export function leaveOutCount(universe: readonly string[]): number {
-  return Math.max(0, universe.length - EPOCH_BASKET_SIZE);
-}
-
-export function leavesOut(universe: readonly string[]): boolean {
-  return leaveOutCount(universe) <= TEAMMATES;
-}
-
 export function toggleMate(universe: readonly string[], backed: string, draft: readonly string[], id: string): string[] {
-  if (id === backed || !universe.includes(id)) return [...draft];
-  if (draft.includes(id)) {
-    const out = universe.length - 1 - draft.length;
-    if (leavesOut(universe) && out >= leaveOutCount(universe)) return [...draft];
-    return draft.filter((item) => item !== id);
-  }
-  if (!leavesOut(universe) && draft.length >= TEAMMATES) return [...draft];
+  if (id === backed || !universe.includes(id) || basketMode(universe) === "fixed") return [...draft];
+  if (draft.includes(id)) return draft.filter((item) => item !== id);
+  if (draft.length >= TEAMMATES) return [...draft];
   return [...draft, id];
 }
 
 export function mateLocked(universe: readonly string[], draft: readonly string[], id: string): boolean {
-  const on = draft.includes(id);
-  if (leavesOut(universe)) return on && universe.length - 1 - draft.length >= leaveOutCount(universe);
-  return !on && draft.length >= TEAMMATES;
+  if (basketMode(universe) === "fixed") return true;
+  return !draft.includes(id) && draft.length >= TEAMMATES;
 }
 
-export type BasketMode = "fixed" | "leave-out" | "pick";
+export type BasketMode = "fixed" | "pick";
 
 export function basketMode(universe: readonly string[]): BasketMode {
-  if (universe.length === EPOCH_BASKET_SIZE) return "fixed";
-  return leavesOut(universe) ? "leave-out" : "pick";
+  return universe.length === EPOCH_BASKET_SIZE ? "fixed" : "pick";
 }
 
 export function startingTeam(universe: readonly string[], backed: string): string[] {
-  return basketMode(universe) === "pick" ? [] : universe.filter((id) => id !== backed);
+  return defaultTeam(universe, backed);
 }
 
 export function withToken(universe: readonly string[], backed: string | null, mates: readonly string[] | null, id: string | null): { backed: string | null; mates: string[] | null } {
@@ -94,7 +80,7 @@ export function withToken(universe: readonly string[], backed: string | null, ma
   if (!universe.includes(id)) return { backed, mates: mates ? [...mates] : null };
   if (mates === null) return { backed: id, mates: null };
   const kept = mates.filter((item) => item !== id);
-  const restored = backed !== null && basketMode(universe) !== "pick" && !kept.includes(backed) ? [...kept, backed] : kept;
+  const restored = backed !== null && kept.length < mates.length && !kept.includes(backed) ? [...kept, backed] : kept;
   return { backed: id, mates: restored };
 }
 
@@ -106,7 +92,7 @@ export function basketProblem(universe: readonly string[], backed: string, mates
   if (universe.length < EPOCH_BASKET_SIZE) return "This Epoch's asset list is not available yet.";
   if (!universe.includes(backed) || mates.some((id) => id === backed || !universe.includes(id)) || new Set(mates).size !== mates.length) return "Your basket has a coin that is not in this round.";
   if (mates.length < TEAMMATES) return `Add ${TEAMMATES - mates.length} more ${TEAMMATES - mates.length === 1 ? "coin" : "coins"} to your basket.`;
-  if (mates.length > TEAMMATES) return `Leave out ${mates.length - TEAMMATES} more ${mates.length - TEAMMATES === 1 ? "coin" : "coins"}.`;
+  if (mates.length > TEAMMATES) return `Remove ${mates.length - TEAMMATES} ${mates.length - TEAMMATES === 1 ? "coin" : "coins"} from your basket.`;
   return null;
 }
 

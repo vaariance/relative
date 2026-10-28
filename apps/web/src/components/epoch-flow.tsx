@@ -1,18 +1,17 @@
 "use client";
 
 import { EPOCH_BASKET_SIZE, type Epoch, type EpochOverview } from "@eox/app-api";
-import { Check, ChevronLeft, ChevronRight, Trophy } from "lucide-react";
+import { ChevronLeft, ChevronRight, Trophy } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo } from "react";
-import { TEAMMATES, basketMode, basketProblem, epochBasket, leaveOutCount, marketClosedReason, mateLocked, stageOf } from "@/lib/epoch";
+import { useEffect, useMemo, useState } from "react";
+import { type Move, TEAMMATES, basketMode, basketProblem, epochBasket, marketClosedReason, mateLocked, stageOf } from "@/lib/epoch";
 import { collateralsOf } from "@/lib/market";
 import { useAccount } from "./account";
 import { CoinIcon } from "./coin-icon";
-import { AssetRows, useEpochSeries } from "./epoch-market";
 import { EntryTicket } from "./epoch-ticket";
 import { useEpochPicks } from "./epoch-picks";
-import { EntryClosed, card, pct, pickDefault, primary, tone, useNow, useRoundMoves } from "./epoch-shared";
+import { CoinBadge, EntryClosed, card, ordered, pct, pickDefault, primary, tone, useNow, useRoundMoves } from "./epoch-shared";
 import { openLogin } from "./signer";
 
 export function entryRound(epochs: readonly Epoch[], now: number): Epoch | null {
@@ -21,8 +20,6 @@ export function entryRound(epochs: readonly Epoch[], now: number): Epoch | null 
 
 function basketStatus(coins: string[], backed: string, mates: string[]): { text: string; ready: boolean } {
   if (basketProblem(coins, backed, mates) === null) return { text: "Basket ready", ready: true };
-  const mode = basketMode(coins);
-  if (mode === "leave-out") return { text: `Leave out ${mates.length - TEAMMATES} more`, ready: false };
   return { text: `Pick ${TEAMMATES - mates.length} more`, ready: false };
 }
 
@@ -126,7 +123,6 @@ export function PickPerformerView({ overview, roster, serverNow }: { overview: E
   const { now, epoch, shown, coins, marketClosed, next } = useFlow(overview, roster, serverNow);
   const picks = useEpochPicks(epoch, coins);
   const { rows } = useRoundMoves(shown, coins, now);
-  const series = useEpochSeries(shown, now);
   const pick = (id: string) => {
     if (!owner) return openLogin();
     picks.setPerformer(id);
@@ -141,20 +137,12 @@ export function PickPerformerView({ overview, roster, serverNow }: { overview: E
           <EntryClosed epoch={shown} now={now} next={next} marketClosed={marketClosed} onSelect={() => router.push("/epochs")} />
         </section>
       )}
-      <AssetRows
+      <CoinGrid
         rows={rows}
-        series={series}
-        onRow={epoch ? (row) => pick(row.id) : undefined}
-        rowLabel={(row) => `Pick ${row.id} as your performer, ${pct(row.change, 2)} against the benchmark`}
-        action={(row) =>
-          !epoch ? null : picks.backed === row.id ? (
-            <span className="inline-flex h-8 items-center gap-1 rounded-pill bg-accent px-3 text-xs font-medium text-white">
-              <Check size={12} strokeWidth={3} aria-hidden="true" /> Picked
-            </span>
-          ) : (
-            <span className="inline-flex h-8 items-center rounded-pill bg-accent/15 px-3 text-xs font-medium text-accent">Pick</span>
-          )
-        }
+        count={`${rows.length} coins in this round`}
+        selected={(id) => picks.backed === id}
+        label={(id) => `Pick ${id} as your performer`}
+        onPick={epoch ? pick : undefined}
       />
     </div>
   );
@@ -166,7 +154,6 @@ export function BasketView({ overview, roster, serverNow }: { overview: EpochOve
   const { now, epoch, shown, coins } = useFlow(overview, roster, serverNow);
   const picks = useEpochPicks(epoch, coins);
   const { rows } = useRoundMoves(shown, coins, now);
-  const series = useEpochSeries(shown, now);
   const collaterals = useMemo(() => collateralsOf(overview.configuration), [overview.configuration]);
 
   useEffect(() => {
@@ -177,37 +164,27 @@ export function BasketView({ overview, roster, serverNow }: { overview: EpochOve
 
   const backed = picks.backed;
   const mode = basketMode(coins);
-  const leave = leaveOutCount(coins);
-  const others = rows.filter((row) => row.id !== backed);
   const status = basketStatus(coins, backed, picks.mates);
   const move = rows.find((row) => row.id === backed)?.change ?? null;
-  const title = mode === "fixed" ? `Your basket of ${EPOCH_BASKET_SIZE}` : mode === "leave-out" ? `Leave out ${leave} ${leave === 1 ? "coin" : "coins"}` : `Pick ${TEAMMATES} coins`;
-  const text =
-    mode === "fixed"
-      ? `${backed} is compared against the other ${TEAMMATES} coins in this round.`
-      : mode === "leave-out"
-        ? `Your basket is ${backed} and every other coin except the ${leave === 1 ? "one" : leave} you leave out.`
-        : `Choose the ${TEAMMATES} coins ${backed} is compared against.`;
+  const full = picks.mates.length >= TEAMMATES;
+  const title = mode === "fixed" ? `Your basket of ${EPOCH_BASKET_SIZE}` : "Review your basket";
+  const text = mode === "fixed" ? `${backed} is compared against the other ${TEAMMATES} coins in this round.` : `We filled your basket with ${TEAMMATES} coins to go with ${backed}. Swap any of them, or enter as it is.`;
 
   return (
     <div className="flex flex-col gap-5 pb-24 xl:pb-0">
       <StepHeader step={2} title={title} text={text} back={{ href: "/epochs/pick", label: "Change performer" }} />
       <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_350px]">
-        <div className="min-w-0">
-          <AssetRows
-            rows={others}
-            series={series}
-            onRow={mode === "fixed" ? undefined : (row) => !mateLocked(coins, picks.mates, row.id) && picks.toggleBasket(row.id)}
-            rowLabel={(row) => (picks.mates.includes(row.id) ? (mode === "pick" ? `Remove ${row.id}` : `Leave out ${row.id}`) : mode === "pick" ? `Add ${row.id}` : `Put ${row.id} back`)}
-            action={(row) => {
-              const included = picks.mates.includes(row.id);
-              const locked = mateLocked(coins, picks.mates, row.id);
-              if (mode === "fixed") return <span className="inline-flex h-8 items-center rounded-pill bg-surface-2 px-3 text-xs text-muted">In</span>;
-              if (mode === "pick") return <span className={`inline-flex h-8 items-center gap-1 rounded-pill px-3 text-xs font-medium ${included ? "bg-accent text-white" : locked ? "bg-surface-2 text-muted/50" : "bg-surface-2 text-muted"}`}>{included ? <><Check size={12} strokeWidth={3} aria-hidden="true" /> Added</> : "Add"}</span>;
-              return <span className={`inline-flex h-8 items-center rounded-pill px-3 text-xs font-medium ${included ? (locked ? "bg-surface-2 text-muted/50" : "bg-surface-2 text-ink") : "border border-dashed border-white/25 text-muted"}`}>{included ? "In" : "Left out"}</span>;
-            }}
-          />
-        </div>
+        <CoinGrid
+          rows={rows.filter((row) => row.id !== backed)}
+          count={mode === "fixed" ? `All ${TEAMMATES} coins in` : `${picks.mates.length} of ${TEAMMATES} in your basket`}
+          hint={mode === "pick" && full ? "Remove a coin to add another." : undefined}
+          action={mode === "pick" && picks.edited ? { label: "Reset basket", onClick: picks.resetBasket } : undefined}
+          checkbox
+          selected={(id) => mode === "fixed" || picks.mates.includes(id)}
+          disabled={(id) => mateLocked(coins, picks.mates, id)}
+          label={(id) => (picks.mates.includes(id) ? `Remove ${id} from your basket` : `Add ${id} to your basket`)}
+          onPick={mode === "fixed" ? undefined : picks.toggleBasket}
+        />
 
         <aside id="epoch-stake-panel" className="min-w-0 xl:sticky xl:top-6">
           <EntryTicket
@@ -223,7 +200,6 @@ export function BasketView({ overview, roster, serverNow }: { overview: EpochOve
               picks.clear();
               router.push("/epochs/pick");
             }}
-            onToggle={picks.toggleBasket}
             onSent={() => {
               picks.clear();
               router.push("/epochs");
@@ -238,5 +214,55 @@ export function BasketView({ overview, roster, serverNow }: { overview: EpochOve
         </button>
       </div>
     </div>
+  );
+}
+
+function useSteadyOrder(rows: Move[]): Move[] {
+  const [order, setOrder] = useState<string[]>([]);
+  const ids = rows.map((row) => row.id).sort().join(",");
+  const priced = rows.some((row) => row.change !== null);
+  const [key, setKey] = useState("");
+  const next = `${ids}|${priced}`;
+  if (next !== key) {
+    setKey(next);
+    setOrder(ordered(rows, "strong").map((row) => row.id));
+  }
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return order.map((id) => byId.get(id)).filter((row): row is Move => row !== undefined);
+}
+
+function CoinGrid({ rows, count, hint, action, checkbox = false, selected, disabled, label, onPick }: { rows: Move[]; count: string; hint?: string; action?: { label: string; onClick: () => void }; checkbox?: boolean; selected: (id: string) => boolean; disabled?: (id: string) => boolean; label?: (id: string) => string; onPick?: (id: string) => void }) {
+  const [query, setQuery] = useState("");
+  const term = query.trim().toUpperCase();
+  const shown = useSteadyOrder(rows).filter((row) => row.id.toUpperCase().includes(term));
+
+  return (
+    <section className={`${card} flex flex-col gap-4 p-4 sm:p-5`}>
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="flex flex-col gap-0.5">
+          <span className="num text-sm font-medium">{count}</span>
+          {hint && <span className="text-xs text-muted">{hint}</span>}
+        </span>
+        {action && (
+          <button type="button" onClick={action.onClick} className="h-9 cursor-pointer rounded-control px-3 text-xs font-medium text-muted transition-colors duration-150 hover:bg-surface-2 hover:text-ink">
+            {action.label}
+          </button>
+        )}
+        {onPick && rows.length > 12 && (
+          <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search coins" aria-label="Search coins" className="ml-auto h-9 min-w-0 flex-1 rounded-control border border-line bg-bg px-3 text-xs text-ink placeholder:text-muted sm:max-w-64" />
+        )}
+      </div>
+      {shown.length === 0 ? (
+        <p className="py-8 text-center text-sm text-muted">{term ? `No coin matches “${query.trim()}”.` : "No coins in this round yet."}</p>
+      ) : (
+        <ul className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
+          {shown.map((row) => (
+            <li key={row.id}>
+              <CoinBadge id={row.id} change={row.change} selected={selected(row.id)} disabled={disabled?.(row.id)} checkbox={checkbox} onClick={onPick ? () => onPick(row.id) : undefined} label={label?.(row.id)} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

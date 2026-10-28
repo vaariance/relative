@@ -2,7 +2,7 @@
 
 import type { Epoch } from "@eox/app-api";
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { startingTeam, toggleMate, withToken } from "@/lib/epoch";
+import { TEAMMATES, startingTeam, toggleMate, withToken } from "@/lib/epoch";
 
 const STORE = "relative_epoch_picks";
 
@@ -56,6 +56,8 @@ export interface EpochPicks {
   mates: string[];
   setPerformer: (id: string | null) => void;
   toggleBasket: (id: string) => void;
+  edited: boolean;
+  resetBasket: () => void;
   clear: () => void;
 }
 
@@ -66,17 +68,22 @@ export function useEpochPicks(epoch: Epoch | null, coins: string[]): EpochPicks 
   const opensAt = epoch?.opensAt ?? null;
   const own = picks.opensAt === opensAt ? picks : { ...EMPTY, opensAt };
   const backed = own.backed && coins.includes(own.backed) ? own.backed : null;
-  const mates = (own.mates ?? (backed ? startingTeam(coins, backed) : [])).filter((id) => coins.includes(id) && id !== backed);
+  const stored = own.mates && own.mates.length <= TEAMMATES ? own.mates : null;
+  const mates = (stored ?? (backed ? startingTeam(coins, backed) : [])).filter((id) => coins.includes(id) && id !== backed);
   return {
     ready,
     backed,
     mates,
     setPerformer: (id) => {
       if (id !== null && id === backed) return;
-      setPicks({ opensAt, ...withToken(coins, backed, own.mates, id) });
+      setPicks({ opensAt, ...withToken(coins, backed, stored, id) });
     },
     toggleBasket: (id) => {
       if (backed) setPicks({ opensAt, backed, mates: toggleMate(coins, backed, mates, id) });
+    },
+    edited: stored !== null,
+    resetBasket: () => {
+      if (backed) setPicks({ opensAt, backed, mates: null });
     },
     clear: () => setPicks({ ...EMPTY, opensAt }),
   };
