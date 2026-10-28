@@ -2485,3 +2485,21 @@ another agent needs to know.
 - **Rules for agents:** Prepare capacity for each queued request page, including accepted batches. Preserve financial bytes and cursor; do not bypass owner/PDA checks or introduce idle polling.
 - **Open:** Source approval and committed release are still required; no live program, signer route, publisher or schedule was changed by this fix.
 - **Refs:** `apps/cox-publisher/README.md`; compiled regression `position_storage_growth_during_an_accepted_batch_preserves_financial_state`. Native 248, compiled Basic 66, compiled Epoch 23 and signer 102 tests pass; signer TypeScript check passes.
+
+### 2026-10-28 · Godwin (Claude Code) · Epoch entries report wins and losses; entry details sheet
+
+- **Area:** `apps/web` (`src/components/epochs-view.tsx`, `src/lib/epoch.ts`); Vercel project `cox-web`.
+- **What:** At Godwin's request, a losing Epoch entry no longer reads as a payout.
+  - **Card:** Stake, Payout and Result. Payout is only the amount above the stake, so a loss shows 0.00. The badge is Won or Lost (with "· withdrawn" once withdrawn). Stake left from a loss is labelled as such, and the withdraw button names the amount.
+  - **Details sheet:** clicking a card opens:
+    - the result and its percentage of the stake;
+    - stake, entry fee, amount into the pot, score, payout and amount left to withdraw;
+    - when the entry was made and started counting, and the round pot;
+    - the basket's moves since the entry started.
+  - **Your team card:** shows Payout and Result the same way. It always shows the latest entry in the current round; clicking an entry card no longer switches it.
+  - **Shared calculation:** `lotOutcome` in `src/lib/epoch.ts` gives money back, payout and result for every view.
+  - **Verified:** 157 web tests and the type check pass. The sheet was seen in a browser with sample entries only.
+  - **Deployed:** `fc886ee` to production at <https://getrelative.trade> (`cox-q10lthxdv-gef-228639f6`).
+- **Rules for agents:** "Payout" in the web app means winnings above the stake, never the amount returned. Use `lotOutcome` rather than recomputing it. The money left from a loss is still withdrawn with `epoch-withdraw`.
+- **Open:** Not checked with a connected wallet. "Into the pot" is shown to 2 decimals, so a 10 USDC stake reads 10.00, not 9.998.
+- **Refs:** commit `fc886ee`.
