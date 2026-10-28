@@ -66,11 +66,17 @@ export function PortfolioView({ classes, status, decimals }: { classes: ClassVie
   const total = rows.length > 0 && rows.every((row) => row.change !== null) ? rows.reduce((sum, row) => sum + (row.change ?? 0), 0) : null;
   const tone = (value: number | null) => (value === null ? "text-muted" : { up: "text-up", down: "text-down", flat: "text-muted" }[direction(value)]);
   const payable = portfolio?.payable ?? "0";
+  const pending = BigInt(portfolio?.pending ?? "0");
+  const refundable = BigInt(portfolio?.refundable ?? "0");
+  const owed = BigInt(payable) > 0n;
+  const activity = rows.length > 0 || (portfolio?.requests.length ?? 0) > 0 || pending > 0n || refundable > 0n || owed;
   const cards = [
-    { label: "Worth now, about", icon: Wallet, value: wallet?.total ?? redeemable, note: total === null ? null : `Gain or loss so far: ${formatSigned(total, 6)} ${COLLATERAL.symbol}` },
-    { label: "Pending buys", icon: Clock, value: toNumber(portfolio?.pending ?? "0", decimals), note: null },
-    { label: "Refundable", icon: Undo2, value: toNumber(portfolio?.refundable ?? "0", decimals), note: null },
-  ];
+    rows.length > 0 && { label: "Worth now, about", icon: Wallet, value: wallet?.total ?? redeemable, note: total === null ? null : `Gain or loss so far: ${formatSigned(total, 6)} ${COLLATERAL.symbol}` },
+    pending > 0n && { label: "Pending buys", icon: Clock, value: toNumber(pending.toString(), decimals), note: null },
+    refundable > 0n && { label: "Refundable", icon: Undo2, value: toNumber(refundable.toString(), decimals), note: null },
+  ].filter((card) => card !== false);
+  const shown = 1 + cards.length + (owed ? 1 : 0);
+  const columns = ["", "sm:max-w-sm", "sm:grid-cols-2", "sm:grid-cols-2 lg:grid-cols-3", "sm:grid-cols-2 lg:grid-cols-4", "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5"][shown];
   const who = !live
     ? "This is fixture data, so it shows a demo wallet."
     : !owner
@@ -92,7 +98,7 @@ export function PortfolioView({ classes, status, decimals }: { classes: ClassVie
 
       {live && <ProfileCard />}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <div className={`grid gap-3 ${columns}`}>
         <StatCard icon={Coins} title="Wallet balance" value={<Figure text={balances ? formatAmount(balances.usdc, 2) : owner && live ? "…" : "—"} unit={COLLATERAL.symbol} />}>
           <dl className="mt-3 flex flex-col gap-1 text-xs">
             <div className="flex justify-between">
@@ -108,83 +114,87 @@ export function PortfolioView({ classes, status, decimals }: { classes: ClassVie
         {cards.map((card) => (
           <StatCard key={card.label} icon={card.icon} title={card.label} value={<Figure text={formatAmount(card.value, 4)} unit={COLLATERAL.symbol} />} caption={card.note} />
         ))}
-        <StatCard icon={ArrowDownToLine} title="Ready to withdraw" value={<Figure text={formatAmount(toNumber(payable, decimals))} unit={COLLATERAL.symbol} />}>
-          <div className="mt-3 flex flex-col gap-2">
-            {market.collaterals.length > 1 && (
-              <label className="flex items-center justify-between gap-2 text-xs text-muted">
-                Receive as
-                <select value={receiveIn?.mint ?? ""} onChange={(event) => setReceive(event.target.value)} className="h-8 cursor-pointer rounded-control border border-line bg-bg px-2 text-xs text-ink">
-                  {market.collaterals.map((item) => (
-                    <option key={item.mint} value={item.mint}>
-                      {item.symbol}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            <SendButton
-              intent={BigInt(payable) > 0n ? { operation: "withdraw", amount: payable, ...(market.collaterals.length > 1 && receiveIn ? { collateralMint: receiveIn.mint } : {}) } : null}
-              label={BigInt(payable) > 0n ? "Withdraw all" : "Nothing to withdraw"}
-              connectLabel="Login to withdraw"
-              className="h-10 w-full rounded-pill bg-accent text-sm font-medium text-accent-ink"
-              hideSuccess
-            />
-          </div>
-        </StatCard>
+        {owed && (
+          <StatCard icon={ArrowDownToLine} title="Ready to withdraw" value={<Figure text={formatAmount(toNumber(payable, decimals))} unit={COLLATERAL.symbol} />}>
+            <div className="mt-3 flex flex-col gap-2">
+              {market.collaterals.length > 1 && (
+                <label className="flex items-center justify-between gap-2 text-xs text-muted">
+                  Receive as
+                  <select value={receiveIn?.mint ?? ""} onChange={(event) => setReceive(event.target.value)} className="h-8 cursor-pointer rounded-control border border-line bg-bg px-2 text-xs text-ink">
+                    {market.collaterals.map((item) => (
+                      <option key={item.mint} value={item.mint}>
+                        {item.symbol}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <SendButton
+                intent={{ operation: "withdraw", amount: payable, ...(market.collaterals.length > 1 && receiveIn ? { collateralMint: receiveIn.mint } : {}) }}
+                label="Withdraw all"
+                connectLabel="Login to withdraw"
+                className="h-10 w-full rounded-pill bg-accent text-sm font-medium text-accent-ink"
+                hideSuccess
+              />
+            </div>
+          </StatCard>
+        )}
       </div>
 
-      <section className="overflow-x-auto rounded-card border border-line bg-surface shadow-card">
-        <h2 className="border-b border-line px-4 py-3 text-sm font-medium">Performance positions</h2>
-        {rows.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-muted">No positions yet.</p>
-        ) : (
-          <table className="w-full min-w-[940px] text-sm">
-            <thead>
-              <tr className="border-b border-line text-left text-xs text-muted">
-                <th scope="col" className="px-4 py-3 font-normal">Position</th>
-                <th scope="col" className="px-4 py-3 text-right font-normal">Position units</th>
-                <th scope="col" className="px-4 py-3 text-right font-normal">Locked in requests</th>
-                <th scope="col" className="px-4 py-3 text-right font-normal">Unit value</th>
-                <th scope="col" className="px-4 py-3 text-right font-normal">Paid ({COLLATERAL.symbol})</th>
-                <th scope="col" className="px-4 py-3 text-right font-normal">Worth now, about ({COLLATERAL.symbol})</th>
-                <th scope="col" className="px-4 py-3 text-right font-normal">Gain or loss</th>
-                <th scope="col" className="px-4 py-3 text-right font-normal"><span className="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.classId} onClick={(event) => !(event.target as HTMLElement).closest("button, a, [role=status]") && router.push(`/portfolio/${row.classId}`)} className="cursor-pointer border-b border-line transition-colors duration-150 last:border-b-0 hover:bg-surface-2">
-                  <th scope="row" className="px-4 py-3 text-left font-medium">
-                    <Link href={`/portfolio/${row.classId}`} className="underline-offset-4 hover:underline">{positionName(row.classId)}</Link>
-                    <span className="mt-0.5 block text-xs font-normal text-muted">{row.classId === CRYPTO_CLASS ? "Tracks the index" : `${row.classId} vs the benchmark`}</span>
-                  </th>
-                  <td className="num px-4 py-3 text-right">{formatAmount(row.units, 4)}</td>
-                  <td className="num px-4 py-3 text-right">{formatAmount(row.locked, 4)}</td>
-                  <td className="num px-4 py-3 text-right">{row.unitValue === null ? "n/a" : formatAmount(row.unitValue, 6)}</td>
-                  <td className="num px-4 py-3 text-right">{row.paid === null ? "—" : formatAmount(row.paid, 4)}</td>
-                  <td className="num px-4 py-3 text-right">{row.redeemable === null ? "n/a" : formatAmount(row.redeemable, 6)}</td>
-                  <td className={`num px-4 py-3 text-right ${tone(row.change)}`}>{row.change === null ? "—" : formatSigned(row.change, 6)}</td>
-                  <td className="px-4 py-2 text-right">
-                    <span className="inline-flex flex-col items-end gap-1">
-                      <SendButton
-                        trading
-                        intent={row.free !== null && expiryBatch !== null ? { operation: "redeem", fromClass: row.classId, units: row.free, minimumProceeds: "0", expiryBatch } : null}
-                        describe={`Cash out your ${nameOf(row.classId)} position to ${COLLATERAL.symbol}`}
-                        label="Cash out"
-                        connectLabel="Cash out"
-                        className="h-9 rounded-pill border border-line px-3 text-xs"
-                        quiet
-                      />
-                    </span>
-                  </td>
+      {activity && (
+        <section className="overflow-x-auto rounded-card border border-line bg-surface shadow-card">
+          <h2 className="border-b border-line px-4 py-3 text-sm font-medium">Performance positions</h2>
+          {rows.length === 0 ? (
+            <p className="px-4 py-6 text-sm text-muted">No positions yet.</p>
+          ) : (
+            <table className="w-full min-w-[940px] text-sm">
+              <thead>
+                <tr className="border-b border-line text-left text-xs text-muted">
+                  <th scope="col" className="px-4 py-3 font-normal">Position</th>
+                  <th scope="col" className="px-4 py-3 text-right font-normal">Position units</th>
+                  <th scope="col" className="px-4 py-3 text-right font-normal">Locked in requests</th>
+                  <th scope="col" className="px-4 py-3 text-right font-normal">Unit value</th>
+                  <th scope="col" className="px-4 py-3 text-right font-normal">Paid ({COLLATERAL.symbol})</th>
+                  <th scope="col" className="px-4 py-3 text-right font-normal">Worth now, about ({COLLATERAL.symbol})</th>
+                  <th scope="col" className="px-4 py-3 text-right font-normal">Gain or loss</th>
+                  <th scope="col" className="px-4 py-3 text-right font-normal"><span className="sr-only">Actions</span></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.classId} onClick={(event) => !(event.target as HTMLElement).closest("button, a, [role=status]") && router.push(`/portfolio/${row.classId}`)} className="cursor-pointer border-b border-line transition-colors duration-150 last:border-b-0 hover:bg-surface-2">
+                    <th scope="row" className="px-4 py-3 text-left font-medium">
+                      <Link href={`/portfolio/${row.classId}`} className="underline-offset-4 hover:underline">{positionName(row.classId)}</Link>
+                      <span className="mt-0.5 block text-xs font-normal text-muted">{row.classId === CRYPTO_CLASS ? "Tracks the index" : `${row.classId} vs the benchmark`}</span>
+                    </th>
+                    <td className="num px-4 py-3 text-right">{formatAmount(row.units, 4)}</td>
+                    <td className="num px-4 py-3 text-right">{formatAmount(row.locked, 4)}</td>
+                    <td className="num px-4 py-3 text-right">{row.unitValue === null ? "n/a" : formatAmount(row.unitValue, 6)}</td>
+                    <td className="num px-4 py-3 text-right">{row.paid === null ? "—" : formatAmount(row.paid, 4)}</td>
+                    <td className="num px-4 py-3 text-right">{row.redeemable === null ? "n/a" : formatAmount(row.redeemable, 6)}</td>
+                    <td className={`num px-4 py-3 text-right ${tone(row.change)}`}>{row.change === null ? "—" : formatSigned(row.change, 6)}</td>
+                    <td className="px-4 py-2 text-right">
+                      <span className="inline-flex flex-col items-end gap-1">
+                        <SendButton
+                          trading
+                          intent={row.free !== null && expiryBatch !== null ? { operation: "redeem", fromClass: row.classId, units: row.free, minimumProceeds: "0", expiryBatch } : null}
+                          describe={`Cash out your ${nameOf(row.classId)} position to ${COLLATERAL.symbol}`}
+                          label="Cash out"
+                          connectLabel="Cash out"
+                          className="h-9 rounded-pill border border-line px-3 text-xs"
+                          quiet
+                        />
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+      )}
 
-      <RequestList status={status} decimals={decimals} />
+      {(activity || !owner) && <RequestList status={status} decimals={decimals} />}
     </div>
   );
 }
