@@ -2450,3 +2450,15 @@ another agent needs to know.
   - **Cloud Build:** local image builds failed on slow npm downloads, so images are now built with `gcloud builds submit` (about 1.5 minutes). Joel granted the default compute service account `529206295845-compute@developer` read access on bucket `colosseum-eox_cloudbuild` and push access (`roles/artifactregistry.writer`) on the `eox` repository. Build logs are not written to Cloud Logging; that account has no Logs Writer role.
 - **Rules for agents:** Build the API image with Cloud Build when local downloads are slow; do not widen that account's roles further without Joel.
 - **Refs:** commit `5d81145`.
+
+### 2026-10-27 · Godwin (Claude Code) · Epoch team card shows score and payout; simpler How Epoch Works
+
+- **Area:** `apps/web` (`epochs-view.tsx`, `epoch-flow.tsx`, `epoch-ticket.tsx`, `src/lib/epoch.ts`).
+- **What:**
+  - **Score first:** a user's STRK entry beat the benchmark by 0.58% and still lost 1.05 of 5 USDC, while the card showed the move in green. The Your team card now leads with the score: the backed coin's share of its basket's gains. It is final from the contract's values after the close (`scoreOf`), and a live estimate while open (`estimatedScore`). The payout and gain or loss show under it, and the benchmark move is no longer on the card.
+  - **Labels:** the pick and basket lists and the hero ranking say "Moves since the round opened", and the ticket says an entry counts from when it executes.
+  - **Redirect fix:** after an entry is sent the page goes straight to `/epochs` instead of flashing the performer step.
+  - **How Epoch Works:** three short steps (pick a performer, build your basket, get paid) at Godwin's request; the formula and refund rules are no longer in the explainer.
+- **Rules for agents:** `estimatedScore` is an estimate of the score only; never estimate a payout in the web app.
+- **Open:** Peter: with user-chosen baskets the score's denominator differs per entry, so backing a volatile coin and filling the basket with calm coins raises the score without any forecast. With one common basket the denominator cancels out of the payout. Decide before the 31 → 61 asset expansion.
+- **Refs:** commits `8f7b95e`..`764f439`.
