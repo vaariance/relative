@@ -4,7 +4,7 @@ import { formatChange } from "@/lib/format";
 import { type Board, loadBoard } from "./board-data";
 import { LogoProvider } from "@/components/coin-icon";
 import { CookieSettingsButton } from "@/components/cookie-consent";
-import { getLogos } from "@/lib/data";
+import { getCoinInfo } from "@/lib/data";
 import { Coin } from "./coin";
 import { Faq, type Question } from "./faq";
 import { Features } from "./features";
@@ -447,7 +447,7 @@ const questions: Question[] = [
 ];
 
 export async function Landing() {
-  const [board, logos] = await Promise.all([loadBoard(), getLogos()]);
+  const [board, { logos }] = await Promise.all([loadBoard(), getCoinInfo()]);
   const total = Math.max(board?.count ?? ROSTER.length, ROSTER.length);
   const star = board?.star ?? { rank: 1, id: "SOL", name: "Solana", lead: 0 };
   const up = star.lead >= 0;

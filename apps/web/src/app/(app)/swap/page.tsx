@@ -1,11 +1,12 @@
 import { SwapForm } from "@/components/swap-form";
-import { getAssets, getDeployment, getStatus } from "@/lib/data";
+import { getAssets, getCoinInfo, getDeployment, getStatus } from "@/lib/data";
+import { byPopularity } from "@/lib/popularity";
 import { CRYPTO_CLASS, decimalsOf } from "@/lib/view";
 
 export default async function SwapPage() {
-  const [assets, deployment, status] = await Promise.all([getAssets(), getDeployment(), getStatus()]);
+  const [assets, deployment, status, coins] = await Promise.all([getAssets(), getDeployment(), getStatus(), getCoinInfo()]);
   const decimals = decimalsOf(deployment);
-  const classes = [...assets.map((asset) => asset.assetId), CRYPTO_CLASS];
+  const classes = [...byPopularity(assets, (asset) => asset.assetId, coins.ranks).map((asset) => asset.assetId), CRYPTO_CLASS];
 
   return (
     <div className="mx-auto flex w-full max-w-lg flex-col gap-6">

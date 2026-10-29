@@ -7,8 +7,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type Move, TEAMMATES, basketMode, basketProblem, epochBasket, marketClosedReason, mateLocked, stageOf } from "@/lib/epoch";
 import { collateralsOf } from "@/lib/market";
+import { byPopularity } from "@/lib/popularity";
 import { useAccount } from "./account";
-import { CoinIcon } from "./coin-icon";
+import { CoinIcon, useCoinRanks } from "./coin-icon";
 import { EntryTicket } from "./epoch-ticket";
 import { useEpochPicks } from "./epoch-picks";
 import { CoinBadge, EntryClosed, card, ordered, pct, pickDefault, primary, tone, useNow, useRoundMoves } from "./epoch-shared";
@@ -140,6 +141,7 @@ export function PickPerformerView({ overview, roster, serverNow }: { overview: E
       <CoinGrid
         rows={rows}
         count={`${rows.length} coins in this round`}
+        popular
         selected={(id) => picks.backed === id}
         label={(id) => `Pick ${id} as your performer`}
         onPick={epoch ? pick : undefined}
@@ -220,7 +222,7 @@ export function BasketView({ overview, roster, serverNow }: { overview: EpochOve
   );
 }
 
-function useSteadyOrder(rows: Move[]): Move[] {
+function useSteadyOrder(rows: Move[], ranks: Record<string, number> | null): Move[] {
   const [order, setOrder] = useState<string[]>([]);
   const ids = rows.map((row) => row.id).sort().join(",");
   const priced = rows.some((row) => row.change !== null);
@@ -228,16 +230,17 @@ function useSteadyOrder(rows: Move[]): Move[] {
   const next = `${ids}|${priced}`;
   if (next !== key) {
     setKey(next);
-    setOrder(ordered(rows, "strong").map((row) => row.id));
+    setOrder((ranks ? byPopularity(rows, (row) => row.id, ranks) : ordered(rows, "strong")).map((row) => row.id));
   }
   const byId = new Map(rows.map((row) => [row.id, row]));
   return order.map((id) => byId.get(id)).filter((row): row is Move => row !== undefined);
 }
 
-function CoinGrid({ rows, count, hint, action, checkbox = false, selected, disabled, label, onPick }: { rows: Move[]; count: string; hint?: string; action?: { label: string; onClick: () => void }; checkbox?: boolean; selected: (id: string) => boolean; disabled?: (id: string) => boolean; label?: (id: string) => string; onPick?: (id: string) => void }) {
+function CoinGrid({ rows, count, hint, action, checkbox = false, popular = false, selected, disabled, label, onPick }: { rows: Move[]; count: string; hint?: string; action?: { label: string; onClick: () => void }; checkbox?: boolean; popular?: boolean; selected: (id: string) => boolean; disabled?: (id: string) => boolean; label?: (id: string) => string; onPick?: (id: string) => void }) {
   const [query, setQuery] = useState("");
   const term = query.trim().toUpperCase();
-  const shown = useSteadyOrder(rows).filter((row) => row.id.toUpperCase().includes(term));
+  const ranks = useCoinRanks();
+  const shown = useSteadyOrder(rows, popular ? ranks : null).filter((row) => row.id.toUpperCase().includes(term));
   const moving = rows.some((row) => row.change !== null);
 
   return (

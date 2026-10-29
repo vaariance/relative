@@ -32,7 +32,7 @@ function Signing({ children }: { children: ReactNode }) {
   );
 }
 
-export function Providers({ live, demo, apiUrl, sequence, fee, market, preview, logos, children }: { live: boolean; demo: Portfolio | null; apiUrl: string; sequence: number | null; fee: FeeTerms | null; market: Market; preview: Preview | null; logos: Record<string, string>; children: ReactNode }) {
+export function Providers({ live, demo, apiUrl, sequence, fee, market, preview, logos, ranks, children }: { live: boolean; demo: Portfolio | null; apiUrl: string; sequence: number | null; fee: FeeTerms | null; market: Market; preview: Preview | null; logos: Record<string, string>; ranks: Record<string, number>; children: ReactNode }) {
   return (
     <ConnectionProvider endpoint={endpoint}>
       <WalletProvider wallets={wallets} autoConnect>
@@ -40,7 +40,7 @@ export function Providers({ live, demo, apiUrl, sequence, fee, market, preview, 
           <SnackbarProvider>
             <AccountProvider live={live} demo={demo} apiUrl={apiUrl} sequence={sequence} fee={fee} market={market} preview={preview}>
               <LiveProvider>
-                <LogoProvider logos={logos}>{children}</LogoProvider>
+                <LogoProvider logos={logos} ranks={ranks}>{children}</LogoProvider>
               </LiveProvider>
             </AccountProvider>
           </SnackbarProvider>

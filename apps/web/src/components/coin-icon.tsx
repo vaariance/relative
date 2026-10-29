@@ -3,14 +3,20 @@
 import { type ReactNode, createContext, useCallback, useContext, useMemo, useState } from "react";
 import { llamaLogo } from "@/lib/logos";
 
-const LogoContext = createContext<Record<string, string>>({});
+const NO_RANKS: Record<string, number> = {};
+const LogoContext = createContext<{ logos: Record<string, string>; ranks: Record<string, number> }>({ logos: {}, ranks: NO_RANKS });
 
-export function LogoProvider({ logos, children }: { logos: Record<string, string>; children: ReactNode }) {
-  return <LogoContext.Provider value={logos}>{children}</LogoContext.Provider>;
+export function LogoProvider({ logos, ranks = NO_RANKS, children }: { logos: Record<string, string>; ranks?: Record<string, number>; children: ReactNode }) {
+  const value = useMemo(() => ({ logos, ranks }), [logos, ranks]);
+  return <LogoContext.Provider value={value}>{children}</LogoContext.Provider>;
+}
+
+export function useCoinRanks(): Record<string, number> {
+  return useContext(LogoContext).ranks;
 }
 
 export function useCoinLogo(id: string, last?: string | null): { source: string | undefined; fail: () => void } {
-  const logos = useContext(LogoContext);
+  const { logos } = useContext(LogoContext);
   const sources = useMemo(() => [logos[id], llamaLogo(id), last].filter((source): source is string => Boolean(source)), [logos, id, last]);
   const [failed, setFailed] = useState(0);
   const fail = useCallback(() => setFailed((count) => count + 1), []);

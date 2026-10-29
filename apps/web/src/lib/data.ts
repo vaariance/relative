@@ -105,24 +105,41 @@ export async function getPublications(): Promise<Publication[]> {
 const LOGO_SECONDS = 86400;
 const LOGO_BATCH = 250;
 
-async function logoImages(ids: string[], key: string | undefined): Promise<Array<[string, string]>> {
+interface CoinMarket {
+  id: string;
+  image?: string;
+  market_cap_rank?: number | null;
+}
+
+export interface CoinInfo {
+  logos: Record<string, string>;
+  ranks: Record<string, number>;
+}
+
+async function coinMarkets(ids: string[], key: string | undefined): Promise<CoinMarket[]> {
   try {
     const response = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=${LOGO_BATCH}&ids=${ids.join(",")}`, {
       headers: key ? { accept: "application/json", "x-cg-demo-api-key": key } : { accept: "application/json" },
       next: { revalidate: LOGO_SECONDS },
     });
     if (!response.ok) return [];
-    const coins = (await response.json()) as Array<{ id: string; image?: string }>;
-    return coins.flatMap((coin) => (coin.image ? [[coin.id, coin.image] as [string, string]] : []));
+    return (await response.json()) as CoinMarket[];
   } catch {
     return [];
   }
 }
 
-export async function getLogos(): Promise<Record<string, string>> {
+export async function getCoinInfo(): Promise<CoinInfo> {
   const key = process.env.COINGECKO_API_KEY?.trim();
-  const images = new Map((await Promise.all(chunk([...new Set(Object.values(COINGECKO_IDS))], LOGO_BATCH).map((ids) => logoImages(ids, key)))).flat());
-  return Object.fromEntries(Object.entries(COINGECKO_IDS).flatMap(([assetId, id]) => (images.has(id) ? [[assetId, images.get(id) as string]] : [])));
+  const coins = new Map((await Promise.all(chunk([...new Set(Object.values(COINGECKO_IDS))], LOGO_BATCH).map((ids) => coinMarkets(ids, key)))).flat().map((coin) => [coin.id, coin]));
+  const logos: Record<string, string> = {};
+  const ranks: Record<string, number> = {};
+  for (const [assetId, id] of Object.entries(COINGECKO_IDS)) {
+    const coin = coins.get(id);
+    if (coin?.image) logos[assetId] = coin.image;
+    if (typeof coin?.market_cap_rank === "number" && coin.market_cap_rank > 0) ranks[assetId] = coin.market_cap_rank;
+  }
+  return { logos, ranks };
 }
 
 export async function getDemoPortfolio(): Promise<Portfolio | null> {

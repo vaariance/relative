@@ -7,8 +7,9 @@ import { LiveChange, LiveFigure, LiveSparkline } from "@/components/live";
 import { RowLink } from "@/components/row-link";
 import { CardTitle, Figure, StatCard } from "@/components/stat-card";
 import { TradeModes } from "@/components/trade-modes";
-import { getAssets, getDeployment, getPublications } from "@/lib/data";
+import { getAssets, getCoinInfo, getDeployment, getPublications } from "@/lib/data";
 import { formatAmount } from "@/lib/format";
+import { byPopularity } from "@/lib/popularity";
 import { classViews, currentOf, decimalsOf, latest, levelSeries, marketRow, standings } from "@/lib/view";
 
 const SPARK = 240;
@@ -35,7 +36,8 @@ function EmptyRow({ id, name, href, note }: { id: string; name: string; href: st
 }
 
 export default async function MarketsPage() {
-  const [assets, deployment, publications] = await Promise.all([getAssets(), getDeployment(), getPublications()]);
+  const [assets, deployment, publications, coins] = await Promise.all([getAssets(), getDeployment(), getPublications(), getCoinInfo()]);
+  const popular = byPopularity(assets, (asset) => asset.assetId, coins.ranks);
   const current = currentOf(publications);
 
   const classes = classViews(current, assets, decimalsOf(deployment));
@@ -81,7 +83,7 @@ export default async function MarketsPage() {
             </tr>
           </thead>
           <tbody>
-            {assets.map((asset) => {
+            {popular.map((asset) => {
               const row = marketRow(publications, classes, asset.assetId);
               if (!current) return <EmptyRow key={asset.assetId} id={asset.assetId} name={asset.name} href={`/assets/${asset.assetId}`} />;
               if (row.price === null && row.reference === null) return <EmptyRow key={asset.assetId} id={asset.assetId} name={asset.name} href={`/assets/${asset.assetId}`} note="No data yet" />;

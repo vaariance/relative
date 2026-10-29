@@ -36,7 +36,7 @@ It is also read by `scripts/coingecko-ids.ts`.
 
 ### Coin logos
 
-Each asset's CoinGecko id is kept in `src/lib/coingecko-ids.json`. Once a day the server asks CoinGecko for the image of every listed id, in batches of 250. If an image is missing or fails to load, the icon tries DefiLlama, then a local file, then the ticker's first letter.
+Each asset's CoinGecko id is kept in `src/lib/coingecko-ids.json`. Once a day the server asks CoinGecko for the image and market-cap rank of every listed id, in batches of 250. The Markets table, the Swap coin picker and the Epoch performer picker list coins by that rank, most popular first; coins without a rank come last in API order. The Epoch basket step keeps its own order, which also decides the default basket. If an image is missing or fails to load, the icon tries DefiLlama, then a local file, then the ticker's first letter.
 
 When assets are added, run `pnpm --filter @eox/web logos:ids`. It looks up each asset without an id on CoinGecko by ticker, keeps a coin only when its CoinGecko price is within 20% of the live price, and adds it to the JSON file. Existing ids are never changed. Assets it cannot match are printed; look them up by hand and add them. SIREN has no confident match and shows its letter.
 
