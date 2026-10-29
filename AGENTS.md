@@ -2515,3 +2515,16 @@ another agent needs to know.
 - **Rules for agents:** Never pad a missing asset with a value. Read `point.assets ?? history.assets` when lining up a point's values.
 - **Open:** Godwin: `historyEstimates` in `apps/web/src/lib/estimate.ts` skips any point whose arrays are shorter than `history.assets`, so the web charts still restart at the change until it reads `point.assets`. It does not break on the new field.
 - **Refs:** commit `2b1dfdd`, `apps/app-api/README.md` (Live previews).
+
+### 2026-10-29 · Joel (Claude Code) · Live API unstuck after PYTH; history read by each point's own asset list
+
+- **Area:** `apps/app-api` (`src/cox/publication-archive.ts`), `apps/web` (`src/lib/estimate.ts`); Cloud Run `cox-app-api-live`, dev VM.
+- **What:**
+  - **Stuck API:** after PYTH joined, the pool's publication account grew from 8,192 to 16,384 bytes. The API's archive reader accepted only 8,192, refused publications 49 onward with "fails its account hash" and kept serving publication 48, from before PYTH. So `/v1/assets` gave PYTH no price and every page showed the market as of 28 Oct 07:00 UTC.
+  - **Fix:** the reader accepts the program's sizes, 8,192 up to the 256-class size (40,960 bytes) in 8 KiB steps, the same rule as the publisher's archive (`be6b9ad`). A test covers 16 KiB and 40 KiB accounts and refuses 12 KiB and 48 KiB; it fails on the old code. The real archived publications 48, 49 and 72 read correctly.
+  - **Deployed:** Cloud Run `cox-app-api-live-00043-l9t` (image `cox-app-api:be6b9ad`) and the VM at `be6b9ad`. Both serve publication 73 with PYTH priced. The first VM deploy dropped during `pnpm install` and was rerun at once.
+  - **Web charts:** `historyEstimates` now reads `point.assets ?? history.assets`, so points from before an asset joined are kept with their own assets and the new asset is never filled (`ead557e`). 158 web tests pass. Not deployed to Vercel.
+  - **Sizes at 247 assets:** the in-memory preview history (one hour of seconds, seven days of minutes) measures about 300 MB, against 45 MB at 32 assets, on a 1 GiB instance. A 1,440-step history response is about 1.5 MB today and about 11 MB at 247 assets; the web app's ranges ask for 167 to 288 steps.
+- **Rules for agents:** never assume a fixed size for the publication or batch account; it grows with the class count.
+- **Open:** Godwin: deploy `ead557e` to Vercel before the 11:00 UTC inclusion, or charts restart again there. Joel: check memory and adoption on both APIs after 11:00.
+- **Refs:** commits `be6b9ad`, `ead557e`.
