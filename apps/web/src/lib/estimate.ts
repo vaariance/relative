@@ -145,16 +145,16 @@ export const PREVIEW_SCALES = { price: "100000000", reference: "1000000000000" }
 export function historyEstimates(history: PreviewHistory, scales: { price: string; reference: string } = PREVIEW_SCALES): Estimate[] {
   const price = digitsOf(scales.price);
   const reference = digitsOf(scales.reference);
-  const count = history.assets.length;
   const out: Estimate[] = [];
   const points = [...history.points].sort((a, b) => a.timestamp - b.timestamp);
   for (const point of points) {
-    if (point.prices.length !== count || point.references.length !== count) continue;
+    const assets = point.assets ?? history.assets;
+    if (point.prices.length !== assets.length || point.references.length !== assets.length) continue;
     const last = out[out.length - 1];
     if (last && point.timestamp <= last.at) continue;
     const prices: Record<string, number> = {};
     const references: Record<string, number> = {};
-    history.assets.forEach((id, index) => {
+    assets.forEach((id, index) => {
       prices[id] = scaled(point.prices[index], price);
       references[id] = scaled(point.references[index], reference);
     });

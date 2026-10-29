@@ -164,6 +164,26 @@ describe("preview history", () => {
     expect(historyEstimates(history).some((item) => item.at === 1792738660)).toBe(false);
   });
 
+  it("reads a point from before an asset joined by its own asset list and never fills the new asset", () => {
+    const joined: PreviewHistory = {
+      assets: ["BTC", "ETH", "PYTH"],
+      step: 60,
+      from: 1792738440,
+      to: 1792738680,
+      points: [
+        { end: 1792738560, timestamp: 1792738560, assets: ["BTC", "ETH"], benchmark: "95000000000000", prices: ["8100000000000", "300000000000"], references: ["101000000000000", "99500000000000"] },
+        { end: 1792738620, timestamp: 1792738620, benchmark: "96000000000000", prices: ["8200000000000", "310000000000", "7000000"], references: ["102000000000000", "99000000000000", "100000000000000"] },
+        { end: 1792738680, timestamp: 1792738680, assets: ["BTC", "ETH"], benchmark: "96000000000000", prices: ["8200000000000"], references: ["102000000000000"] },
+      ],
+    };
+    const estimates = historyEstimates(joined);
+    expect(estimates.map((item) => item.at)).toEqual([1792738560, 1792738620]);
+    expect(estimates[0].benchmark).toBe(95);
+    expect(estimates[0].prices.ETH).toBe(3000);
+    expect("PYTH" in estimates[0].prices).toBe(false);
+    expect(estimates[1].prices.PYTH).toBeCloseTo(0.07, 9);
+  });
+
   it("keeps a missing step as a gap", () => {
     const series = seriesOf(historyEstimates(history), "level");
     expect(series.map((point) => point.cutoff)).toEqual([1792738500, 1792738619]);
