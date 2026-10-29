@@ -8,7 +8,9 @@ import type { ChainPublication } from "./chain.js";
 
 const FINALIZED_SCHEMA = "cox.publication-archive/v1";
 const CONFIRMED_SCHEMA = "cox.publication-archive/v2";
-const ACCOUNT_BYTES = 8192;
+const ACCOUNT_STEP = 8192;
+const MAX_CLASSES = 256;
+const MAX_ACCOUNT_BYTES = Math.ceil((4096 + 128 * MAX_CLASSES) / ACCOUNT_STEP) * ACCOUNT_STEP;
 const STORAGE = "https://storage.googleapis.com/storage/v1";
 const GCS_URL = /^gs:\/\/([a-z0-9][a-z0-9._-]{1,61}[a-z0-9])\/((?:[A-Za-z0-9._-]+\/)*)$/;
 
@@ -117,7 +119,7 @@ export class PublicationArchive {
       throw new Error(`archived publication ${sequence} has the wrong address or sequence`);
     }
     const bytes = Buffer.from(record.accountBase64, "base64");
-    if (bytes.length !== ACCOUNT_BYTES || bytes.toString("base64") !== record.accountBase64 || sha256(bytes) !== record.accountSha256) {
+    if (bytes.length < ACCOUNT_STEP || bytes.length > MAX_ACCOUNT_BYTES || bytes.length % ACCOUNT_STEP !== 0 || bytes.toString("base64") !== record.accountBase64 || sha256(bytes) !== record.accountSha256) {
       throw new Error(`archived publication ${sequence} fails its account hash`);
     }
     const account = decodeAccount(this.program, "publication", { data: bytes, owner: this.program.programId, executable: false, lamports: 0 });

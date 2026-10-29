@@ -399,6 +399,23 @@ describe("reusable publication account and the publisher archive", () => {
     await expect(store.read(9n)).rejects.toThrow(PublicationArchiveMissing);
   });
 
+  it("reads publication accounts that grew with the asset list, up to the 256-class size", async () => {
+    const account = Object.values(fixture.accounts).find((a) => a.name === "publication")!;
+    const sized = (sequence: string, length: number) => {
+      const bytes = Buffer.alloc(length);
+      Buffer.from(account.dataHex, "hex").copy(bytes);
+      return archiveRecord({ sequence, accountSha256: createHash("sha256").update(bytes).digest("hex"), accountBase64: bytes.toString("base64") });
+    };
+    for (const length of [16384, 40960]) {
+      const store = archive({ 1: sized("1", length) });
+      expect(Buffer.from((await store.read(1n)).publication.stateDigest).toString("hex")).toBe(STATE_DIGEST);
+    }
+    for (const length of [12288, 49152]) {
+      const store = archive({ 1: sized("1", length) });
+      await expect(store.read(1n)).rejects.toThrow("fails its account hash");
+    }
+  });
+
   it("keeps confirmed v2 records apart from finalized v1 records and refuses mixed provenance", async () => {
     const confirmed = { schema: "cox.publication-archive/v2", finalizedSlot: undefined, observedSlot: 88, commitment: "confirmed" };
     const store = archive({
