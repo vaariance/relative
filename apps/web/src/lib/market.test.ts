@@ -54,6 +54,6 @@ describe("trading gate", () => {
     expect(closedNote({ open: false, gate: "preparing", lifecycle: "preparing", opensAt: NOW - 60 }, NOW)).toBe("This market is being set up. Trading opens once it is ready.");
     expect(closedLabel({ open: false, gate: "archived", lifecycle: "archived", opensAt: null }, NOW)).toBe("Market closed");
     expect(closedLabel({ open: false, gate: "unavailable", lifecycle: "active", opensAt: null }, NOW)).toBe("Market unavailable");
-    expect(closedNote({ open: false, gate: "unavailable", lifecycle: "active", opensAt: null }, NOW)).toBe("Prices are not updating right now, so trading is on hold. You can still withdraw what is ready.");
+    expect(closedNote({ open: false, gate: "unavailable", lifecycle: "active", opensAt: null }, NOW)).toBe("Trading is paused while settlement catches up. Withdrawals still work.");
   });
 });

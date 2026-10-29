@@ -82,6 +82,6 @@ export function closedNote(trading: TradingStatus | null, now: number): string |
       : "This market is being set up. Trading opens once it is ready.";
   }
   if (trading.gate === "archived") return "This market has closed and takes no new trades. You can still withdraw what is ready.";
-  if (trading.gate === "unavailable") return "Prices are not updating right now, so trading is on hold. You can still withdraw what is ready.";
+  if (trading.gate === "unavailable") return "Trading is paused while settlement catches up. Withdrawals still work.";
   return "Trading is paused. You can still withdraw what is ready.";
 }
