@@ -663,7 +663,7 @@ export async function Landing() {
               <p {...stylex.props(styles.label)}>Status</p>
               <span {...stylex.props(styles.footFact)}>Solana devnet</span>
               <span {...stylex.props(styles.footFact)}>Devnet USDC and rlUSD</span>
-              <span {...stylex.props(styles.footFact)}>{board ? `${board.count} coins ranked` : "Coins ranked live"}</span>
+              <span {...stylex.props(styles.footFact)}>{board ? `${board.count} coins listed` : "Coins ranked live"}</span>
               <span {...stylex.props(styles.footFact)}>Prices every second</span>
             </div>
             <nav aria-label="Legal" {...stylex.props(styles.footColumn)}>

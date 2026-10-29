@@ -367,7 +367,7 @@ export function Features({ data }: { data: FeatureData }) {
 
       <article {...stylex.props(styles.card)}>
         <div {...stylex.props(styles.art)}>
-          <Status text={`${data.count} ranked`} />
+          <Status text={`${data.count} listed`} />
           <div {...stylex.props(styles.pile)}>
             <div {...stylex.props(styles.coins)}>
               {pile.map((id, index) => (
@@ -378,7 +378,7 @@ export function Features({ data }: { data: FeatureData }) {
             </div>
             <span {...stylex.props(styles.badge)}>
               <span {...stylex.props(styles.live)} />
-              {data.count} coins ranked
+              {data.count} coins listed
             </span>
           </div>
         </div>

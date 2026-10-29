@@ -50,7 +50,7 @@ export async function loadBoard(): Promise<Board | null> {
     const levels = levelSeries(publications);
     const levelDay = levels.filter((point) => point.cutoff >= end - DAY);
     const levelSpark = sample(levelDay.map((point) => point.value / levelDay[0].value - 1), SPARK);
-    return { rows, top, count: ranked.length, scale, star, bottom: ranked.slice(-3), spark, level: latest(levels), levelSpark };
+    return { rows, top, count: assets.length, scale, star, bottom: ranked.slice(-3), spark, level: latest(levels), levelSpark };
   } catch {
     return null;
   }
