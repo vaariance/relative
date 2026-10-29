@@ -2503,3 +2503,15 @@ another agent needs to know.
 - **Rules for agents:** "Payout" in the web app means winnings above the stake, never the amount returned. Use `lotOutcome` rather than recomputing it. The money left from a loss is still withdrawn with `epoch-withdraw`.
 - **Open:** Not checked with a connected wallet. "Into the pot" is shown to 2 decimals, so a 10 USDC stake reads 10.00, not 9.998.
 - **Refs:** commit `fc886ee`.
+
+### 2026-10-28 · Joel (Claude Code) · Preview history kept across asset list changes
+
+- **Area:** `apps/app-api` (`src/cox/preview-history.ts`), `packages/app-api`; Cloud Run `cox-app-api-live`, dev VM.
+- **What:** Peter's 2026-10-28 email: after PYTH joined, `GET /v1/preview/history` dropped every point from before the change, because it served only points that carried the whole current list.
+  - **Fix:** older points are now served with their own `assets` (the current assets they carry, in current order) and `prices` and `references` to match. Points that cover the whole current list have no `assets` field, so the response shape is unchanged for them. PYTH starts at its first real record; nothing is filled before it. The benchmark runs straight through. The Epoch history route is unchanged (`2b1dfdd`).
+  - **Tests:** a 31-to-32 regression test and an updated earlier-methodology test both fail on the old code. All other API tests pass. The fixture provenance test cannot run on Joel's machine at present, because Windows refuses to start the local `cox.exe` ("Permission denied"); nothing in the fixture changed.
+  - **Deployed:** Cloud Run `cox-app-api-live-00042-42q` (image `cox-app-api:2b1dfdd`, built with Cloud Build) and the VM at `2b1dfdd`, both still on pool 3.
+  - **Verified on both:** the last 24 hours at 300-second steps return 102 points on the 31-asset list (none with PYTH), then 186 on all 32. The VM was still loading older points from the bucket when checked (45 at that time). Status fresh, feed healthy, adoption current, trading open.
+- **Rules for agents:** Never pad a missing asset with a value. Read `point.assets ?? history.assets` when lining up a point's values.
+- **Open:** Godwin: `historyEstimates` in `apps/web/src/lib/estimate.ts` skips any point whose arrays are shorter than `history.assets`, so the web charts still restart at the change until it reads `point.assets`. It does not break on the new field.
+- **Refs:** commit `2b1dfdd`, `apps/app-api/README.md` (Live previews).
