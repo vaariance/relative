@@ -2528,3 +2528,17 @@ another agent needs to know.
 - **Rules for agents:** never assume a fixed size for the publication or batch account; it grows with the class count.
 - **Open:** Godwin: deploy `ead557e` to Vercel before the 11:00 UTC inclusion, or charts restart again there. Joel: check memory and adoption on both APIs after 11:00.
 - **Refs:** commits `be6b9ad`, `ead557e`.
+
+### 2026-10-29 · Godwin (Claude Code) · Web app: logos for every asset, coins sorted by market cap, solid status banner
+
+- **Area:** `apps/web` (`src/lib/coingecko-ids.json`, `src/lib/coingecko-match.ts`, `scripts/coingecko-ids.ts`, `src/lib/data.ts`, `src/lib/popularity.ts`, `src/components/status-banner.tsx`, `src/lib/market.ts`); Vercel project `cox-web`.
+- **What:** At Godwin's request.
+  - **Charts:** Joel's `ead557e` (history read by each point's own asset list) is deployed.
+  - **Banner:** the market status shows as a solid purple bar (`#8338EC`, white text) for Delayed and Incident, red for Halted and Paused, with a warning icon and one line. The `unavailable` gate now reads "Trading is paused while settlement catches up. Withdrawals still work."
+  - **Logos:** only the original 31 coins had a CoinGecko id, so 216 new assets showed a letter. Ids now live in `src/lib/coingecko-ids.json` (246 of 247). `pnpm --filter @eox/web logos:ids` matches new assets by ticker and keeps a coin only when its CoinGecko price is within 20% of the live preview price; existing ids are never changed. CLOUD (`sanctum-2`) and GNS (`gains-network`) were added by hand; SIREN has no confident match and keeps its letter. The server still asks CoinGecko for images once a day, now in batches of 250 ids.
+  - **Popularity:** the same daily request returns each coin's market-cap rank (`getCoinInfo` replaces `getLogos`). Markets, the Swap coin picker and the Epoch performer picker list coins by that rank; unranked coins come last in API order.
+  - **Verified:** 168 web tests and the type check pass. On production, Markets shows 246 CoinGecko logos with none broken, starting BTC, ETH, BNB, XRP, SOL.
+  - **Deployed:** `0afe501` to production at <https://getrelative.trade> (`cox-gvz2ggzba-gef-228639f6`).
+- **Rules for agents:** Never add a CoinGecko id from the ticker alone; check its price against the live preview, as `logos:ids` does. The Epoch basket step keeps its move-based order, because that order also picks the default basket; do not sort it by popularity.
+- **Open:** SIREN's logo. When Peter adds assets, someone runs `logos:ids` and commits the result. Joel: a logo and full name on `/v1/assets` would still replace this list.
+- **Refs:** commits `05cbb61`, `7020d5a`, `0afe501`; `apps/web/README.md` (Coin logos).
