@@ -1,5 +1,6 @@
 import "server-only";
 import { FIXTURE_DEMO_WALLET } from "./config";
+import { chunk } from "./coingecko-match";
 import { COINGECKO_IDS } from "./logos";
 import { type CoxAsset, type CoxDeployment, type CoxStatus, type CryptoComposition, type EpochOverview, type Portfolio, type Preview, type Publication, CoxApiError, createCoxApiClient } from "@eox/app-api";
 
@@ -102,22 +103,26 @@ export async function getPublications(): Promise<Publication[]> {
 }
 
 const LOGO_SECONDS = 86400;
+const LOGO_BATCH = 250;
 
-export async function getLogos(): Promise<Record<string, string>> {
+async function logoImages(ids: string[], key: string | undefined): Promise<Array<[string, string]>> {
   try {
-    const ids = Object.values(COINGECKO_IDS).join(",");
-    const key = process.env.COINGECKO_API_KEY?.trim();
-    const response = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=250&ids=${ids}`, {
+    const response = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=${LOGO_BATCH}&ids=${ids.join(",")}`, {
       headers: key ? { accept: "application/json", "x-cg-demo-api-key": key } : { accept: "application/json" },
       next: { revalidate: LOGO_SECONDS },
     });
-    if (!response.ok) return {};
+    if (!response.ok) return [];
     const coins = (await response.json()) as Array<{ id: string; image?: string }>;
-    const images = new Map(coins.map((coin) => [coin.id, coin.image]));
-    return Object.fromEntries(Object.entries(COINGECKO_IDS).flatMap(([assetId, id]) => (images.get(id) ? [[assetId, images.get(id) as string]] : [])));
+    return coins.flatMap((coin) => (coin.image ? [[coin.id, coin.image] as [string, string]] : []));
   } catch {
-    return {};
+    return [];
   }
+}
+
+export async function getLogos(): Promise<Record<string, string>> {
+  const key = process.env.COINGECKO_API_KEY?.trim();
+  const images = new Map((await Promise.all(chunk([...new Set(Object.values(COINGECKO_IDS))], LOGO_BATCH).map((ids) => logoImages(ids, key)))).flat());
+  return Object.fromEntries(Object.entries(COINGECKO_IDS).flatMap(([assetId, id]) => (images.has(id) ? [[assetId, images.get(id) as string]] : [])));
 }
 
 export async function getDemoPortfolio(): Promise<Portfolio | null> {

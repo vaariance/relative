@@ -7,7 +7,8 @@
     "dev": "next dev --port 3100",
     "build": "next build --webpack",
     "start": "next start --port 3100",
-    "test": "vitest run"
+    "test": "vitest run",
+    "logos:ids": "node --env-file-if-exists=.env.local scripts/coingecko-ids.ts"
   },
   "dependencies": {
     "@eox/app-api": "workspace:*",

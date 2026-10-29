@@ -32,6 +32,14 @@ Open <http://localhost:3100> for the landing page, or <http://localhost:3100/mar
 
 Treat this as a secret, not as configuration. Store it as a Sensitive environment variable on the host and in the untracked `.env.local` for local work. Never commit it, never log it, and never give it a `NEXT_PUBLIC_` name. It is read only in `src/lib/data.ts`, which is marked server-only so it cannot be bundled for browsers.
 
+It is also read by `scripts/coingecko-ids.ts`.
+
+### Coin logos
+
+Each asset's CoinGecko id is kept in `src/lib/coingecko-ids.json`. Once a day the server asks CoinGecko for the image of every listed id, in batches of 250. If an image is missing or fails to load, the icon tries DefiLlama, then a local file, then the ticker's first letter.
+
+When assets are added, run `pnpm --filter @eox/web logos:ids`. It looks up each asset without an id on CoinGecko by ticker, keeps a coin only when its CoinGecko price is within 20% of the live price, and adds it to the JSON file. Existing ids are never changed. Assets it cannot match are printed; look them up by hand and add them. SIREN has no confident match and shows its letter.
+
 The browser RPC and API deployment must target the same network. Private infrastructure credentials must not be supplied through `NEXT_PUBLIC_*` variables.
 
 ## Data and trading

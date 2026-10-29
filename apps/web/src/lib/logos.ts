@@ -1,36 +1,6 @@
-export const COINGECKO_IDS: Record<string, string> = {
-  BTC: "bitcoin",
-  ETH: "ethereum",
-  SOL: "solana",
-  XRP: "ripple",
-  BNB: "binancecoin",
-  TRX: "tron",
-  AVAX: "avalanche-2",
-  DOT: "polkadot",
-  NEAR: "near",
-  SUI: "sui",
-  APT: "aptos",
-  UNI: "uniswap",
-  ARB: "arbitrum",
-  OP: "optimism",
-  INJ: "injective-protocol",
-  AAVE: "aave",
-  ZEC: "zcash",
-  STRK: "starknet",
-  HYPE: "hyperliquid",
-  TAO: "bittensor",
-  WLD: "worldcoin-wld",
-  ONDO: "ondo-finance",
-  ENA: "ethena",
-  ZRO: "layerzero",
-  FET: "fetch-ai",
-  JUP: "jupiter-exchange-solana",
-  AERO: "aerodrome-finance",
-  RENDER: "render-token",
-  TIA: "celestia",
-  W: "wormhole",
-  LIT: "lighter",
-};
+import ids from "./coingecko-ids.json";
+
+export const COINGECKO_IDS: Record<string, string> = ids;
 
 const LLAMA_PATHS: Record<string, string> = {
   BTC: "chains/rsz_bitcoin",
