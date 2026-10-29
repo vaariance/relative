@@ -356,6 +356,7 @@ export interface PreviewHistoryPoint {
   benchmark: string;
   prices: string[];
   references: string[];
+  assets?: string[];
 }
 
 export interface PreviewHistory {

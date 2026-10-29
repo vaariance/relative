@@ -10,7 +10,7 @@ const MINUTE_RETENTION = 7 * 24 * 3_600;
 const BACKFILL_CONCURRENCY = 16;
 const SETTLE_SECONDS = 5;
 
-type Point = Omit<PreviewHistoryPoint, "end"> & { assets: readonly string[] };
+type Point = Omit<PreviewHistoryPoint, "end" | "assets"> & { assets: readonly string[] };
 type Result = { data: PreviewHistoryData; complete: boolean };
 
 export class HistoryRangeError extends Error {}
@@ -95,7 +95,13 @@ export class PreviewHistory {
 
   query(from: number, to: number, step: number): Result {
     const assets = this.options.identity.assets;
-    return this.collect(from, to, step, assets, (point) => (sameAssets(point.assets, assets) ? point : null));
+    return this.collect(from, to, step, assets, (point) => {
+      if (sameAssets(point.assets, assets)) return point;
+      const kept = assets.filter((asset) => point.assets.includes(asset));
+      if (kept.length === 0) return null;
+      const positions = kept.map((asset) => point.assets.indexOf(asset));
+      return { ...point, assets: kept, prices: positions.map((i) => point.prices[i]!), references: positions.map((i) => point.references[i]!) };
+    });
   }
 
   window(from: number, to: number, step: number, assets: readonly string[]): Result {
@@ -117,7 +123,10 @@ export class PreviewHistory {
     for (let end = Math.floor(from / step) * step + step; end <= to; end += step) {
       const found = this.at(end, step);
       const point = found ? project(found) : null;
-      if (point) points.push({ end, timestamp: point.timestamp, benchmark: point.benchmark, prices: point.prices, references: point.references });
+      if (!point) continue;
+      const entry: PreviewHistoryPoint = { end, timestamp: point.timestamp, benchmark: point.benchmark, prices: point.prices, references: point.references };
+      if (!sameAssets(point.assets, assets)) entry.assets = [...point.assets];
+      points.push(entry);
     }
     const complete = to + SETTLE_SECONDS < now && this.backfilledFrom !== null && this.backfilledFrom <= from;
     return { data: { assets: [...assets], step, from, to, points }, complete };

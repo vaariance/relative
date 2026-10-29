@@ -256,7 +256,7 @@ describe("preview history", () => {
     return { history, errors };
   }
 
-  it("keeps records from an earlier methodology and serves them only where every asset is known", async () => {
+  it("keeps records from an earlier methodology and serves the assets each record carries", async () => {
     const loaded: string[] = [];
     const { history, errors } = await acrossChange(async (digest) => {
       loaded.push(digest);
@@ -264,12 +264,48 @@ describe("preview history", () => {
     });
     expect(errors).toEqual([]);
     expect(loaded).toEqual([METHODOLOGY]);
-    expect(history.query(H, H + 180, 60).data.points.map((p) => p.timestamp)).toEqual([H + 150]);
+    const general = history.query(H, H + 180, 60).data;
+    expect(general.assets).toEqual(["BTC", "ETH", "LIT"]);
+    expect(general.points.map((p) => [p.timestamp, p.assets ?? null])).toEqual([[H + 30, ["BTC", "ETH"]], [H + 90, ["BTC", "ETH"]], [H + 150, null]]);
+    expect(general.points[0]!.prices).toEqual(["8117531545582", "237197465112"]);
     const epoch = history.window(H, H + 180, 60, ["ETH", "BTC"]).data;
     expect(epoch.assets).toEqual(["ETH", "BTC"]);
     expect(epoch.points.map((p) => p.timestamp)).toEqual([H + 30, H + 90, H + 150]);
     expect(epoch.points[0]!.prices).toEqual(["237197465112", "8117531545582"]);
     expect(history.window(H, H + 180, 60, ["BTC", "LIT"]).data.points.map((p) => p.timestamp)).toEqual([H + 150]);
+  });
+
+  it("keeps existing-asset and benchmark history across a 31-to-32 roster change, and starts the new asset at its first record", async () => {
+    const OLD = Array.from({ length: 31 }, (_, i) => `A${i}`);
+    const NEW = [...OLD, "PYTH"];
+    const assetsOf = (ids: string[], timestamp: number) => ids.map((assetId, classId) => ({ classId: classId + 1, assetId, priceE8: String(100_000_000 + classId), reference: String(100_000_000_000_000 + timestamp - H + classId) }));
+    const before = (timestamp: number) => record(timestamp, { assets: assetsOf(OLD, timestamp), cryptoClass: 0, benchmark: String(90_000_000_000_000 + timestamp - H), basicProjection: null });
+    const after = (timestamp: number) => ({ ...before(timestamp), methodologyDigest: NEXT, assets: assetsOf(NEW, timestamp) });
+    const oldIdentity: PreviewIdentity = { ...IDENTITY, assets: OLD, classes: ["CRYPTO", ...OLD] };
+    const newIdentity: PreviewIdentity = { ...IDENTITY, methodologyDigest: NEXT, assets: NEW, classes: ["CRYPTO", ...NEW] };
+    const store = new MemoryStore();
+    for (const t of [H + 30, H + 90, H + 150]) store.put(t, before(t));
+    for (const t of [H + 210, H + 270]) store.put(t, after(t));
+    const history = new PreviewHistory({ store, identity: newIdentity, earlier: async (digest) => (digest === METHODOLOGY ? oldIdentity : null), now: () => H + 600 });
+    await history.backfill();
+
+    const data = history.query(H, H + 300, 60).data;
+    expect(data.assets).toEqual(NEW);
+    expect(data.points.map((p) => p.timestamp)).toEqual([H + 30, H + 90, H + 150, H + 210, H + 270]);
+    expect(data.points.map((p) => p.benchmark)).toEqual([30, 90, 150, 210, 270].map((d) => String(90_000_000_000_000 + d)));
+    for (const point of data.points.slice(0, 3)) {
+      expect(point.assets).toEqual(OLD);
+      expect(point.prices).toHaveLength(31);
+      expect(point.references).toHaveLength(31);
+      expect(point.assets).not.toContain("PYTH");
+    }
+    for (const point of data.points.slice(3)) {
+      expect(point.assets).toBeUndefined();
+      expect(point.prices).toHaveLength(32);
+    }
+    expect(data.points[2]!.references[5]).toBe(String(100_000_000_000_000 + 150 + 5));
+    expect(data.points[3]!.references[31]).toBe(String(100_000_000_000_000 + 210 + 31));
+    expect(history.window(H, H + 300, 60, OLD).data.points).toHaveLength(5);
   });
 
   it("skips records whose methodology cannot be loaded and asks for it once", async () => {
