@@ -135,7 +135,7 @@ The page is on in local development (`pnpm dev`) and shows "Coming soon" on depl
 
 `/epochs` is the four-hour game run by the separate Epoch program
 (`packages/cox-epoch`), read through the app API's `/v1/epochs` routes. A user
-backs one coin in a basket of 30 and stakes USDC or rlUSD while a round is
+backs one coin in a basket and stakes USDC or rlUSD while a round is
 open. The entry counts from its own execution to the fixed close. Its score is
 the backed coin's rise against $CRYPTO as a share of all the basket's rises
 (coins that did worse than $CRYPTO count as zero). The pot is every executed
@@ -165,16 +165,19 @@ The layout:
 - **Your entry:** follows the Buy form. The backed coin, its basket, You pay with
   the wallet balance of the chosen collateral (USDC or rlUSD, sent as
   `collateralMint`), the exact fee with its rate and cap, then one button that
-  goes to the wallet. The basket is the 30 coins the contract scores against,
-  the backed coin included, and must be exactly 30. Step 1 picks the
-  performer; step 2 (`/epochs/basket`) chooses the rest of the basket. A 30-coin
-  round fills it with every other coin and cannot be changed. A larger round,
-  of any size, starts filled with the first 29 other coins in the round's own
-  order (`startingTeam`), never ranked by move, so the user can enter as it is.
-  They swap coins on coin badges (`CoinBadge`) with a search: while 29 are in
-  the basket the rest are locked until one is removed, and Reset basket goes
-  back to the prefilled 29 (`basketMode`, `toggleMate` and `mateLocked` in
-  `src/lib/epoch.ts`). Changing the performer to a coin already in the basket
+  goes to the wallet. The basket is the coins the contract scores against,
+  the backed coin included, and its size comes from each round's `basketSize`
+  (`basketSizeOf`): 11 for current rounds (the backed coin plus 10), 30 for
+  older rounds and for any response without the field. Step 1 picks the
+  performer; step 2 (`/epochs/basket`) chooses the rest of the basket. A round
+  with exactly `basketSize` coins fills it with every other coin and cannot be
+  changed. A larger round starts filled with the first `basketSize − 1` other
+  coins in the round's own order (`startingTeam`), never ranked by move, so the
+  user can enter as it is. They swap coins on coin badges (`CoinBadge`) with a
+  search: while the basket is full the rest are locked until one is removed,
+  and Reset basket goes back to the prefilled coins (`basketMode`,
+  `toggleMate` and `mateLocked` in `src/lib/epoch.ts`). Past entries, scores and
+  claims keep their own stored basket of 30 or 11. Changing the performer to a coin already in the basket
   puts the old performer in its place.
   Entries use the API's `entriesOpen` gate and cannot be sold or cancelled, so there is no Sell side. When no round is open, the panel
   says whether another one is open or scheduled. Below 1280px a bottom button

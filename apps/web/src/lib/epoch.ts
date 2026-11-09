@@ -1,4 +1,4 @@
-import { EPOCH_BASKET_SIZE, type Epoch, type EpochConfiguration, type EpochLot, type EpochOverview } from "@eox/app-api";
+import { EPOCH_BASKET_SIZE, type Epoch, type EpochBasketSize, type EpochConfiguration, type EpochLot, type EpochOverview } from "@eox/app-api";
 
 export const SCORE_DIGITS = 12;
 const SCALE = 10n ** BigInt(SCORE_DIGITS);
@@ -25,6 +25,14 @@ export function epochBasket(epoch: Epoch): string[] {
 
 export const TEAMMATES = EPOCH_BASKET_SIZE - 1;
 
+export function basketSizeOf(epoch: Pick<Epoch, "basketSize"> | null | undefined): EpochBasketSize {
+  return epoch?.basketSize === 11 ? 11 : 30;
+}
+
+export function teammatesOf(size: number = EPOCH_BASKET_SIZE): number {
+  return size - 1;
+}
+
 const UNNAMED = /^#\d+$/;
 
 export function isUnnamedCoin(id: string): boolean {
@@ -42,8 +50,8 @@ export function latestEpochs(read: (EpochsSnapshot & { fresh: boolean }) | null,
   return { shown, staleSince: shown ? shown.fetchedAt : null };
 }
 
-export function defaultTeam(universe: readonly string[], backed: string): string[] {
-  return universe.filter((id) => id !== backed).slice(0, TEAMMATES);
+export function defaultTeam(universe: readonly string[], backed: string, size: number = EPOCH_BASKET_SIZE): string[] {
+  return universe.filter((id) => id !== backed).slice(0, teammatesOf(size));
 }
 
 export function byMove(a: number | null, b: number | null): number {
@@ -53,26 +61,26 @@ export function byMove(a: number | null, b: number | null): number {
   return a - b;
 }
 
-export function toggleMate(universe: readonly string[], backed: string, draft: readonly string[], id: string): string[] {
-  if (id === backed || !universe.includes(id) || basketMode(universe) === "fixed") return [...draft];
+export function toggleMate(universe: readonly string[], backed: string, draft: readonly string[], id: string, size: number = EPOCH_BASKET_SIZE): string[] {
+  if (id === backed || !universe.includes(id) || basketMode(universe, size) === "fixed") return [...draft];
   if (draft.includes(id)) return draft.filter((item) => item !== id);
-  if (draft.length >= TEAMMATES) return [...draft];
+  if (draft.length >= teammatesOf(size)) return [...draft];
   return [...draft, id];
 }
 
-export function mateLocked(universe: readonly string[], draft: readonly string[], id: string): boolean {
-  if (basketMode(universe) === "fixed") return true;
-  return !draft.includes(id) && draft.length >= TEAMMATES;
+export function mateLocked(universe: readonly string[], draft: readonly string[], id: string, size: number = EPOCH_BASKET_SIZE): boolean {
+  if (basketMode(universe, size) === "fixed") return true;
+  return !draft.includes(id) && draft.length >= teammatesOf(size);
 }
 
 export type BasketMode = "fixed" | "pick";
 
-export function basketMode(universe: readonly string[]): BasketMode {
-  return universe.length === EPOCH_BASKET_SIZE ? "fixed" : "pick";
+export function basketMode(universe: readonly string[], size: number = EPOCH_BASKET_SIZE): BasketMode {
+  return universe.length === size ? "fixed" : "pick";
 }
 
-export function startingTeam(universe: readonly string[], backed: string): string[] {
-  return defaultTeam(universe, backed);
+export function startingTeam(universe: readonly string[], backed: string, size: number = EPOCH_BASKET_SIZE): string[] {
+  return defaultTeam(universe, backed, size);
 }
 
 export function withToken(universe: readonly string[], backed: string | null, mates: readonly string[] | null, id: string | null): { backed: string | null; mates: string[] | null } {
@@ -88,11 +96,12 @@ export function entryBasket(universe: readonly string[], backed: string, mates: 
   return universe.filter((id) => id === backed || mates.includes(id));
 }
 
-export function basketProblem(universe: readonly string[], backed: string, mates: readonly string[]): string | null {
-  if (universe.length < EPOCH_BASKET_SIZE) return "This Epoch's asset list is not available yet.";
+export function basketProblem(universe: readonly string[], backed: string, mates: readonly string[], size: number = EPOCH_BASKET_SIZE): string | null {
+  const need = teammatesOf(size);
+  if (universe.length < size) return "This Epoch's asset list is not available yet.";
   if (!universe.includes(backed) || mates.some((id) => id === backed || !universe.includes(id)) || new Set(mates).size !== mates.length) return "Your basket has a coin that is not in this round.";
-  if (mates.length < TEAMMATES) return `Add ${TEAMMATES - mates.length} more ${TEAMMATES - mates.length === 1 ? "coin" : "coins"} to your basket.`;
-  if (mates.length > TEAMMATES) return `Remove ${mates.length - TEAMMATES} ${mates.length - TEAMMATES === 1 ? "coin" : "coins"} from your basket.`;
+  if (mates.length < need) return `Add ${need - mates.length} more ${need - mates.length === 1 ? "coin" : "coins"} to your basket.`;
+  if (mates.length > need) return `Remove ${mates.length - need} ${mates.length - need === 1 ? "coin" : "coins"} from your basket.`;
   return null;
 }
 

@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { parseScaled } from "@/lib/amounts";
 import { COLLATERAL } from "@/lib/config";
-import { TEAMMATES, basketMode, basketProblem, entryBasket, feeOf } from "@/lib/epoch";
+import { basketMode, basketProblem, basketSizeOf, entryBasket, feeOf, teammatesOf } from "@/lib/epoch";
 import type { Collateral } from "@/lib/market";
 import type { Intent } from "@/lib/requests";
 import { useAccount } from "./account";
@@ -115,13 +115,14 @@ export function EntryTicket(props: { epoch: Epoch; coins: string[]; backed: stri
   const shownSymbol = collaterals[shownIndex]?.symbol ?? COLLATERAL.symbol;
   const charge = gross !== null && gross > 0n ? feeOf(gross, fee.bps, BigInt(fee.cap)) : null;
   const net = gross !== null && charge !== null ? gross - charge : null;
-  const basketIssue = basketProblem(coins, backed, mates);
+  const size = basketSizeOf(epoch);
+  const basketIssue = basketProblem(coins, backed, mates, size);
   const short = known && gross !== null && gross > 0n && payIndex === -1;
   const empty = amount.trim() === "";
   const problem = basketIssue ? basketIssue : gross === null || gross <= 0n ? "Enter an amount above zero." : short ? "Not enough USDC or rlUSD." : null;
   const intent: Intent | null = problem === null && gross !== null ? { operation: "epoch-entry", opensAt: epoch.opensAt, grossStake: gross.toString(), basket: entryBasket(coins, backed, mates), backedAsset: backed, collateralMint: collaterals.length > 1 && chosen ? chosen.mint : undefined } : null;
-  const mode = basketMode(coins);
-  const extra = mates.length - TEAMMATES;
+  const mode = basketMode(coins, size);
+  const extra = mates.length - teammatesOf(size);
   const basketAction = mode === "pick" && extra < 0 ? `Pick ${-extra} more` : "Finish basket";
   const preset = (dollars: number) => setAmount(String(dollars));
   const max = () => {

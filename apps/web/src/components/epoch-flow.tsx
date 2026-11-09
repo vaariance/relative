@@ -1,11 +1,11 @@
 "use client";
 
-import { EPOCH_BASKET_SIZE, type Epoch, type EpochOverview } from "@eox/app-api";
+import type { Epoch, EpochOverview } from "@eox/app-api";
 import { ChevronLeft, ChevronRight, Trophy } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { type Move, TEAMMATES, basketMode, basketProblem, epochBasket, marketClosedReason, mateLocked, stageOf } from "@/lib/epoch";
+import { type Move, basketMode, basketProblem, basketSizeOf, epochBasket, marketClosedReason, mateLocked, stageOf, teammatesOf } from "@/lib/epoch";
 import { collateralsOf } from "@/lib/market";
 import { byPopularity } from "@/lib/popularity";
 import { useAccount } from "./account";
@@ -19,9 +19,10 @@ export function entryRound(epochs: readonly Epoch[], now: number): Epoch | null 
   return epochs.find((epoch) => stageOf(epoch, now) === "open" && epoch.entriesOpen) ?? null;
 }
 
-function basketStatus(coins: string[], backed: string, mates: string[]): { text: string; ready: boolean } {
-  if (basketProblem(coins, backed, mates) === null) return { text: "Basket ready", ready: true };
-  return { text: `Pick ${TEAMMATES - mates.length} more`, ready: false };
+function basketStatus(coins: string[], backed: string, mates: string[], size: number): { text: string; ready: boolean } {
+  if (basketProblem(coins, backed, mates, size) === null) return { text: "Basket ready", ready: true };
+  const need = teammatesOf(size) - mates.length;
+  return { text: need > 0 ? `Pick ${need} more` : `Remove ${-need}`, ready: false };
 }
 
 export function PerformerPrompt({ epoch, coins, now, next, marketClosed, active, onSelect }: { epoch: Epoch; coins: string[]; now: number; next: Epoch | null; marketClosed: string | null; active: boolean; onSelect: (address: string) => void }) {
@@ -44,7 +45,7 @@ export function PerformerPrompt({ epoch, coins, now, next, marketClosed, active,
   if (!picks.ready) return <section aria-busy="true" aria-label="Loading your entry" className={`${card} min-h-[18rem] animate-pulse`} />;
 
   if (picks.backed) {
-    const status = basketStatus(coins, picks.backed, picks.mates);
+    const status = basketStatus(coins, picks.backed, picks.mates, basketSizeOf(epoch));
     const move = rows.find((row) => row.id === picks.backed)?.change ?? null;
     return (
       <section className={`${card} flex flex-col gap-5 p-6 sm:flex-row sm:items-center`}>
@@ -167,12 +168,14 @@ export function BasketView({ overview, roster, serverNow }: { overview: EpochOve
   if (!epoch || !picks.backed) return <p className="py-16 text-center text-sm text-muted">Loading your entry…</p>;
 
   const backed = picks.backed;
-  const mode = basketMode(coins);
-  const status = basketStatus(coins, backed, picks.mates);
+  const size = basketSizeOf(epoch);
+  const mates = teammatesOf(size);
+  const mode = basketMode(coins, size);
+  const status = basketStatus(coins, backed, picks.mates, size);
   const move = rows.find((row) => row.id === backed)?.change ?? null;
-  const full = picks.mates.length >= TEAMMATES;
-  const title = mode === "fixed" ? `Your basket of ${EPOCH_BASKET_SIZE}` : "Review your basket";
-  const text = mode === "fixed" ? `${backed} is compared against the other ${TEAMMATES} coins in this round.` : `We filled your basket with ${TEAMMATES} coins to go with ${backed}. Swap any of them, or enter as it is.`;
+  const full = picks.mates.length >= mates;
+  const title = mode === "fixed" ? `Your basket of ${size}` : "Review your basket";
+  const text = mode === "fixed" ? `${backed} is compared against the other ${mates} coins in this round.` : `We filled your basket with ${mates} coins to go with ${backed}. Swap any of them, or enter as it is.`;
 
   return (
     <div className="flex flex-col gap-5 pb-24 xl:pb-0">
@@ -180,12 +183,12 @@ export function BasketView({ overview, roster, serverNow }: { overview: EpochOve
       <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_350px]">
         <CoinGrid
           rows={rows.filter((row) => row.id !== backed)}
-          count={mode === "fixed" ? `All ${TEAMMATES} coins in` : `${picks.mates.length} of ${TEAMMATES} in your basket`}
+          count={mode === "fixed" ? `All ${mates} coins in` : `${picks.mates.length} of ${mates} in your basket`}
           hint={mode === "pick" && full ? "Remove a coin to add another." : undefined}
           action={mode === "pick" && picks.edited ? { label: "Reset basket", onClick: picks.resetBasket } : undefined}
           checkbox
           selected={(id) => mode === "fixed" || picks.mates.includes(id)}
-          disabled={(id) => mateLocked(coins, picks.mates, id)}
+          disabled={(id) => mateLocked(coins, picks.mates, id, size)}
           label={(id) => (picks.mates.includes(id) ? `Remove ${id} from your basket` : `Add ${id} to your basket`)}
           onPick={mode === "fixed" ? undefined : picks.toggleBasket}
         />

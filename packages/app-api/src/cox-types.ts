@@ -564,6 +564,8 @@ export interface Submission {
 export const EPOCH_SECONDS = 14_400;
 export const EPOCH_BASKET_SIZE = 30;
 
+export type EpochBasketSize = 11 | 30;
+
 export type EpochPhase = "draft" | "open" | "scoring" | "allocating" | "settled" | "voided" | "empty";
 export type EpochLotState = "pending" | "executed" | "scored" | "claimable" | "withdrawn";
 export type EpochRefundReason = "not-executed" | "voided";
@@ -622,6 +624,7 @@ export interface Epoch {
   terminal: boolean;
   ledger: EpochLedger | null;
   registry: EpochRegistryBinding | null;
+  basketSize?: EpochBasketSize;
 }
 
 export interface EpochRegistryBinding {

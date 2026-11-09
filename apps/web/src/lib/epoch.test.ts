@@ -1,7 +1,7 @@
 import type { Epoch, EpochLot } from "@eox/app-api";
 import { describe, expect, it } from "vitest";
 import settled from "../../test/fixtures/epoch-2026-10-23-0800.json";
-import { TEAMMATES, basketProblem, basketScore, byMove, defaultTeam, entryBasket, heroRounds, latestEpochs, mateLocked, basketMode, startingTeam, withToken, toggleMate, epochBasket, countdown, estimatedScore, executionReferences, feeOf, finalPayout, finalScore, lotOutcome, lotView, marketClosedReason, moves, refundMint, stageOf, timelineStep, withdrawSource } from "./epoch";
+import { TEAMMATES, basketSizeOf, teammatesOf, basketProblem, basketScore, byMove, defaultTeam, entryBasket, heroRounds, latestEpochs, mateLocked, basketMode, startingTeam, withToken, toggleMate, epochBasket, countdown, estimatedScore, executionReferences, feeOf, finalPayout, finalScore, lotOutcome, lotView, marketClosedReason, moves, refundMint, stageOf, timelineStep, withdrawSource } from "./epoch";
 
 const epoch = (phase: Epoch["phase"], extra: Partial<Epoch> = {}): Epoch => ({ address: "x", opensAt: 1000, closesAt: 2000, phase, sealed: true, entriesOpen: false, universe: [], nextNonce: null, lots: null, totalWeight: null, settlementPot: null, allZero: null, closingReferences: [], closingDeadline: 88_400, voidable: false, terminal: false, ledger: null, registry: null, ...extra });
 const lot = (extra: Partial<EpochLot>): EpochLot => ({ address: "l", epochOpensAt: 1000, nonce: "0", owner: "o", grossStake: "100000000", fee: "20000", admittedAt: 1100, basket: [], backedAsset: "ETH", execution: { timestamp: 1101, references: [] }, state: "executed", score: null, weight: null, claimable: null, refund: null, ...extra });
@@ -424,5 +424,45 @@ describe("changing the token", () => {
   it("clears the entry when the token is removed", () => {
     expect(withToken(universe, "C1", ["C2"], "C1")).toEqual({ backed: null, mates: null });
     expect(withToken(universe, "C1", ["C2"], null)).toEqual({ backed: null, mates: null });
+  });
+});
+
+describe("basket size per round", () => {
+  const round = (size: number) => Array.from({ length: size }, (_, index) => `C${index}`);
+  it("reads basketSize and falls back to 30 when it is missing", () => {
+    expect(basketSizeOf({ basketSize: 11 })).toBe(11);
+    expect(basketSizeOf({ basketSize: 30 })).toBe(30);
+    expect(basketSizeOf({})).toBe(30);
+    expect(basketSizeOf(null)).toBe(30);
+    expect(teammatesOf(11)).toBe(10);
+  });
+  it("prefills 10 coins in an 11-coin round of 247 assets", () => {
+    const universe = round(247);
+    expect(basketMode(universe, 11)).toBe("pick");
+    const team = startingTeam(universe, "C0", 11);
+    expect(team).toEqual(universe.slice(1, 11));
+    expect(basketProblem(universe, "C0", team, 11)).toBeNull();
+    expect(entryBasket(universe, "C0", team)).toHaveLength(11);
+  });
+  it("enforces exactly 10 comparison coins in an 11-coin round", () => {
+    const universe = round(247);
+    const team = startingTeam(universe, "C0", 11);
+    expect(basketProblem(universe, "C0", team.slice(0, 7), 11)).toBe("Add 3 more coins to your basket.");
+    expect(basketProblem(universe, "C0", [...team, "C50"], 11)).toBe("Remove 1 coin from your basket.");
+    expect(mateLocked(universe, team, "C50", 11)).toBe(true);
+    expect(toggleMate(universe, "C0", team, "C50", 11)).toEqual(team);
+    const swapped = toggleMate(universe, "C0", toggleMate(universe, "C0", team, "C3", 11), "C50", 11);
+    expect(swapped).toContain("C50");
+    expect(basketProblem(universe, "C0", swapped, 11)).toBeNull();
+  });
+  it("never accepts a 30-coin basket as an 11-coin entry, or the reverse", () => {
+    const universe = round(247);
+    expect(basketProblem(universe, "C0", startingTeam(universe, "C0", 30), 11)).toBe("Remove 19 coins from your basket.");
+    expect(basketProblem(universe, "C0", startingTeam(universe, "C0", 11), 30)).toBe("Add 19 more coins to your basket.");
+  });
+  it("keeps a fixed 11-coin round and the legacy 30-coin rules", () => {
+    expect(basketMode(round(11), 11)).toBe("fixed");
+    expect(basketMode(round(30))).toBe("fixed");
+    expect(basketProblem(round(30), "C0", startingTeam(round(30), "C0"))).toBeNull();
   });
 });
