@@ -248,10 +248,10 @@ function products(data: ProductData): Product[] {
     {
       name: "Epoch",
       icon: Timer,
-      line: "Four-hour rounds. Pick an asset, build a basket of 30 around it, and share the pot by score when the round closes.",
+      line: "Four-hour rounds. Pick an asset, build a basket of 11 around it, and share the pot by score when the round closes.",
       facts: [
         { label: "Round", value: "4 hours" },
-        { label: "Basket", value: "30 coins" },
+        { label: "Basket", value: "11 coins" },
         { label: "Pot", value: "Shared by score" },
       ],
       href: "/epochs",
