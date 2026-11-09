@@ -2542,3 +2542,23 @@ another agent needs to know.
 - **Rules for agents:** Never add a CoinGecko id from the ticker alone; check its price against the live preview, as `logos:ids` does. The Epoch basket step keeps its move-based order, because that order also picks the default basket; do not sort it by popularity.
 - **Open:** SIREN's logo. When Peter adds assets, someone runs `logos:ids` and commits the result. Joel: a logo and full name on `/v1/assets` would still replace this list.
 - **Refs:** commits `05cbb61`, `7020d5a`, `0afe501`; `apps/web/README.md` (Coin logos).
+
+### 2026-11-09 · Godwin (Claude Code) · Web app sizes each Epoch basket from basketSize; deployed
+
+- **Area:** `apps/web` (`src/lib/epoch.ts`, `epoch-flow.tsx`, `epoch-picks.tsx`, `epoch-ticket.tsx`, Epoch page and landing copy, README), `packages/app-api` (`Epoch.basketSize`); Vercel project `cox-web`.
+- **What:** Peter's 8 Nov request: new rounds take the backed coin plus 10 comparison coins (`basketSize: 11`); older rounds keep 30.
+  - **Implementation:** written from Peter's email. His `epoch-11-web.patch` and the reference tarball were not available to this session, so `d78e37f` was not applied.
+  - **Type:** `Epoch.basketSize?: 11 | 30` is optional. `basketSizeOf(epoch)` returns 30 when the field is missing.
+  - **Size-dependent behaviour:** the basket helpers (`defaultTeam`, `startingTeam`, `toggleMate`, `mateLocked`, `basketMode`, `basketProblem`) take the round's size, defaulting to 30. Pre-filled picks, limits, checks, the ticket and step wording follow it.
+  - **Past entries:** they keep their own stored baskets.
+  - **Verified:** 173 web tests (5 new), the web and API type checks, and `next build --webpack` pass.
+    - **11 coins:** checked locally with a temporary override marking the live 247-asset round open (removed before commit). The basket pre-filled 10 of 10, the other 237 were locked, the ticket read "BTC + 10", and a swap worked.
+    - **No `basketSize`:** the round fell back to 29 + 1.
+    - **Not checked:** no entry has been signed.
+  - **Deployed:** `8ff802e` to production at <https://getrelative.trade> (`cox-lfaxq09rn-gef-228639f6`); `/`, `/epochs`, `/epochs/pick`, `/portfolio` and `/faucet` return 200.
+- **Rules for agents:** Read a round's basket size through `basketSizeOf`, never a literal 30 or 11. Do not change a stored entry's basket to the current round size.
+- **Open:**
+  - **Peter/Joel:** no round is open for entries. The 9 Nov 04:00 UTC round is past its close and still open, the 08:00 round never opened, and the API reports trading paused while settlement catches up.
+  - **Joel:** production `/markets` took 233 s on 9 Nov before this deploy; the API answered each call in about 2 s.
+  - **Vercel:** `COX_API_URL`, `EPOCHS_ENABLED` and `NEXT_PUBLIC_PRIVY_APP_ID` are set for Production only, so a preview build needs them passed in.
+- **Refs:** commits `13dc78b`, `8ff802e`.
